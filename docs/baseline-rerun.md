@@ -57,6 +57,6 @@ node baselines/bridge.mjs
 
 每次正式运行锁定源文件、依赖、数据和评分器。`requests.jsonl` 在发出请求前记 request ID；`usage.jsonl` 记录完成后的实际 usage，未知 usage 单独标记并保守估计，不能混同精确实耗。崩溃恢复时可对账无终态的 request ID。网页搜索不计模型 tokens，其摘要与查询压缩模型调用仍计费。
 
-已验证：6 项离线适配检查；原工程测试 39 通过、2 跳过、0 失败；四种方法验证集试跑均完成；真实联网通过 Ditto 工具返回结果，并通过原生 AutoAgents SearchAndSummarize 链路。试跑用于功能检查，不作为性能结论。
+已验证：6 项离线适配检查；原工程测试（指定实验 Python 评分环境）40 通过、1 跳过、0 失败；跳过项为 Docker 代码评分集成测试；四种方法验证集试跑均完成；真实联网通过 Ditto 工具返回结果，并通过原生 AutoAgents SearchAndSummarize 链路。试跑用于功能检查，不作为性能结论。
 
 这轮与 MFlow 的固定 24k 单题预算、工具条件不同，应报告为**取消额外限制的基线对比**，同时报告成本与失败率，不能标成计算预算完全匹配的实验。
