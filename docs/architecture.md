@@ -24,11 +24,11 @@ flowchart TD
 
 ## 数据与评分
 
-`src/data.ts` 读取严格 schema JSONL。prepare 按 group 洗牌，seed 42，生成互斥 search/confirmation/test 与内容 hash manifest。没有通用办法自动检测语义近重复；数据制作者应将共享原题、模板、来源或多变体样本标成同一个 group。
+`src/data.ts` 读取严格 schema JSONL。自定义数据的 prepare 按 group 洗牌，seed 42，生成互斥 search/confirmation/test 与内容 hash manifest。公开 benchmark 则直接使用锁定的 AFlow validate/test，分别映射为 search/test，不重新抽样或划出 confirmation；读取时校验完整文件 SHA-256。详见 [AFlow 数据协议](aflow-data-protocol.md)。没有通用办法自动检测语义近重复；数据制作者应将共享原题、模板、来源或多变体样本标成同一个 group。
 
-LLM 只收到 `{id,prompt}`，标准答案保留在 evaluator。模型做开放语义工作：提出 deficit、构造 agent、判断已有 capability 是否相关；表现标签来自 exact/numeric 评分器。现版只支持二元指标。接入代码执行 benchmark、F1 或其他连续指标，应实现相应评分器并重新定义 outcome 模型，不能直接把它们伪装成 correction/harm。
+LLM 只收到 `{id,prompt}`，标准答案保留在 evaluator。模型做开放语义工作：提出 deficit、构造 agent、判断已有 capability 是否相关；表现标签来自 exact/numeric、数学等价性或容器代码测试等评分器。MIA 后验仍使用二元指标；AFlow DROP 同时记录原版最大 token F1，但仅 F1=1 记作二元成功，连续 F1 不进入三分类后验。
 
-confirmation 参与多次候选选择，属于验证数据，不能当无偏 test。test 在 `evaluate` 单独加载，运行前检查与策略选择数据的 ID、prompt hash 和 group 不重叠。
+confirmation 参与多次候选选择，属于验证数据，不能当无偏 test。test 在 `evaluate` 单独加载，运行前检查与策略选择数据的 ID、prompt hash 和 group 不重叠。为了保持上游固定划分，AFlow DROP 的 5 对已锁定 prompt 重复单独放行并记录；不豁免其他重叠。
 
 ## 策略与搜索
 
@@ -52,7 +52,7 @@ bootstrap 优先低观测数与高 trigger coverage。完成 bootstrap 后使用
 
 每个 trace 记录动作前的完整策略输入（deficits、活动状态、深度、turns、stalled）。重新运行 child policy，找到决策不同的任务。无分歧任务继承 parent 的那次**已观测轨迹**和评分，记录 `inheritedFrom`；不增加执行次数或 token 消耗。
 
-此结论只对保存的轨迹成立。即使 seed 相同，远端模型也未必确定；不能声称随机 rollout 的整体分布完全不变。启用 prefixCache 后，候选在首个分歧决策前恢复 parent checkpoint，跳过 Root 和已完成的前缀调用；关闭时从头运行。共用前缀减少配对噪声，但 suffix 的模型采样仍可能不同。部署候选应配置独立 confirmation；多 seed 科研实验还应重复评估并报告不确定性。
+此结论只对保存的轨迹成立。即使 seed 相同，远端模型也未必确定；不能声称随机 rollout 的整体分布完全不变。启用 prefixCache 后，候选在首个分歧决策前恢复 parent checkpoint，跳过 Root 和已完成的前缀调用；关闭时从头运行。共用前缀减少配对噪声，但 suffix 的模型采样仍可能不同。自定义协议可配置独立 confirmation；AFlow 对齐协议不增设 confirmation。多 seed 科研实验还应重复评估并报告不确定性。
 
 checkpoint 使用 Ditto `checkpointState/restoreState`，包含 population、各 agent 的 episode/inbox/output、deficits、artifacts、edges、检索记录、trace、逻辑成本和下一个决策位置。保存点之前所有 Ditto 调用已结束。恢复校验 task、模型、预算、初始 pool、代码/资源版本，以及新策略在此前 trace 上仍产生相同决策。它恢复本应用的显式状态；不是序列化 live Worker 或 JavaScript generator。
 

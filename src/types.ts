@@ -183,6 +183,7 @@ export const taskSchema = z
     answer: z.string(),
     metric: z.enum(["exact", "numeric", "drop", "math", "python"]).default("exact"),
     benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math"]).optional(),
+    aflowSplit: z.enum(["validate", "test"]).optional(),
     reference: z.object({
       answers: z.array(z.array(z.string())).optional(),
       tests: z.array(z.string()).optional(),

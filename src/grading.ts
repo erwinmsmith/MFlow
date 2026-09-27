@@ -22,6 +22,26 @@ function normalized(text: string): string {
 function splitSpans(text: string): string[] {
   return text.trim().split(/\s*\|\s*/).map(normalized);
 }
+// AFlow treats | as alternative answers and reports maximum token F1, not span alignment.
+function aflowDropScore(gold: string, prediction: string): { score: 0 | 1; f1: number } {
+  const tokens = (text: string) => text.toLowerCase()
+    .replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g, "")
+    .replace(/\b(a|an|the)\b/g, " ").trim().split(/\s+/).filter(Boolean);
+  let f1 = 0;
+  for (const answer of gold.split("|").filter((s) => s.trim())) {
+    const expected = tokens(answer);
+    for (const part of prediction.split("|")) {
+      const actual = tokens(part), remaining = [...expected];
+      let common = 0;
+      for (const token of actual) {
+        const index = remaining.indexOf(token);
+        if (index >= 0) { common++; remaining.splice(index, 1); }
+      }
+      if (common) f1 = Math.max(f1, 2 * common / (expected.length + actual.length));
+    }
+  }
+  return { score: f1 === 1 ? 1 : 0, f1 };
+}
 function dropScore(answer: string, aliases: string[][]): { score: 0 | 1; f1: number } {
   const predicted = splitSpans(answer);
   let exact: 0 | 1 = 0, bestF1 = 0;
@@ -100,7 +120,10 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
     ? `${ref.tests![0]}\ncheck(${ref.entryPoint})\n`
     : ref.tests!.join("\n") + "\n";
   const marker = `MFLOW_PASS_${randomUUID()}`;
-  const script = `${code}\n${ref.setup ?? ""}\n${test}\nprint(${JSON.stringify(marker)})\n`;
+  const preamble = task.aflowSplit
+    ? "import math, hashlib, re\nfrom typing import Any, Dict, List, Optional, Tuple\n"
+    : "";
+  const script = `${preamble}${code}\n${ref.setup ?? ""}\n${test}\nprint(${JSON.stringify(marker)})\n`;
   const dir = await mkdtemp(join(process.cwd(), ".benchmark-sandbox-"));
   try {
     await writeFile(join(dir, "check.py"), script, { mode: 0o444 });
@@ -120,6 +143,11 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
 }
 
 export async function grade(task: Task, answer: string): Promise<{ score: 0 | 1; f1?: number }> {
+  if (task.aflowSplit && task.metric === "drop") return aflowDropScore(task.answer, answer);
+  if (task.aflowSplit && task.benchmark === "gsm8k") {
+    const lastNumber = (text: string) => text.match(/[-+]?\d+(?:,\d{3})*(?:\.\d+)?|\d+\.\d+/g)?.at(-1) ?? "";
+    return { score: score({ ...task, answer: lastNumber(task.answer) }, lastNumber(answer)) };
+  }
   if (task.metric === "exact" || task.metric === "numeric") return { score: score(task, answer) };
   if (task.metric === "drop") return dropScore(answer, task.reference!.answers!);
   if (task.metric === "python") return { score: await gradePython(task, answer) };

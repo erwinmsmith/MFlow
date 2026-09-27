@@ -62,29 +62,34 @@ npm run build
 npm run mflow -- prepare --input data/example.jsonl --out data/prepared --seed 42
 ```
 
-默认按 group 数量划为约 60% search、20% confirmation、20% test，实际样本量记录在 manifest。示例仅有 12 道手工算术题，用于格式检查，不是科研 benchmark。已有官方 split 的数据直接转换为三个 JSONL，保持原 split，不要再次随机划分。
+默认按 group 数量划为约 60% search、20% confirmation、20% test，实际样本量记录在 manifest。示例仅有 12 道手工算术题，用于格式检查，不是科研 benchmark。该 `prepare` 命令仅用于自定义数据。下面五个 benchmark 固定使用 AFlow 发布的划分，不经过此随机划分流程。
 
 ### 公开 benchmark
 
-`benchmarks` 命令下载并转换 **DROP、HumanEval、MBPP、GSM8K、MATH**，不会下载 HotpotQA。需 Python 3.12+；MATH 转换需 `pyarrow`，评分需 `math-verify`。可用独立虚拟环境：
+`benchmarks` 命令直接导入 **AFlow 发布的数据包**，保留 DROP、HumanEval、MBPP、GSM8K、MATH 的题目、顺序和 `validate/test` 归属。HotpotQA 不生成、不参与实验；上游压缩包内附带的 HotpotQA 文件不解压。转换仅用 Python 标准库，数学评分另需 `math-verify`：
 
 ```sh
 python3.12 -m venv .benchmark-venv
 .benchmark-venv/bin/python -m pip install -r requirements-benchmarks.txt
 MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- benchmarks --name all
+npm run mflow -- benchmarks --name all --verify
 ```
 
-也可把 `all` 改成 `drop`、`humaneval`、`mbpp`、`gsm8k`、`math` 单独准备。默认每个训练集抽取 64 道 search、16 道 confirmation，完整保留官方测试集；`--search-size`、`--confirmation-size`、`--seed` 可调整。`data/benchmarks/<name>/manifest.json` 记录来源 URL、SHA-256 与划分数量。目标目录已有转换结果时命令拒绝覆盖。当前机器五个数据集的原始和转换文件共约 **37 MiB**；独立 Python 环境约 **161 MiB**，Docker 镜像另计。
+也可把 `all` 改为单个数据集名称。划分固定，不支持 `--search-size`、`--confirmation-size` 或 `--seed`；已有目标目录时拒绝覆盖。`data/aflow.lock.json` 固定上游 commit、压缩包及 10 个源文件/转换文件的 SHA-256；各数据集的 manifest 记录来源和数量。运行时拒绝被裁剪或修改的 AFlow 数据文件。新数据包与转换后的五个数据集共约 **6 MiB**，不含 Python 环境和旧数据备份。
 
-| 数据集 | 搜索 / 确认 / 测试 | 评分与划分 |
-| --- | ---: | --- |
-| DROP | 86 / 19 / 9535 | train 按 passage 抽样；dev 作最终测试；多标注答案的 EM 用于搜索，同时记录 DROP F1。源数据含空答案和一个重复 ID，转换时剔除。 |
-| HumanEval | 0 / 0 / 164 | 只有官方 test；使用别的代码训练集选好策略后才评测；容器内运行 `check(entry_point)`，记录 pass@1。 |
-| MBPP | 64 / 16 / 500 | 官方 task ID：601–974 train、511–600 validation、11–510 test；在容器内运行提供的断言，记录 pass@1。 |
-| GSM8K | 64 / 16 / 1319 | 官方 train/test；提取 `####` 后最终数字，按数值评分。 |
-| MATH | 64 / 16 / 5000 | EleutherAI 的 Hendrycks MATH 镜像 train/test；使用 `math-verify` 检查数学等价性。 |
+| 数据集 | 搜索：AFlow validate → search.jsonl | 最终评测：AFlow test → test.jsonl |
+| --- | ---: | ---: |
+| DROP | 200 | 800 |
+| HumanEval | 33 | 131 |
+| MBPP | 86 | 341 |
+| GSM8K | 264 | 1055 |
+| MATH | 119 | 486 |
 
-HumanEval 和 MBPP 的参考测试只留在评测记录，Ditto agent 只接收题目 prompt。MBPP 原始题目附带的公开示例断言保留在 prompt 中。代码评分需预先运行 Docker 并准备本地镜像：
+五个数据集均不生成独立 confirmation。搜索、候选比较和策略选择使用完整 validate；冻结 `best.json` 后，`evaluate` 在完整 test 上运行并评分。`infer` 用于单条新问题。测试答案、推导和参考实现不会进入 agent prompt，MBPP 也不再附加隐藏评分断言。
+
+**上游 DROP 自身含 5 对跨 split 重复题目，以及共享 passage。** 为复现原划分，保留这些题目，不改成按 passage 划分；程序仅放行锁定的 ID/prompt 组合，并在评测 summary 记录 `knownSourceOverlaps`。其他重复继续拒绝。不能把这份 DROP 划分描述成完全无重叠。完整来源、规则和评分差异见 [AFlow 数据协议](docs/aflow-data-protocol.md)。
+
+代码评分需预先运行 Docker 并准备本地镜像：
 
 ```sh
 docker pull python:3.12-alpine
@@ -106,6 +111,17 @@ npm run mflow -- search \
   --config configs/search.json \
   --out runs/search-1
 ```
+
+上述命令演示自定义数据的三分协议。AFlow benchmark 使用以下命令，不传 `--confirmation`：
+
+```sh
+npm run mflow -- search --search data/benchmarks/gsm8k/search.jsonl \
+  --config configs/aflow-search.json --out runs/gsm8k-search
+npm run mflow -- evaluate --bundle runs/gsm8k-search/best.json \
+  --test data/benchmarks/gsm8k/test.jsonl --out runs/gsm8k-test
+```
+
+`configs/aflow-search.json` 是预算示例（最多 1000 次任务执行、500 万 tokens），不是 AFlow 论文的计算预算。原来的 200 次小样例预算不足以覆盖 GSM8K 的 264 题基线，且 DROP 基线后没有候选预算；请按实验预算配置，系统不会因此缩减数据集。
 
 输出目录必须尚不存在，避免覆盖旧实验。默认所有 agent 使用同一模型；能力差异来自 Ditto 推理组织、上下文和工具。当前注册工具为 `arithmetic`。可通过 `DittoAgents` 注入其他 Ditto `RegisteredTool`，但没有隔离契约的工具只能用于关闭缓存的普通执行，不得据此宣称具有事务回滚能力。
 
@@ -129,7 +145,7 @@ npm run mflow -- evaluate --bundle runs/search-1/best.json \
   --test data/prepared/test.jsonl --out runs/test-1
 ```
 
-`best.json` 固定策略、模型配置、初始 profile pool 和运行预算。推理不读取搜索树。标准测试每道题重置 pool 和 episode，禁止跨题累计新 agent 或记忆。测试会拒绝与 search/confirmation 重复的 ID、规范化 prompt 或 group。
+`best.json` 固定策略、模型配置、初始 profile pool 和运行预算。推理不读取搜索树。标准测试每道题重置 pool 和 episode，禁止跨题累计新 agent 或记忆。测试会拒绝与 search/confirmation 重复的 ID、规范化 prompt 或 group；唯一例外是上述 AFlow DROP 的 5 对固定源数据重复。
 
 ## 持续组织协议
 

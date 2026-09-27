@@ -1,5 +1,7 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import aflow from "../data/aflow.lock.json" with { type: "json" };
 import { taskSchema, type TaskInput, type Task } from "./types.js";
 import { Random, digest, save } from "./util.js";
 
@@ -16,11 +18,45 @@ export async function readTasks(path: string): Promise<Task[]> {
       }
     });
   if (!tasks.length) throw new Error("Dataset must not be empty");
+  if (tasks.some((t) => t.aflowSplit)) {
+    const first = tasks[0];
+    const key = `${first.benchmark}_${first.aflowSplit}.jsonl` as keyof typeof aflow.files;
+    const pinned = aflow.files[key];
+    if (!pinned || createHash("sha256").update(text).digest("hex") !== pinned.convertedSha256)
+      throw new Error("AFlow data must match the complete pinned split; run benchmarks --verify");
+  }
   assertDisjoint(tasks);
   return tasks;
 }
 export const promptKey = (task: TaskInput) =>
   task.prompt.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+
+export function assertDatasetRole(tasks: Task[], role: "search" | "confirmation" | "test" | "prepare") {
+  for (const task of tasks)
+    if (task.aflowSplit && task.aflowSplit !== ({ search: "validate", test: "test" } as Record<string, string>)[role])
+      throw new Error(`AFlow ${task.aflowSplit} cannot be used for ${role}: ${task.id}`);
+}
+
+/** Preserve only the five prompt collisions already present in AFlow's pinned DROP split. */
+export function assertTestDisjoint(tasks: Task[], selection: {
+  selectionTaskIds: string[]; selectionPromptHashes: string[]; selectionGroups: string[];
+}) {
+  assertDatasetRole(tasks, "test");
+  const knownOverlaps: typeof aflow.knownPromptOverlaps = [];
+  for (const task of tasks) {
+    if (selection.selectionTaskIds.includes(task.id) || (task.group && selection.selectionGroups.includes(task.group)))
+      throw new Error(`Test overlaps strategy selection data: ${task.id}`);
+    const hash = digest(promptKey(task));
+    selection.selectionPromptHashes.forEach((promptHash, i) => {
+      if (promptHash !== hash) return;
+      const known = task.aflowSplit === "test" && aflow.knownPromptOverlaps.find((entry) =>
+        entry.testId === task.id && entry.searchId === selection.selectionTaskIds[i] && entry.promptHash === hash);
+      if (!known) throw new Error(`Test overlaps strategy selection data: ${task.id}`);
+      knownOverlaps.push(known);
+    });
+  }
+  return knownOverlaps;
+}
 export function assertDisjoint(...splits: Task[][]) {
   const ids = new Set<string>(),
     prompts = new Map<string, number>(),
@@ -53,6 +89,7 @@ export async function prepare(
     throw new Error("Need positive search/confirmation/test fractions");
   const tasks = await readTasks(input),
     groups = new Map<string, Task[]>();
+  assertDatasetRole(tasks, "prepare");
   for (const task of tasks) {
     const key = task.group ? `group:${task.group}` : `task:${task.id}`;
     groups.set(key, [...(groups.get(key) ?? []), task]);

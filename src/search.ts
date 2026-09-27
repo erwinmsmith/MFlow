@@ -17,7 +17,7 @@ import {
   type AgentProfile,
 } from "./types.js";
 import { acquisition, Posterior } from "./mia.js";
-import { assertDisjoint, promptKey } from "./data.js";
+import { assertDisjoint, assertDatasetRole, promptKey } from "./data.js";
 import { grade, checkScoring } from "./grading.js";
 import { BudgetExhausted, type ModelSettings } from "./ditto.js";
 import { Random, append, digest, mean, save } from "./util.js";
@@ -145,6 +145,10 @@ export class Search {
     }
   }
   async run(tasks: Task[], confirmation: Task[] = []): Promise<Bundle> {
+    assertDatasetRole(tasks, "search");
+    assertDatasetRole(confirmation, "confirmation");
+    if (tasks.some((task) => task.aflowSplit) && confirmation.length)
+      throw new Error("AFlow search uses the complete validate split without separate confirmation");
     assertDisjoint(tasks, confirmation);
     if (!tasks.length) throw new Error("Empty search reservoir");
     if (this.config.maxExecutions < tasks.length + confirmation.length)

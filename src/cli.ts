@@ -13,7 +13,7 @@ import {
   type StoreSnapshot,
 } from "@codesoul-co/ditto";
 import { DittoAgents, MeteredProvider, httpProvider } from "./ditto.js";
-import { prepare, readTasks, promptKey } from "./data.js";
+import { prepare, readTasks, assertTestDisjoint } from "./data.js";
 import { grade, checkScoring } from "./grading.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -46,13 +46,12 @@ const { positionals, values } = parseArgs({
     state: { type: "string" },
     "state-out": { type: "string" },
     name: { type: "string" },
-    "search-size": { type: "string" },
-    "confirmation-size": { type: "string" },
+    verify: { type: "boolean" },
   },
 });
 const required = (key: keyof typeof values) => {
   const value = values[key];
-  if (!value) throw new Error(`--${key} is required`);
+  if (typeof value !== "string" || !value) throw new Error(`--${key} is required`);
   return value;
 };
 async function json(path: string): Promise<unknown> {
@@ -74,10 +73,9 @@ async function run() {
   const command = positionals[0];
   if (command === "benchmarks") {
     const exec = promisify(execFile);
+    if (values.seed) throw new Error("AFlow benchmark splits are fixed; --seed cannot resplit them");
     const args = ["scripts/benchmarks.py", "--name", values.name ?? "all",
-      "--out", values.out ?? "data/benchmarks", "--seed", values.seed ?? "42",
-      "--search-size", values["search-size"] ?? "64",
-      "--confirmation-size", values["confirmation-size"] ?? "16"];
+      "--out", values.out ?? "data/benchmarks", ...(values.verify ? ["--verify"] : [])];
     const { stdout } = await exec(process.env.MFLOW_BENCH_PYTHON ?? "python3", args, { maxBuffer: 2_000_000 });
     process.stdout.write(stdout);
     return;
@@ -239,14 +237,10 @@ async function run() {
       return;
     }
     const tasks = await readTasks(required("test"));
+    const knownSourceOverlaps = assertTestDisjoint(tasks, bundle);
+    if (knownSourceOverlaps.length)
+      console.log(`Retaining ${knownSourceOverlaps.length} documented AFlow DROP prompt overlaps for exact split replication.`);
     await checkScoring(tasks);
-    for (const t of tasks)
-      if (
-        bundle.selectionTaskIds.includes(t.id) ||
-        bundle.selectionPromptHashes.includes(digest(promptKey(t))) ||
-        (t.group && bundle.selectionGroups.includes(t.group))
-      )
-        throw new Error(`Test overlaps strategy selection data: ${t.id}`);
     const out = required("out");
     await outputDirectory(out);
     const results = [];
@@ -271,6 +265,7 @@ async function run() {
       ...(results.some((r) => r.f1 !== undefined) ? { meanF1: mean(results.map((r) => r.f1 ?? 0)) } : {}),
       meanTokens: mean(results.map((r) => r.execution.tokens)),
       testDataHash: digest(tasks),
+      knownSourceOverlaps,
       protocol,
       actualTokens: provider.tokens,
       usage: provider.records,
@@ -280,6 +275,7 @@ async function run() {
   }
   console.log(`MFlow (Node 24+, published Ditto 0.1.1)
   doctor
+  benchmarks --name all [--verify]
   prepare --input tasks.jsonl --out data/prepared --seed 42
   search --search data/prepared/search.jsonl --confirmation data/prepared/confirmation.jsonl --config configs/search.json --out runs/search-1
   evaluate --bundle runs/search-1/best.json --test data/prepared/test.jsonl --out runs/test-1
