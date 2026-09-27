@@ -1,5 +1,5 @@
 {
-  "status": "held_out_test_running",
+  "status": "held_out_test_completed",
   "benchmark": "MATH",
   "model": "deepseek-flash",
   "dittoVersion": "0.1.1",
@@ -29,7 +29,7 @@
     "priorUsagePlusConservativeFailedCallAllowance": 1262819,
     "searchCeiling": 12000000
   },
-  "conclusion": "Partial frozen test shows a positive same-trajectory improvement over initial root answers; not an independent ablation or evidence of beating baselines. AFlow initial validation scored 114/119 versus MFlow selected 106/119. No test-driven strategy or prompt changes.",
+  "conclusion": "Frozen MATH test completed: 431/486 (88.68%). Initial root answers scored 394/486 on the same trajectories; final answers gained 37 correct overall, including a net 21 after first child execution. This is not an independent spawn ablation or evidence of beating baselines. Separate v3 search is still running.",
   "formatFailureDiagnostic": {
     "completedValidationTasks": 65,
     "tokens": 88042,
@@ -131,40 +131,40 @@
     "selectionFrozenBeforeTest": true
   },
   "testProgress": {
-    "asOf": "2026-09-27T11:53:40.349002+00:00",
-    "completedSnapshot": 396,
+    "asOf": "2026-09-27T13:18:22.809270+00:00",
+    "completedSnapshot": 486,
     "plannedCount": 486,
-    "initialRootCorrect": 324,
-    "beforeFirstChildCorrect": 336,
-    "finalCorrect": 355,
+    "initialRootCorrect": 394,
+    "beforeFirstChildCorrect": 410,
+    "finalCorrect": 431,
     "reviewStage": {
-      "corrected": 15,
+      "corrected": 19,
       "harmed": 3,
-      "unchanged": 378
+      "unchanged": 464
     },
     "afterSpawnStage": {
-      "corrected": 21,
-      "harmed": 2,
-      "unchanged": 373
+      "corrected": 24,
+      "harmed": 3,
+      "unchanged": 459
     },
     "wholeWorkflow": {
-      "corrected": 36,
-      "harmed": 5,
-      "unchanged": 355
+      "corrected": 43,
+      "harmed": 6,
+      "unchanged": 437
     },
-    "tasksWithSpawn": 394,
-    "spawnedAgents": 409,
-    "tasksWithEvidenceDelivered": 379,
-    "tasksWithRootTurnAfterChild": 362,
-    "tokens": 3436978,
+    "tasksWithSpawn": 483,
+    "spawnedAgents": 500,
+    "tasksWithEvidenceDelivered": 464,
+    "tasksWithRootTurnAfterChild": 442,
+    "tokens": 4212610,
     "stopReasons": {
-      "strategy": 332,
-      "tokens": 64
+      "strategy": 408,
+      "tokens": 78
     },
-    "limitation": "Partial ordered test subset; same-trajectory stage comparison, not an independent baseline/ablation or causal estimate. No model calls or tuning.",
-    "meanTokens": 8679.237373737375,
-    "spawnWithoutRootIntegration": 32,
-    "stopReasonLimitation": "tokens merges output truncation and episode budget limits; this run does not record finer causes."
+    "limitation": "Complete frozen test; same-trajectory stage comparison, not an independent no-spawn ablation or causal estimate. No test feedback used to select this strategy.",
+    "spawnWithoutRootIntegration": 41,
+    "allAttemptTokens": 4235308,
+    "failedAttemptTokens": 22698
   },
   "baselineInitialValidation": {
     "AFlow": {
@@ -178,5 +178,16 @@
       "correct": 106
     },
     "limitation": "Validation-only comparison; methods have different prompting and output protocols, full selected test is pending."
+  },
+  "testSummary": {
+    "strategy": "s4",
+    "count": 486,
+    "accuracy": 0.8868312757201646,
+    "meanTokens": 8667.921810699589,
+    "testDataHash": "ae66f173a56e977602039c35428114a83d827459dd8c97a3f5f7861574774e0f",
+    "protocol": "standard",
+    "actualTokens": 4235308,
+    "recovered": true,
+    "executionVersion": "8ed368b35ead11abfbab0d08de72b4f33c6872a1b6c5b87de892261986ef95ab"
   }
 }
