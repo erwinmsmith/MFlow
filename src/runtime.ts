@@ -120,10 +120,12 @@ export class OrganizationRuntime {
           depth: a.depth,
           turns: a.turns,
           stalled: a.stalled,
+          reviewed: a.reviewed ?? false,
+          challenged: a.challenged ?? false,
         })),
         maxDepth: this.limits.maxDepth,
       });
-    const execute = async (agent: AgentState) => {
+    const execute = async (agent: AgentState, review = false) => {
       if (tokens() >= this.limits.maxTokens) return;
       const before = digest({
         answer: agent.output?.candidate_answer,
@@ -140,9 +142,11 @@ export class OrganizationRuntime {
         deficits,
         artifacts.filter((a) => agent.inbox.includes(a.id)),
         remaining(),
+        review,
       );
       toolEvents.push(...result.toolEvents);
       agent.turns++;
+      if (review) agent.reviewed = true;
       agent.output = result.value;
       outputs.push({ agentId: agent.profile.id, output: result.value });
       agent.episode.push(JSON.stringify(result.value));
@@ -284,46 +288,59 @@ export class OrganizationRuntime {
           stopReason = "strategy";
           break;
         }
-        if (decision.action === "CONTINUE") {
+        if (decision.action === "CONTINUE" || decision.action === "REVIEW") {
           const target = population.find(
             (a) => a.profile.id === decision.agentId,
           );
-          if (target?.status === "ACTIVE") await execute(target);
+          if (target?.status === "ACTIVE") await execute(target, decision.action === "REVIEW");
           else event = "CONTINUE:no-active-target";
-        } else if (decision.action === "DERIVE") {
+        } else if (decision.action === "DERIVE" || decision.action === "CHALLENGE") {
+          const challenge = decision.action === "CHALLENGE";
           if (
-            !d ||
-            d.status === "RESOLVED" ||
+            (!d && !challenge) ||
+            d?.status === "RESOLVED" ||
+            (challenge && owner.challenged) ||
             active() >= this.limits.maxActiveAgents ||
             population.length >= this.limits.maxPoolAgents ||
             owner.depth >= this.limits.maxDepth
           )
             event = "DERIVE:resource-limit-or-no-deficit";
           else {
+            let requested = d;
+            if (challenge) {
+              let id = `${owner.profile.id}:independent-check`;
+              while (deficits.some((item) => item.id === id)) id += "-next";
+              requested = { id, owner: owner.profile.id, status: "MISSING", artifactIds: [], deliveredIds: [],
+                text: "Solve the original task independently from its constraints and return a compact derivation or exhaustive check of the decisive result. The owner will compare your evidence with its own solution. This is a strategy-requested independent check, not a known error." };
+              deficits.push(requested);
+            }
+            const assignment = requested!;
             let n = population.length;
             while (population.some((a) => a.profile.id === `agent-${n}`)) n++;
             const profile = await this.agents.derive(
-              d,
+              assignment,
               owner.profile,
               task,
               `agent-${n}`,
               remaining(),
+              challenge ? undefined : owner.output,
             );
             const agent: AgentState = {
               profile,
               status: "ACTIVE",
               depth: owner.depth + 1,
-              assigned: d.id,
+              assigned: assignment.id,
               turns: 0,
               stalled: false,
               episode: [],
               inbox: [],
             };
             population.push(agent);
-            d.source = profile.id;
-            d.status = "ACTIVE";
-            d.artifactIds = [];
-            d.deliveredIds = [];
+            if (challenge) owner.challenged = true;
+            assignment.source = profile.id;
+            assignment.status = "ACTIVE";
+            assignment.artifactIds = [];
+            assignment.deliveredIds = [];
             peakActive = Math.max(peakActive, active());
             await execute(agent);
           }

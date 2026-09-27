@@ -8,7 +8,7 @@
 
 ## 当前实现范围
 
-- 类型化、有序规则 DSL：`CONTINUE / REACTIVATE / DERIVE / CONNECT / DISCONNECT / DORMANT / STOP`。
+- 类型化、有序规则 DSL：`CONTINUE / REVIEW / CHALLENGE / REACTIVATE / DERIVE / CONNECT / DISCONNECT / DORMANT / STOP`。
 - Ditto 组合的 agent 执行器：独立 objective、capability、private context、reasoning 和 tool manifest。Factory 依据 deficit 开放生成 agent，不使用固定 verifier/programmer 角色表。
 - `MISSING / LATENT / ACTIVE / DELIVERED / RESOLVED` 状态；artifact 定向传递；只有 owner 能关闭自己的 deficit。
 - 按真实 utility 选择父节点；局部修改；逐步评估；完整受影响集合评估后才能晋升；可选独立 confirmation。
@@ -24,6 +24,8 @@
 - standard 每题重置；另有显式 `--protocol continual`，通过 Ditto 生成压缩记忆，并原子提交 profile、memory 和任务来源到 `BranchStore`，可导出和恢复 JSON 状态。
 
 当前隔离范围为显式 JSON 状态与内置纯算术工具。注入其他工具时，缓存、prefix 恢复与 continual commit 会拒绝运行，直至接入经过验证的资源隔离适配器。
+
+AFlow 式失败反馈提议、独立复核、完整派生与整合操作见 [搜索控制 v2](docs/search-v2.md)。
 
 详见 [Ditto 通用能力需求](docs/ditto-requirements.md) 和 [架构与实验协议](docs/architecture.md)。
 

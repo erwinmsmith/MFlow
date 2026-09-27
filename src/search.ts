@@ -21,6 +21,7 @@ import { assertDisjoint, assertDatasetRole, promptKey } from "./data.js";
 import { grade, checkScoring } from "./grading.js";
 import { BudgetExhausted, type ModelSettings } from "./ditto.js";
 import { Random, append, digest, mean, save } from "./util.js";
+import { SEARCH_PROMPT } from "./prompts.js";
 
 export interface SearchNode {
   id: string;
@@ -35,7 +36,8 @@ export interface SearchNode {
   reason?: string;
 }
 export interface Bundle {
-  version: 2;
+  version: 3;
+  executionVersion: string;
   dittoVersion: "0.1.1";
   strategy: Strategy;
   pool: AgentProfile[];
@@ -247,7 +249,7 @@ export class Search {
           Math.exp(((f.parent.utility ?? 0) - best) / this.config.temperature),
         ),
         sum = weights.reduce((a, b) => a + b, 0);
-      const { parent, edits } = this.rng.weighted(
+      const selected = this.rng.weighted(
         frontier,
         weights.map(
           (w) =>
@@ -255,6 +257,34 @@ export class Search {
             this.config.exploration / frontier.length,
         ),
       );
+      const parent = selected.parent;
+      let edits = selected.edits;
+      if (this.config.proposalMode === "aflow") {
+        // Validation feedback informs legal proposals only; it never enters execution prompts.
+        const failures = parent.results.filter((r) => r.score === 0).slice(0, 3).map((r) => ({
+          task: tasks.find((t) => t.id === r.taskId)?.prompt,
+          prediction: r.execution.answer, score: r.score,
+          trace: r.execution.trace.slice(0, 8).map((t) => ({ decision: t.decision, deficits: t.state.deficits, event: t.event })),
+        }));
+        try {
+          const proposal = await this.runtime.agents.structured("mutation-proposal", SEARCH_PROMPT, {
+            parent: parent.strategy, validationAccuracy: parent.utility,
+            failure_examples: failures,
+            experience: this.nodes.slice(-10).map((n) => ({ id: n.id, parent: n.parent, edit: n.mutation?.description,
+              status: n.status, accuracy: n.utility, reason: n.reason })),
+            legal_edits: edits.map(({ edit, affected }) => ({ id: edit.id, operator: edit.family,
+              description: edit.description, affectedTasks: affected.size })),
+          }, z.object({ ids: z.array(z.string()).min(1).max(4), rationale: z.string() }).strict(), this.config.episode);
+          const ids = [...new Set(proposal.value.ids)];
+          if (ids.some((id) => !edits.some((e) => e.edit.id === id))) throw new Error("Optimizer proposed an illegal edit");
+          edits = ids.map((id) => edits.find((e) => e.edit.id === id)!);
+          await append(join(this.out, "proposals.jsonl"), { iteration, parent: parent.id, ...proposal.value });
+        } catch (error) {
+          await this.persist();
+          if (error instanceof BudgetExhausted) { stopReason = "budget"; break; }
+          throw error;
+        }
+      }
       const experiments = edits.map((e) => ({
         key: e.edit.posteriorKey,
         triggerRate: e.affected.size / tasks.length,
@@ -465,7 +495,8 @@ export class Search {
       );
     const selection = [...tasks, ...confirmation];
     const bundle: Bundle = {
-      version: 2,
+      version: 3,
+      executionVersion: this.runtime.agents.resourceVersion,
       dittoVersion: "0.1.1",
       strategy: incumbent.strategy,
       pool: structuredClone([...this.runtime.pool]),

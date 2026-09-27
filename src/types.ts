@@ -3,6 +3,8 @@ import { z } from "zod";
 
 export const actions = [
   "CONTINUE",
+  "REVIEW",
+  "CHALLENGE",
   "REACTIVATE",
   "DERIVE",
   "CONNECT",
@@ -22,6 +24,8 @@ export const guards = [
   "has_artifact",
   "depth_room",
   "overactive",
+  "not_reviewed",
+  "not_challenged",
 ] as const;
 export const ruleSchema = z
   .object({
@@ -108,6 +112,8 @@ export interface AgentState {
   assigned?: string;
   turns: number;
   stalled: boolean;
+  reviewed?: boolean;
+  challenged?: boolean;
   episode: string[];
   inbox: string[];
   output?: AgentOutput;
@@ -126,6 +132,8 @@ export interface PolicyState {
     depth: number;
     turns: number;
     stalled: boolean;
+    reviewed?: boolean;
+    challenged?: boolean;
   }[];
   maxDepth: number;
 }
@@ -229,6 +237,7 @@ export const searchConfigSchema = z
     variant: z
       .enum(["random", "llm-guided", "mia-space", "mia-acq", "mia-full"])
       .default("mia-full"),
+    proposalMode: z.enum(["grammar", "aflow"]).default("grammar"),
     maxIterations: z.number().int().positive().default(20),
     maxExecutions: z.number().int().positive().default(200),
     maxSearchTokens: z.number().int().positive().default(1000000),

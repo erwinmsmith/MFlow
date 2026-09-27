@@ -25,6 +25,10 @@ function matches(
       ? owner?.stalled
       : g === "has_artifact"
         ? (d?.artifactIds.length ?? 0) > 0
+        : g === "not_reviewed"
+          ? !owner?.reviewed
+        : g === "not_challenged"
+          ? !owner?.challenged
         : g === "depth_room"
           ? (owner?.depth ?? 0) < state.maxDepth
           : state.agents.some(
@@ -41,10 +45,15 @@ function matches(
 }
 export function decide(strategy: Strategy, state: PolicyState): Decision {
   for (const rule of strategy.rules) {
-    if (rule.status === "NONE" && matches(rule, undefined, state))
-      return bind(rule.action, rule.id, undefined, state);
+    if (rule.status === "NONE" && matches(rule, undefined, state)) {
+      const decision = bind(rule.action, rule.id, undefined, state);
+      if (applicable(decision, undefined, state)) return decision;
+    }
     for (const d of state.deficits)
-      if (matches(rule, d, state)) return bind(rule.action, rule.id, d, state);
+      if (matches(rule, d, state)) {
+        const decision = bind(rule.action, rule.id, d, state);
+        if (applicable(decision, d, state)) return decision;
+      }
   }
   return bind(
     strategy.fallback,
@@ -52,6 +61,17 @@ export function decide(strategy: Strategy, state: PolicyState): Decision {
     state.deficits.find((d) => d.status !== "RESOLVED"),
     state,
   );
+}
+function applicable(decision: Decision, d: Deficit | undefined, state: PolicyState): boolean {
+  const target = state.agents.find((a) => a.id === decision.agentId);
+  if (decision.action === "REVIEW") return target?.status === "ACTIVE" && !target.reviewed;
+  if (decision.action === "CHALLENGE") return target?.status === "ACTIVE" && !target.challenged;
+  if (decision.action === "DORMANT") return target?.id !== "root" && target?.status === "ACTIVE";
+  if (decision.action === "CONNECT") return !!d?.source && d.status !== "RESOLVED" && d.artifactIds.some((id) => !d.deliveredIds.includes(id));
+  if (decision.action === "DERIVE") return !!d && d.status !== "RESOLVED";
+  if (decision.action === "REACTIVATE") return state.agents.some((a) => a.id === d?.source && a.status === "DORMANT");
+  if (decision.action === "DISCONNECT") return !!d?.deliveredIds.length;
+  return true;
 }
 function bind(
   action: Action,
@@ -95,7 +115,7 @@ const directions: Record<string, Action[]> = {
   ACTIVE: ["CONNECT", "DISCONNECT", "CONTINUE"],
   DELIVERED: ["CONTINUE", "DERIVE", "REACTIVATE"],
   RESOLVED: ["DORMANT", "DISCONNECT", "STOP"],
-  NONE: ["STOP", "DORMANT"],
+  NONE: ["STOP", "REVIEW", "CHALLENGE", "DORMANT"],
   ANY: [...actions],
 };
 export function mutations(
@@ -127,6 +147,35 @@ export function mutations(
       strategy,
       posteriorKey,
     });
+  }
+  // A single collaboration operator must contain its delivery and integration path.
+  // Otherwise DERIVE alone cannot affect Root's answer and never receives useful feedback.
+  const delivery: Rule[] = [
+    { id: "route", status: "ACTIVE", guards: ["has_artifact"], action: "CONNECT" },
+    { id: "integrate", status: "DELIVERED", guards: [], action: "CONTINUE" },
+  ];
+  for (const status of ["MISSING", "LATENT"] as const) {
+    if (filtered && !observed.has(status)) continue;
+    add("ADD_COLLABORATION", `${status}:derive-deliver-integrate`, [
+      ...delivery,
+      { id: "derive", status, guards: ["depth_room"], action: "DERIVE" },
+      ...parent.rules,
+    ], parent.fallback, status);
+  }
+  if (!filtered || observed.has("NONE")) {
+    const review: Rule = { id: "review", status: "NONE", guards: ["not_reviewed"], action: "REVIEW" };
+    add("ADD_REVIEW", "NONE:independent-review", [review, ...parent.rules], parent.fallback, "NONE");
+    add("ADD_COLLABORATION", "NONE:review-then-delegate-open-issues", [
+      ...delivery,
+      { id: "reuse", status: "LATENT", guards: ["depth_room"], action: "REACTIVATE" },
+      { id: "derive", status: "MISSING", guards: ["depth_room"], action: "DERIVE" },
+      review, ...parent.rules,
+    ], parent.fallback, "NONE");
+    add("ADD_COLLABORATION", "NONE:independent-solution-deliver-integrate", [
+      ...delivery,
+      { id: "independent", status: "NONE", guards: ["not_challenged", "depth_room"], action: "CHALLENGE" },
+      ...parent.rules,
+    ], parent.fallback, "NONE");
   }
   for (const status of [
     "MISSING",
@@ -174,6 +223,8 @@ export function mutations(
       "has_artifact",
       "depth_room",
       "overactive",
+      "not_reviewed",
+      "not_challenged",
     ] as const) {
       const removing = r.guards.includes(guard);
       add(

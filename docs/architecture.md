@@ -34,7 +34,7 @@ confirmation 参与多次候选选择，属于验证数据，不能当无偏 tes
 
 `src/policy.ts` 的策略是有序规则表。每条 rule 具有 status、guards 和 action，匹配后返回绑定了具体 owner/source 的组织动作。语义目标和工具不进入 mutation grammar。当前没有任意 Python/JavaScript 代码生成或执行。
 
-初始策略只允许 Root CONTINUE/STOP。mutation 包括新增状态规则、改 action、增删 guard、优先级、复用顺序、深度 guard 与移除规则；搜索节点保存修改后的完整策略。预算是运行时硬边界，不允许 mutation 提高实验预算。
+初始策略只允许 Root CONTINUE/STOP。可搜索 REVIEW、CHALLENGE，以及派生—交付—整合的完整操作，详见 [搜索控制 v2](search-v2.md)。mutation 包括新增状态规则、改 action、增删 guard、优先级、复用顺序、深度 guard 与移除规则；搜索节点保存修改后的完整策略。预算是运行时硬边界，不允许 mutation 提高实验预算。
 
 父节点从已完整评估的候选中选取；当前取 top-k 后以 softmax utility 与均匀探索混合。Root 即使不满足资源均值约束也可作为探索起点，但不满足约束的策略不会导出为 best。
 

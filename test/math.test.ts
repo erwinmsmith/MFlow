@@ -34,3 +34,12 @@ test("a truncated model response exhausts only its episode, not the experiment",
   assert.equal(result.answer, "");
   assert.equal(result.actualTokens, 20);
 });
+
+
+test("MATH plain textual final answers match boxed text without accepting other words", async (t) => {
+  const task = taskSchema.parse({ id: "word", prompt: "Name the word", answer: "The word is \\boxed{\\text{MAKE}}.", metric: "math" });
+  try { await checkScoring([task]); } catch { t.skip("math-verify unavailable"); return; }
+  assert.equal((await grade(task, "MAKE")).score, 1);
+  assert.equal((await grade(task, "TAKE")).score, 0);
+  assert.equal((await grade(task, "MAKE or TAKE")).score, 0);
+});

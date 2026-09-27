@@ -12,7 +12,7 @@ import {
   stateDigest,
   type StoreSnapshot,
 } from "@codesoul-co/ditto";
-import { DittoAgents, MeteredProvider, httpProvider } from "./ditto.js";
+import { DittoAgents, MeteredProvider, httpProvider, executionVersion } from "./ditto.js";
 import { prepare, readTasks, assertTestDisjoint } from "./data.js";
 import { grade, checkScoring } from "./grading.js";
 import { execFile } from "node:child_process";
@@ -244,6 +244,7 @@ async function run() {
     const out = required("out");
     await outputDirectory(out);
     const results = [];
+    try {
     for (const task of tasks) {
       const execution = await execute({
         id: task.id,
@@ -270,6 +271,9 @@ async function run() {
       actualTokens: provider.tokens,
       usage: provider.records,
     });
+    } finally {
+      await save(join(out, "usage.json"), provider.records);
+    }
     console.log(`Test results written to ${out}`);
     return;
   }
@@ -287,7 +291,8 @@ For continual infer/evaluate: --protocol continual --state-out state.json [--sta
 async function loadBundle(path: string): Promise<Bundle> {
   const raw = (await json(path)) as Bundle;
   if (
-    raw.version !== 2 ||
+    raw.version !== 3 ||
+    raw.executionVersion !== executionVersion ||
     raw.dittoVersion !== "0.1.1" ||
     raw.experimentalScope !== "standard-isolated-state-v2"
   )

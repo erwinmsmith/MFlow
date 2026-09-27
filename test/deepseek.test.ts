@@ -24,6 +24,7 @@ test("DeepSeek requests use the published Ditto provider with supported fields",
     assert.equal(body.max_tokens, 40);
     assert.equal(body.max_completion_tokens, undefined);
     assert.deepEqual(body.thinking, { type: "disabled" });
+    assert.deepEqual(body.response_format, { type: "json_object" });
   } finally {
     globalThis.fetch = previous;
   }
