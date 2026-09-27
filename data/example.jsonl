@@ -1,0 +1,12 @@
+{"id":"example-01","prompt":"What is 7 multiplied by 8? Return only the number.","answer":"56","metric":"numeric"}
+{"id":"example-02","prompt":"A box has 12 red and 19 blue balls. How many balls are there? Return only the number.","answer":"31","metric":"numeric"}
+{"id":"example-03","prompt":"What is the smallest prime number greater than 20? Return only the number.","answer":"23","metric":"numeric"}
+{"id":"example-04","prompt":"How many minutes are in 2.5 hours? Return only the number.","answer":"150","metric":"numeric"}
+{"id":"example-05","prompt":"Solve 3x + 9 = 30. Return only x.","answer":"7","metric":"numeric"}
+{"id":"example-06","prompt":"What is the area of a triangle with base 14 and height 9? Return only the number.","answer":"63","metric":"numeric"}
+{"id":"example-07","prompt":"What is 2 raised to the power 10? Return only the number.","answer":"1024","metric":"numeric"}
+{"id":"example-08","prompt":"What is the greatest common divisor of 24 and 36? Return only the number.","answer":"12","metric":"numeric"}
+{"id":"example-09","prompt":"What is 15 percent of 240? Return only the number.","answer":"36","metric":"numeric"}
+{"id":"example-10","prompt":"What is the sum of the integers from 1 to 20 inclusive? Return only the number.","answer":"210","metric":"numeric"}
+{"id":"example-11","prompt":"A rectangle is 11 units long and 6 units wide. What is its perimeter? Return only the number.","answer":"34","metric":"numeric"}
+{"id":"example-12","prompt":"How many distinct arrangements are there of the letters in AAB? Return only the number.","answer":"3","metric":"numeric"}

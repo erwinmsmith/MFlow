@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+runs/
+data/prepared/
+data/benchmarks/
+.benchmark-venv/
+.benchmark-sandbox-*/
+*.log
+.DS_Store
