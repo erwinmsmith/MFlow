@@ -35,7 +35,7 @@
 
 - 只用 registry 发布的 `@codesoul-co/ditto@0.1.1`，没有 Ditto 源码依赖。
 - 删除 Context 与 Infer 消息的重复注入，减少输入与预留成本。
-- DeepSeek Flash 通过 Ditto 公共 `providerOptions` 启用 [JSON Output](https://api-docs.deepseek.com/guides/json_mode/)，保留严格 schema 校验；截断只终止当前 episode，其他无效输出仍报错。
+- DeepSeek Flash 通过 Ditto 公共 `providerOptions` 启用 [JSON Output](https://api-docs.deepseek.com/guides/json_mode/)，保留严格 schema 校验；截断只终止当前 episode，非截断的格式错误最多经 Ditto 修复一次（保留答案、计入预算），修复后仍不符合 schema 则报错。
 - bundle 升为 v3，记录执行版本与执行提示词摘要。CLI 拒绝不同版本的 bundle，避免旧策略被新提示词静默执行。旧 bundle 必须用原提交重现。
 - MATH 官方运行仍为 AFlow validate 119 / test 486。诊断仅从 validate 选取，明确不作为全量准确率。
 - `configs/math-search-v2.json`：4 次候选实验、最多 800 次任务执行、12M 搜索 token、24k 每题、4096 最大输出。预算上限不是预期消耗，所有失败和诊断成本也计入用户的约 30M 总额。

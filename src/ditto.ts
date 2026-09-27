@@ -20,7 +20,7 @@ import type {
   SampleOutput,
 } from "@codesoul-co/ditto/worker/infer";
 import { z } from "zod";
-import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT } from "./prompts.js";
+import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
 import {
   agentOutputSchema,
   profileSchema,
@@ -32,7 +32,7 @@ import {
   type TaskInput,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-explicit-state-v3/arithmetic-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-explicit-state-v3/arithmetic-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -282,7 +282,15 @@ export class DittoAgents {
     schema: z.ZodType<T>,
     limits: Limits,
     profile?: AgentProfile,
-  ) {
+    repair = true,
+  ): Promise<{ value: T; toolEvents: unknown[] }> {
+    const decode = async (content: unknown): Promise<T> => {
+      try { return parseJSON(content, schema); }
+      catch (error) {
+        if (!repair) throw error;
+        return (await this.structured(`${kind}-format-repair`, FORMAT_PROMPT, { output: content }, schema, limits, undefined, false)).value;
+      }
+    };
     const runtime = this.runtime(profile?.tools ?? [], limits.timeoutMs);
     const messages = [
       {
@@ -335,7 +343,7 @@ export class DittoAgents {
             `Ditto agent failed: ${result.stopReason} ${result.error?.message ?? ""}`,
           );
         return {
-          value: parseJSON(result.result.content, schema),
+          value: await decode(result.result.content),
           toolEvents: result.observations,
         };
       }
@@ -375,7 +383,7 @@ export class DittoAgents {
           `Ditto inference failed: ${result.reason.error?.message ?? result.reason.output?.stopReason ?? "no result"}`,
         );
       return {
-        value: parseJSON(result.reason.output.result.content, schema),
+        value: await decode(result.reason.output.result.content),
         toolEvents: [],
       };
     } catch (error) {

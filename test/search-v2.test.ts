@@ -85,3 +85,20 @@ test("a searchable independent challenge can spawn even when Root reports no gap
   assert.equal(result.agents.length, 2);
   assert.deepEqual(result.trace.map((t) => t.decision.action), ["CHALLENGE", "CONNECT", "CONTINUE", "STOP"]);
 });
+
+
+test("one format repair is metered and preserves schema validation", async () => {
+  let calls = 0;
+  const provider = new MeteredProvider({ async invoke(input) {
+    calls++;
+    const { kind, payload } = request(input);
+    if (calls === 2) { assert.equal(kind, "agent-format-repair"); assert.ok(payload.output.endsWith(" trailing")); }
+    return { message: { role: "assistant" as const, content: JSON.stringify(output("56")) + (calls === 1 ? " trailing" : "") },
+      finishReason: "stop" as const, usage: { totalTokens: 20 } };
+  } });
+  const runtime = new OrganizationRuntime(new DittoAgents(provider, model), limitsSchema.parse({}));
+  const result = await runtime.run(initialStrategy, { id: "repair", prompt: "Multiply 7 by 8" });
+  assert.equal(result.answer, "56");
+  assert.equal(provider.tokens, 40);
+  assert.equal(calls, 2);
+});
