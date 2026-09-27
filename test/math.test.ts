@@ -18,3 +18,19 @@ test("MATH accepts bare LaTeX expressions without accepting a wrong expression",
   for (const answer of ["1", "\\sqrt{3}+1"])
     assert.equal((await grade(task, answer)).score, 0, answer);
 });
+
+test("a truncated model response exhausts only its episode, not the experiment", async () => {
+  const { DittoAgents, MeteredProvider } = await import("../src/ditto.js");
+  const { OrganizationRuntime } = await import("../src/runtime.js");
+  const { initialStrategy, limitsSchema } = await import("../src/types.js");
+  const provider = new MeteredProvider({ async invoke() {
+    return { message: { role: "assistant" as const, content: '{"claims":[' }, finishReason: "length" as const,
+      usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } };
+  } });
+  const result = await new OrganizationRuntime(new DittoAgents(provider, {
+    model: "fixture", baseUrl: "https://invalid.example", temperature: 0, seed: 42,
+  }), limitsSchema.parse({})).run(initialStrategy, { id: "truncated", prompt: "q" });
+  assert.equal(result.stopReason, "tokens");
+  assert.equal(result.answer, "");
+  assert.equal(result.actualTokens, 20);
+});

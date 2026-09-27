@@ -325,6 +325,8 @@ export class DittoAgents {
           },
           { signal, timeoutMs: limits.timeoutMs },
         );
+        if (result.stopReason === "max_tokens")
+          throw new EpisodeExhausted("Model output or episode token limit reached");
         if (result.status !== "completed")
           throw new Error(
             `Ditto agent failed: ${result.stopReason} ${result.error?.message ?? ""}`,
@@ -361,6 +363,8 @@ export class DittoAgents {
           }),
         );
       const result = await runtime.run(plan, messages, { signal });
+      if (result.reason.output?.stopReason === "max_tokens")
+        throw new EpisodeExhausted("Model output or episode token limit reached");
       if (
         result.reason.status !== "success" ||
         result.reason.output?.status !== "completed"

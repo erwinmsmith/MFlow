@@ -3,7 +3,7 @@
   "variant": "mia-full",
   "maxIterations": 20,
   "maxExecutions": 1000,
-  "maxSearchTokens": 5000000,
+  "maxSearchTokens": 21000000,
   "batchSize": 5,
   "minObservations": 3,
   "monteCarloSamples": 1000,
