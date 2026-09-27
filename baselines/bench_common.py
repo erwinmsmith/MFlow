@@ -3,7 +3,8 @@ import contextvars, hashlib, importlib.metadata, json, subprocess, urllib.reques
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 SOURCES=ROOT.parent/'MFlow-baselines/sources'
-RUNS=ROOT/'runs/baselines-math'
+PROTOCOL=json.loads((ROOT/'baselines/protocol.json').read_text())
+RUNS=ROOT/PROTOCOL['runDirectory']
 SCOPE=contextvars.ContextVar('scope')
 class BudgetStop(BaseException):
     def __init__(self,reason):self.reason=reason
@@ -14,13 +15,21 @@ def call(messages):
     body=json.dumps(dict(method=method,phase=phase,taskId=task_id,messages=messages)).encode()
     req=urllib.request.Request('http://127.0.0.1:8197/sample',data=body,headers={'Content-Type':'application/json'})
     try:
-        with urllib.request.urlopen(req,timeout=100) as response:result=json.load(response)
+        with urllib.request.urlopen(req,timeout=None) as response:result=json.load(response)
     except urllib.error.HTTPError as e:
         error=e.read().decode()
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
         raise TransportFailure(error) from None
-    if result['finishReason']=='length':raise BudgetStop('OUTPUT_LIMIT')
+    if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']
+
+def search_web(query):
+    query=' '.join(query.split())
+    if len(query)>600 or len(query.split())>75:
+        query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}]).strip()
+    method,phase,task_id=SCOPE.get()
+    req=urllib.request.Request('http://127.0.0.1:8197/search',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'query':query}).encode(),headers={'Content-Type':'application/json'})
+    with urllib.request.urlopen(req,timeout=None) as response:return json.dumps(json.load(response)['results'])
 
 def tasks(split):
     path=ROOT/f'data/benchmarks/math/{split}.jsonl'
@@ -46,8 +55,8 @@ def save_row(out,row):
 
 def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""
-    files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
-    manifest={'method':method,'phase':phase,'model':'deepseek-flash','temperature':0,'maxOutputTokens':4096,'episodeTokenLimit':24000,'seed':42,'testCount':486,'validationCount':119,'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
+    files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',ROOT/'baselines/protocol.json',ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
+    manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':486,'validationCount':119,'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
     manifest['pythonPackages']=sorted(f"{p.metadata['Name']}=={p.version}" for p in importlib.metadata.distributions())
     source=json.loads((ROOT/'baselines/sources.lock.json').read_text())[method]
     for name,digest in source['files'].items():

@@ -1,25 +1,36 @@
-"""Official Manager/observers/Group/CustomAction; only model transport and closed-book tools adapted."""
+"""Official Manager/observers/Group/CustomAction with Ditto model and search transport."""
 import asyncio, importlib, os, re, sys, types
 from pathlib import Path
-from bench_common import SOURCES, RUNS, SCOPE, call
+from bench_common import ROOT, SOURCES, RUNS, SCOPE, call, save_row, search_web
+from repairs import install_autoagents_repairs
 class AutoAgents:
     def __init__(self):
         source=SOURCES/'AutoAgents';sys.path.insert(0,str(source))
         os.chdir(source)
+        owner=self
         class LLM:
             def __init__(self,*args,**kwargs):pass
             async def aask(self,prompt,system_msgs=None):
-                return call([{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]+[{'role':'user','content':prompt}])
+                content=call([{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]+[{'role':'user','content':prompt}])
+                owner.remember_roles(content)
+                return content
         transport=types.ModuleType('autoagents.system.provider.llm_api');transport.LLMAPI=LLM
         sys.modules[transport.__name__]=transport
         import cfg
         cfg.LONG_TERM_MEMORY=False;cfg.TOTAL_COST=0;cfg.MAX_BUDGET=10
+        from autoagents.system.tools import SearchEngineType
+        from autoagents.system.tools.search_engine import SearchEngine
+        cfg.SEARCH_ENGINE=SearchEngineType.CUSTOM_ENGINE
+        original_search_init=SearchEngine.__init__
+        def search_init(engine,*args,**kwargs):
+            original_search_init(engine,*args,**kwargs)
+            engine.engine=SearchEngineType.CUSTOM_ENGINE;engine.run_func=search_web
+        SearchEngine.__init__=search_init
         from autoagents.explorer import Explorer
         from autoagents.roles import Manager
         from autoagents.environment import Environment
         from autoagents.actions.custom_action import CustomAction
-        import autoagents.actions.create_roles as create_roles
-        create_roles.TOOLS='No external tools. Solve the supplied problem from its text. Use an empty tools list for generated roles.'
+        self.remember_roles,self.clear_roles=install_autoagents_repairs(call,lambda kind,error:save_row(RUNS/'AutoAgents/repairs.jsonl',{'taskId':SCOPE.get()[2],'kind':kind,'error':error}))
         self.Explorer=Explorer;self.Manager=Manager;self.answer=''
         original_publish=Environment.publish_message
         async def publish(env,message):
@@ -39,6 +50,7 @@ class AutoAgents:
         self.answer=''
     def solve(self,prompt):
         self.answer=''
+        self.clear_roles()
         async def execute():
             team=self.Explorer();team.hire([self.Manager(llm_api_key='local-ditto-bridge')]);team.invest(10)
             await team.start_project(idea=prompt,llm_api_key='local-ditto-bridge',task_id=SCOPE.get()[2])

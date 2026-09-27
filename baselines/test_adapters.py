@@ -10,9 +10,26 @@ from unittest.mock import patch
 import bench_common as common
 from dylan import DyLAN
 from evoagent import EvoAgent
+from repairs import parse_roles, validate_workflow, validate_role_plan
 
 
 class AdapterTests(unittest.TestCase):
+    def test_roles_ignore_question_braces_and_keep_braces_in_strings(self):
+        role={'name':'Math_Expert','description':'math','tools':[],'suggestions':'check','prompt':'Prove {x} = {y}'}
+        text='## Question or Task\nFind {x} in {1,2}.\n## Created Roles List\n'+json.dumps(role)+'\n## Execution Plan\n1. Math_Expert: solve'
+        self.assertEqual(parse_roles(text),[role])
+        validate_role_plan(text)
+        with self.assertRaises(ValueError):validate_role_plan(text+'\n2. [Language Expert]: summarize')
+        compound={**role,'name':'Computation and Counting Expert'}
+        validate_role_plan('## Created Roles List\n'+json.dumps(compound)+'\n## Execution Plan\n1. [Computation and Counting Expert]: count')
+
+    def test_commented_prompt_definition_repaired_before_execution(self):
+        response={'graph':'class Workflow:\n def solve(self): return prompt_custom.SOLVE_PROMPT','prompt':'# SOLVE_PROMPT = """\n# Solve carefully.\n# """','modification':'fixture'}
+        fixed=validate_workflow(response)
+        namespace={};exec(fixed['prompt'],namespace)
+        self.assertIn('Solve carefully.',namespace['SOLVE_PROMPT'])
+        with self.assertRaises(ValueError):validate_workflow({**response,'prompt':''})
+
     def test_pinned_splits_are_disjoint(self):
         search, test = common.tasks('search'), common.tasks('test')
         self.assertEqual((len(search), len(test)), (119, 486))

@@ -1,7 +1,8 @@
 """Run the official AFlow optimizer and workflows; swap only provider, data and scoring adapters."""
 import argparse, asyncio, hashlib, json, os, random, sys, time
 from pathlib import Path
-from bench_common import ROOT, SOURCES, RUNS, SCOPE, BudgetStop, call, tasks, grade, save_row, usage, freeze_run
+from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, BudgetStop, call, tasks, grade, save_row, usage, freeze_run
+from repairs import validate_workflow
 p=argparse.ArgumentParser();p.add_argument('--phase',choices=['pilot','search-test'],required=True);args=p.parse_args()
 source=SOURCES/'AFlow';sys.path.insert(0,str(source));os.chdir(source)
 from scripts.async_llm import AsyncLLM, LLMConfig
@@ -13,11 +14,27 @@ random.seed(42);np.random.seed(42)
 config=LLMConfig({'model':'deepseek-flash','temperature':0,'key':'local-ditto-bridge','base_url':'http://127.0.0.1:8197/v1'})
 async def invoke(self,prompt):
     messages=([{'role':'system','content':self.sys_msg}] if self.sys_msg else [])+[{'role':'user','content':prompt}]
-    return call(messages)
+    try:SCOPE.get();return call(messages)
+    except LookupError:
+        token=SCOPE.set(('AFlow','search',f'optimizer-round-{optimizer.round}'))
+        try:return call(messages)
+        finally:SCOPE.reset(token)
 AsyncLLM.__call__=invoke
-# Configuration exposes native operators that do not require arbitrary code execution.
-# Python execution and web search are excluded from the common-tool comparison.
-optimizer=Optimizer(dataset='MATH',question_type='math',opt_llm_config=config,exec_llm_config=config,operators=['Custom','ScEnsemble'],sample=4,check_convergence=False,optimized_path='workspace',initial_round=1,max_rounds=4,validation_rounds=1)
+original_format=AsyncLLM.call_with_format
+async def formatted(self,prompt,formatter):
+    response=await original_format(self,prompt,formatter)
+    if getattr(getattr(formatter,'model',None),'__name__','')!='GraphOptimize':return response
+    while True:
+        try:
+            repaired=validate_workflow(response)
+            if repaired!=response:save_row(RUNS/'AFlow/repairs.jsonl',{'round':optimizer.round+1,'kind':'uncomment_prompt_or_remove_fences'})
+            return repaired
+        except (SyntaxError,ValueError,KeyError) as error:
+            save_row(RUNS/'AFlow/repairs.jsonl',{'round':optimizer.round+1,'kind':'code_format_repair','error':str(error)})
+            response=await original_format(self,'Repair Python syntax and missing prompt definitions in this workflow. Preserve its algorithm and modification. Return all fields. Do not solve benchmark questions.\n'+json.dumps(response)+'\nError: '+str(error),formatter)
+AsyncLLM.call_with_format=formatted
+native=PROTOCOL['aflow']
+optimizer=Optimizer(dataset='MATH',question_type='math',opt_llm_config=config,exec_llm_config=config,operators=native['operators'],sample=4,check_convergence=native['checkConvergence'],optimized_path='workspace',initial_round=1,max_rounds=native['maxRounds'],validation_rounds=native['validationRounds'])
 phase='pilot' if args.phase=='pilot' else 'search'
 recovered_initial={}
 async def load_data(self,specific_indices=None):
@@ -74,13 +91,9 @@ async def main():
         recovered_initial.update({r['taskId']:r for r in saved})
         # Rebuild the failed metadata write from paid results, without repeating model calls.
         Path(workflows,'results.json').write_text('[]\n')
-    stop='iterations'
-    for round_number in range(1,5):
-        optimizer.round=round_number
-        token=SCOPE.set(('AFlow','search',f'optimizer-round-{round_number}'))
-        try:await optimizer._optimize_graph()
-        except BudgetStop as e:stop=e.reason;break
-        finally:SCOPE.reset(token)
+    # Execute the official top-level optimizer, including its convergence/round controls.
+    await asyncio.to_thread(optimizer.optimize,'Graph')
+    stop='official_optimizer_returned'
     records=json.loads(Path(workflows,'results.json').read_text())
     # Only official completed 119-task validation records are eligible.
     logged=[json.loads(s) for s in (out/'search/results.jsonl').read_text().splitlines()]
@@ -88,7 +101,7 @@ async def main():
     if not complete:raise RuntimeError('No fully evaluated AFlow candidate')
     best=max(complete,key=lambda r:(r['score'],-r['round']));number=best['round']
     files={n:hashlib.sha256(Path(workflows,f'round_{number}',n).read_bytes()).hexdigest() for n in ['graph.py','prompt.py']}
-    (out/'frozen.json').write_text(json.dumps({'round':number,'validationScore':best['score'],'stop':stop,'files':files,'model':'deepseek-flash','operators':['Custom','ScEnsemble'],'frozenBeforeTest':True},indent=2)+'\n')
+    (out/'frozen.json').write_text(json.dumps({'round':number,'validationScore':best['score'],'stop':stop,'files':files,'model':'deepseek-flash','operators':native['operators'],'frozenBeforeTest':True},indent=2)+'\n')
     await test(number,out,workflows)
 async def test(number,out,workflows):
     global phase
@@ -101,4 +114,4 @@ async def test(number,out,workflows):
     rows=[json.loads(s) for s in (out/'test/results.jsonl').read_text().splitlines()]
     assert len(rows)==486 and len({r['taskId'] for r in rows})==486
     (out/'test/summary.json').write_text(json.dumps({'method':'AFlow','count':486,'correct':sum(r['score'] for r in rows),'tokens':sum(r['tokens'] for r in rows),'selectedRound':number},indent=2)+'\n')
-asyncio.run(main())
+if __name__=='__main__':asyncio.run(main())

@@ -1,0 +1,14 @@
+{
+  "runDirectory": "runs/baselines-math-unrestricted-20260927",
+  "model": "deepseek-flash",
+  "temperature": 0,
+  "maxOutputTokens": 393216,
+  "providerTimeoutMs": 2147483647,
+  "outputLimitSource": "https://api-docs.deepseek.com/api/create-chat-completion/",
+  "episodeTokenLimit": null,
+  "overallTokenCeiling": null,
+  "authorization": "User explicitly cancelled the shared 30M ceiling and requested full baseline reruns without additional restrictions.",
+  "aflow": {"maxRounds": 20, "validationRounds": 1, "checkConvergence": true, "operators": ["Custom", "ScEnsemble", "Programmer"]},
+  "webSearch": {"runtime": "Ditto INTERACTION.ACT.TOOL", "tool": "createWebSearchTool", "provider": "DuckDuckGo via injected ddgs adapter", "autoagentsInterface": "CUSTOM_ENGINE"},
+  "seed": 42
+}

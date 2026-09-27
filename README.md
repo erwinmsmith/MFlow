@@ -29,7 +29,7 @@ AFlow 式失败反馈提议、独立复核、完整派生与整合操作见 [搜
 
 详见 [Ditto 通用能力需求](docs/ditto-requirements.md) 和 [架构与实验协议](docs/architecture.md)。
 
-官方 AFlow、DyLAN、AutoAgents、EvoAgent 的源码复用入口、统一 MATH 划分、30M 总预算和复现命令见 [baseline 对比协议](docs/baseline-comparison.md)。
+官方 AFlow、DyLAN、AutoAgents、EvoAgent 的源码复用、统一 MATH 划分、Ditto 搜索接入和复现命令见 [baseline 完整重跑协议](docs/baseline-rerun.md)。本轮已按用户要求取消额外单题及总 token 限制；旧受限实验另行归档。
 
 ## 安装和验证
 

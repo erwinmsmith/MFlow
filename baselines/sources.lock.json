@@ -94,7 +94,7 @@
       "autoagents/actions/action_bank/design_api.py": "d3db032e9554b94d2b98289cd032896cdb60ffb78131e94dcc38a345fc069a00",
       "autoagents/actions/action_bank/project_management.py": "d647ac57c091ba3a0c6c5f61cfeb6139afe1691692a22c37019deed8f2407c66",
       "autoagents/actions/action_bank/requirement.py": "f64658045326451452d9560614b1558251c68efde8701c7ceb7a50084cdf61ac",
-      "autoagents/actions/action_bank/search_and_summarize.py": "a97dcad345565217be5ea8317571b9268c9c85406d36f7990da46395da9e761b",
+      "autoagents/actions/action_bank/search_and_summarize.py": "2f3df2557f7208aa375c94c999ac6b56070dfe04b28382bf08972293925f2607",
       "autoagents/actions/action_bank/write_code.py": "4ba4890badb25feab88200b1b224942b454eb09a829ba78d0be8ecb1ab8d02b5",
       "autoagents/actions/action_bank/write_code_review.py": "a937fd7ea1e16f689d02037db86bc9b18f76fd88315cf2d9ee5f76e5aaca64ed",
       "autoagents/actions/action_bank/write_prd.py": "91b774b5641c5f268b1b2d95f524e362437609bd75a7873da23bdf135d20884d",
@@ -150,7 +150,8 @@
       "setup.py": "9c1ae8b1cb978f983d89cc91a5249aa682f9bb116a6ba03ea5eae85a6f7c6850",
       "startup.py": "adb511450979efd4d5c3808c6463d8f643f70dd60f5cc291fcdada3230da32a3",
       "ws_service.py": "0504e829609bbc3b963d540edc75edfd37a3131c6178e53044b9bf49a884137c"
-    }
+    },
+    "patch": "patches/autoagents-custom-search.patch"
   },
   "EvoAgent": {
     "repository": "https://github.com/siyuyuan/evoagent.git",

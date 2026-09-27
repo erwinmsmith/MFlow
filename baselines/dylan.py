@@ -22,6 +22,7 @@ class DyLAN:
         previous=openai.ChatCompletion.create;openai.ChatCompletion.create=generate
         old_argv=sys.argv;old_cwd=Path.cwd()
         try:
+            RUNS.mkdir(parents=True,exist_ok=True)
             with tempfile.TemporaryDirectory(prefix='dylan-',dir=RUNS) as scratch:
                 data=Path(scratch)/'inputs';data.mkdir()
                 # The upstream script stores this unused reference in its output; real gold stays in the evaluator.

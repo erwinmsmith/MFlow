@@ -1,0 +1,21 @@
+diff --git a/autoagents/actions/action_bank/search_and_summarize.py b/autoagents/actions/action_bank/search_and_summarize.py
+index 5430b8c..84d7c4e 100644
+--- a/autoagents/actions/action_bank/search_and_summarize.py
++++ b/autoagents/actions/action_bank/search_and_summarize.py
+@@ -12,6 +12,7 @@ import cfg
+ from autoagents.system.logs import logger
+ from autoagents.system.schema import Message
+ from autoagents.system.tools.search_engine import SearchEngine
++from autoagents.system.tools import SearchEngineType
+ 
+ SEARCH_AND_SUMMARIZE_SYSTEM = """### Requirements
+ 1. Please summarize the latest dialogue based on the reference information (secondary) and dialogue history (primary). Do not include text that is irrelevant to the conversation.
+@@ -115,7 +116,7 @@ class SearchAndSummarize(Action):
+         no_google = not cfg.GOOGLE_API_KEY or 'YOUR_API_KEY' == cfg.GOOGLE_API_KEY
+         no_self_serpapi = self.serpapi_api_key is None
+ 
+-        if no_serpapi and no_google and no_serper and no_self_serpapi:
++        if self.engine != SearchEngineType.CUSTOM_ENGINE and no_serpapi and no_google and no_serper and no_self_serpapi:
+             logger.warning('Configure one of SERPAPI_API_KEY, SERPER_API_KEY, GOOGLE_API_KEY to unlock full feature')
+             return ""
+         
