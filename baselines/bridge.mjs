@@ -10,11 +10,13 @@ const out=resolve(root,'runs/baselines-math'); mkdirSync(out,{recursive:true});
 const log=resolve(out,'usage.jsonl'), mf=resolve(root,'runs/math-search-v2-20260927-02/test');
 const prior=3543561, budget=new TokenBudget(30000000-prior), episodes=new Map(), phases=new Map();
 const allowed=new Set(['AFlow','DyLAN','AutoAgents','EvoAgent']);
+// Optimizer prompts are search-level work, not one benchmark episode.
+const episodeLimit=(method,phase,taskId)=>method==='AFlow'&&phase==='search'&&taskId.startsWith('optimizer-round-')?2280742:24000;
 function append(file, value) { appendFileSync(resolve(out,file),JSON.stringify(value)+'\n'); }
 function scopeBudget(map,key,limit) { if(!map.has(key)) map.set(key,new TokenBudget(limit)); return map.get(key); }
 const previous=existsSync(log)?readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse):[];
 for(const r of previous) {
-  for(const b of [budget,scopeBudget(episodes,r.episode,24000),scopeBudget(phases,r.phase, r.phase==='AFlow:search'?2280742:30000000)]) {
+  for(const b of [budget,scopeBudget(episodes,r.episode,episodeLimit(r.method,r.phase.split(':')[1],r.taskId)),scopeBudget(phases,r.phase, r.phase==='AFlow:search'?2280742:30000000)]) {
     b.reserve(r.charged,{runId:r.episode})({totalTokens:r.charged});
   }
 }
@@ -28,7 +30,7 @@ const provider={async invoke(input,options) {
   const {method,phase,taskId}=input.metadata;
   const key=`${method}:${phase}:${taskId}`, phaseKey=`${method}:${phase}`;
   const estimate=Buffer.byteLength(JSON.stringify(input),'utf8')+input.generation.maxTokens+1024;
-  const episode=scopeBudget(episodes,key,24000),phaseBudget=scopeBudget(phases,phaseKey,phaseKey==='AFlow:search'?2280742:30000000);
+  const episode=scopeBudget(episodes,key,episodeLimit(method,phase,taskId)),phaseBudget=scopeBudget(phases,phaseKey,phaseKey==='AFlow:search'?2280742:30000000);
   if(estimate>budget.remaining-mflowReserve())throw new Error('GLOBAL_BUDGET');
   if(estimate>phaseBudget.remaining)throw new Error('SEARCH_BUDGET');
   if(estimate>episode.remaining)throw new Error('EPISODE_BUDGET');

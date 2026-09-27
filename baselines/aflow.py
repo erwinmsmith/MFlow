@@ -19,6 +19,7 @@ AsyncLLM.__call__=invoke
 # Python execution and web search are excluded from the common-tool comparison.
 optimizer=Optimizer(dataset='MATH',question_type='math',opt_llm_config=config,exec_llm_config=config,operators=['Custom','ScEnsemble'],sample=4,check_convergence=False,optimized_path='workspace',initial_round=1,max_rounds=4,validation_rounds=1)
 phase='pilot' if args.phase=='pilot' else 'search'
+recovered_initial={}
 async def load_data(self,specific_indices=None):
     rows=tasks('test' if phase=='test' else 'search')
     if phase=='pilot':rows=rows[:2]
@@ -29,7 +30,11 @@ async def evaluate_all(self,data,agent,max_concurrent_tasks=1):
 BaseBenchmark.evaluate_all_problems=evaluate_all
 async def evaluate(self,problem,agent):
     round_name=Path(self.log_path).name
-    execution_id=problem['id'] if phase=='test' else round_name+'/'+problem['id']
+    if phase=='search' and round_name=='round_1' and problem['id'] in recovered_initial:
+        row=recovered_initial[problem['id']]
+        self.charged=getattr(self,'charged',0)+row['tokens']
+        return problem['problem'],row['answer'],problem['solution'],row['score'],float(self.charged)
+    execution_id=round_name+'/'+problem['id']
     token=SCOPE.set(('AFlow',phase,execution_id));status='completed';output='';started=time.monotonic()
     try:
         try:output,_=await self._generate_output(agent,problem['problem'])
@@ -43,7 +48,7 @@ async def evaluate(self,problem,agent):
         if score==0 and phase=='search':self.log_mismatch(problem['problem'],problem['solution'],output,output)
         print(json.dumps({'phase':phase,'round':round_name,'taskId':problem['id'],'score':score,'tokens':charged}),flush=True)
         self.charged=getattr(self,'charged',0)+charged
-        return problem['problem'],output,problem['solution'],score,self.charged
+        return problem['problem'],output,problem['solution'],score,float(self.charged)
     finally:SCOPE.reset(token)
 MATHBenchmark.evaluate_problem=evaluate
 async def main():
@@ -62,7 +67,13 @@ async def main():
             if hashlib.sha256(Path(workflows,f'round_{number}',name).read_bytes()).hexdigest()!=digest:raise RuntimeError('Frozen workflow changed')
         await test(number,out,workflows)
         return
-    if (out/'search/results.jsonl').exists():raise RuntimeError('Interrupted search requires inspection; refuse duplicate evaluations')
+    if (out/'search/results.jsonl').exists():
+        saved=[json.loads(s) for s in (out/'search/results.jsonl').read_text().splitlines()]
+        if len(saved)!=119 or {r['taskId'] for r in saved}!={t['id'] for t in tasks('search')} or any(r['round']!='round_1' for r in saved) or Path(workflows,'round_2/graph.py').exists():
+            raise RuntimeError('Interrupted candidate search requires inspection; refuse duplicate evaluations')
+        recovered_initial.update({r['taskId']:r for r in saved})
+        # Rebuild the failed metadata write from paid results, without repeating model calls.
+        Path(workflows,'results.json').write_text('[]\n')
     stop='iterations'
     for round_number in range(1,5):
         optimizer.round=round_number

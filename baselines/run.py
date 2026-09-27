@@ -1,5 +1,5 @@
 import argparse, asyncio, contextlib, json, os, random, sys, time
-from bench_common import ROOT, RUNS, SCOPE, BudgetStop, tasks, grade, save_row, usage, freeze_run
+from bench_common import ROOT, RUNS, SCOPE, BudgetStop, TransportFailure, tasks, grade, save_row, usage, freeze_run
 p=argparse.ArgumentParser();p.add_argument('method',choices=['DyLAN','EvoAgent','AutoAgents']);p.add_argument('--phase',choices=['pilot','test'],required=True);p.add_argument('--limit',type=int);a=p.parse_args()
 if a.phase=='test' and a.limit:p.error('Official test must use all 486 tasks')
 random.seed(42)
@@ -25,8 +25,11 @@ for t in rows:
         status=e.reason
         if 'GLOBAL_BUDGET' in status or 'SEARCH_BUDGET' in status:print(status,flush=True);sys.exit(2)
         answer=method.final()
-    except Exception as e:
+    except TransportFailure as e:
         save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])});raise
+    except Exception as e:
+        status='execution_error: '+repr(e);answer=''
+        save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])})
     row={'taskId':t['id'],'score':grade(t,answer),'answer':answer,'status':status,'tokens':usage(a.method,a.phase,t['id']),'seconds':time.monotonic()-started}
     save_row(result,row);print(json.dumps({k:row[k] for k in ['taskId','score','status','tokens']}),flush=True)
 all_rows=[json.loads(s) for s in result.read_text().splitlines()]

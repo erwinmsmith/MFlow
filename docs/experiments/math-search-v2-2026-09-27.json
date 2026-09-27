@@ -29,7 +29,7 @@
     "priorUsagePlusConservativeFailedCallAllowance": 1262819,
     "searchCeiling": 12000000
   },
-  "conclusion": "s4 selected on validation: 106/119 versus root 98/119. Full 486-task frozen held-out evaluation started; no test outcome or generalization claim yet.",
+  "conclusion": "Partial frozen test shows a positive same-trajectory improvement over initial root answers; not an independent ablation or evidence of beating baselines. AFlow initial validation scored 114/119 versus MFlow selected 106/119. No test-driven strategy or prompt changes.",
   "formatFailureDiagnostic": {
     "completedValidationTasks": 65,
     "tokens": 88042,
@@ -129,5 +129,54 @@
     "priorTokensConservative": 3543561,
     "testEpisodeBudgetSum": 11664000,
     "selectionFrozenBeforeTest": true
+  },
+  "testProgress": {
+    "asOf": "2026-09-27T11:53:40.349002+00:00",
+    "completedSnapshot": 396,
+    "plannedCount": 486,
+    "initialRootCorrect": 324,
+    "beforeFirstChildCorrect": 336,
+    "finalCorrect": 355,
+    "reviewStage": {
+      "corrected": 15,
+      "harmed": 3,
+      "unchanged": 378
+    },
+    "afterSpawnStage": {
+      "corrected": 21,
+      "harmed": 2,
+      "unchanged": 373
+    },
+    "wholeWorkflow": {
+      "corrected": 36,
+      "harmed": 5,
+      "unchanged": 355
+    },
+    "tasksWithSpawn": 394,
+    "spawnedAgents": 409,
+    "tasksWithEvidenceDelivered": 379,
+    "tasksWithRootTurnAfterChild": 362,
+    "tokens": 3436978,
+    "stopReasons": {
+      "strategy": 332,
+      "tokens": 64
+    },
+    "limitation": "Partial ordered test subset; same-trajectory stage comparison, not an independent baseline/ablation or causal estimate. No model calls or tuning.",
+    "meanTokens": 8679.237373737375,
+    "spawnWithoutRootIntegration": 32,
+    "stopReasonLimitation": "tokens merges output truncation and episode budget limits; this run does not record finer causes."
+  },
+  "baselineInitialValidation": {
+    "AFlow": {
+      "count": 119,
+      "correct": 114,
+      "tokens": 103728,
+      "phase": "initial workflow, before optimization"
+    },
+    "MFlowSelected": {
+      "count": 119,
+      "correct": 106
+    },
+    "limitation": "Validation-only comparison; methods have different prompting and output protocols, full selected test is pending."
   }
 }

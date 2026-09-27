@@ -39,9 +39,12 @@ AutoAgents 和 EvoAgent 此入口没有原生 MATH 数据加载器；因此需�
 - `.env` 仅由本机 `baselines/bridge.mjs` 读取；Python 进程只连接 `127.0.0.1:8197`，不持有真实 key。`.env`、原始题目输出、运行日志、虚拟环境不提交。
 - 计费桥在已有 3,543,561 历史 tokens 上计费，并为 MFlow test 剩余题按每题 24000 tokens 留足额度。所有基线的成功、失败及 pilot 调用都记账；未知 usage 的失败按预留额计费。
 - 账本为 `runs/baselines-math/usage.jsonl`；AFlow search 含候选生成与验证调用。原生 AFlow CSV 的 cost 单位在本适配中为 token，最终成本以公共账本为准。
+- AFlow 优化器请求受搜索总预算约束，不套 benchmark 单题 24000 上限；候选工作流解题仍受单题上限约束。早期桥误套该上限，导致原始流程提前进入 test；这些记录已隔离到 `AFlow/initial-only-diagnostic/`，计费保留，不混入正式选优 test。
 - `/status` 的 spent 仅为新基线账本；mflowReserved 为 MFlow test 已用加未完成题预留；remaining 已扣历史、基线与 MFlow 预留，不等于尚未实际消费的全部额度。
 - 运行中不要重启计费桥；意外退出后先核对供应商与本地账本，在途请求可能尚未写入终态记录。只有一个桥可占用此端口。
-- 三个直接 test 的 runner 可跳过已完成题续跑。AFlow 冻结后可续跑 test；搜索意外中断会要求先检查日志，避免盲目重跑付费候选。全局额度不足会停机，不能将未跑完的部分标为完整结果。
+- 三个直接 test 的 runner 可跳过已完成题续跑。原生角色/输出解析失败记为 execution_error、得分 0 并继续下一题，不重试以挑选更好的输出；传输错误仍停机检查。AutoAgents 首次此类失败已从 errors 记录补入结果，消耗没有重复。
+- AFlow 初始 119 题全部完成后发生 NumPy 整数序列化错误：适配器已将累计成本转为 Python float。完整初始结果可重建元数据并复用，无需再次调用模型；生成候选后的搜索中断仍要求检查。冻结后可续跑 test。全局额度不足会停机，不能将未跑完的部分标为完整结果。
+- 上述基础设施恢复保留原 manifest / manifest-history 和原因；没有依据 test 成绩更改原生提示词、策略、模型、单题限制或评分器。
 
 ## 环境与执行
 
