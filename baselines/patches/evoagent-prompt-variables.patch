@@ -1,0 +1,9 @@
+diff --git a/spp/agent_prompt_logic.py b/spp/agent_prompt_logic.py
+index 44cf503..cde6e64 100644
+--- a/spp/agent_prompt_logic.py
++++ b/spp/agent_prompt_logic.py
+@@ -161,3 +161,3 @@ Answer:
+ spp_agent_prompt = PromptTemplate(
+-    input_variables=["query", "option", "suggestion"],
++    input_variables=["question", "suggestion"],
+     template=SPP_INSTRUCTION,

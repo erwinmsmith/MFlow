@@ -29,6 +29,8 @@ AFlow 式失败反馈提议、独立复核、完整派生与整合操作见 [搜
 
 详见 [Ditto 通用能力需求](docs/ditto-requirements.md) 和 [架构与实验协议](docs/architecture.md)。
 
+官方 AFlow、DyLAN、AutoAgents、EvoAgent 的源码复用入口、统一 MATH 划分、30M 总预算和复现命令见 [baseline 对比协议](docs/baseline-comparison.md)。
+
 ## 安装和验证
 
 需要 Node.js 24+、npm 11+。
