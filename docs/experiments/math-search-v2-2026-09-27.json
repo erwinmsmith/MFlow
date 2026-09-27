@@ -1,5 +1,5 @@
 {
-  "status": "validation_search_running",
+  "status": "held_out_test_running",
   "benchmark": "MATH",
   "model": "deepseek-flash",
   "dittoVersion": "0.1.1",
@@ -29,11 +29,105 @@
     "priorUsagePlusConservativeFailedCallAllowance": 1262819,
     "searchCeiling": 12000000
   },
-  "conclusion": "No measured full-validation search improvement claimed yet.",
+  "conclusion": "s4 selected on validation: 106/119 versus root 98/119. Full 486-task frozen held-out evaluation started; no test outcome or generalization claim yet.",
   "formatFailureDiagnostic": {
     "completedValidationTasks": 65,
     "tokens": 88042,
     "status": "aborted_invalid_json",
     "fix": "One metered format-only repair; complete validation restarted under a new execution version"
+  },
+  "searchSummary": {
+    "stopReason": "iterations",
+    "executions": 576,
+    "tokens": 2280742,
+    "incumbent": "s4",
+    "utility": 0.8907563025210085
+  },
+  "validationResults": [
+    {
+      "id": "s0",
+      "parent": null,
+      "edit": null,
+      "count": 119,
+      "correct": 98,
+      "accuracy": 0.8235294117647058,
+      "meanLogicalTokens": 1489.4621848739496,
+      "correctedAgainstRoot": 0,
+      "harmedAgainstRoot": 0
+    },
+    {
+      "id": "s1",
+      "parent": "s0",
+      "edit": "NONE:review-then-delegate-open-issues",
+      "count": 119,
+      "correct": 100,
+      "accuracy": 0.8403361344537815,
+      "meanLogicalTokens": 3304.983193277311,
+      "correctedAgainstRoot": 2,
+      "harmedAgainstRoot": 0
+    },
+    {
+      "id": "s2",
+      "parent": "s1",
+      "edit": "NONE:independent-solution-deliver-integrate",
+      "count": 119,
+      "correct": 102,
+      "accuracy": 0.8571428571428571,
+      "meanLogicalTokens": 8596.848739495797,
+      "correctedAgainstRoot": 7,
+      "harmedAgainstRoot": 3
+    },
+    {
+      "id": "s3",
+      "parent": "s0",
+      "edit": "NONE:independent-review",
+      "count": 119,
+      "correct": 101,
+      "accuracy": 0.8487394957983193,
+      "meanLogicalTokens": 3376.621848739496,
+      "correctedAgainstRoot": 3,
+      "harmedAgainstRoot": 0
+    },
+    {
+      "id": "s4",
+      "parent": "s2",
+      "edit": "NONE->REVIEW",
+      "count": 119,
+      "correct": 106,
+      "accuracy": 0.8907563025210085,
+      "meanLogicalTokens": 8384.033613445377,
+      "correctedAgainstRoot": 8,
+      "harmedAgainstRoot": 0
+    }
+  ],
+  "frozenTest": {
+    "startedAt": "2026-09-27T10:44:12.028053+00:00",
+    "gitCommit": "a5bbb68f5a8e75ac8c557c4fd7987ee2cdf01c31",
+    "bundleSha256": "cc617a58a2e79c86a0f0ee3a3ce82d1935e331ab82047f69952c5f8d07e3ef11",
+    "executionVersion": "8ed368b35ead11abfbab0d08de72b4f33c6872a1b6c5b87de892261986ef95ab",
+    "model": {
+      "model": "deepseek-flash",
+      "baseUrl": "https://api.deepseek.com",
+      "temperature": 0,
+      "seed": 42
+    },
+    "protocol": "standard",
+    "testCount": 486,
+    "testFileSha256": "f70ee9bf452002843a7896a8297529a475e1f8f554a6bb7ae9317399ebfbec68",
+    "graderSha256": "9c2613a57142275f7448211f21fc9a5470435512c9b8d213f8c2f3efb4e1100e",
+    "episode": {
+      "maxSteps": 12,
+      "maxActiveAgents": 4,
+      "maxPoolAgents": 12,
+      "maxDepth": 3,
+      "maxTokens": 24000,
+      "maxOutputTokens": 4096,
+      "maxToolCalls": 4,
+      "timeoutMs": 90000
+    },
+    "overallTokenCeiling": 30000000,
+    "priorTokensConservative": 3543561,
+    "testEpisodeBudgetSum": 11664000,
+    "selectionFrozenBeforeTest": true
   }
 }
