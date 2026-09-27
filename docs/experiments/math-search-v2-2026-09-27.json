@@ -1,0 +1,33 @@
+{
+  "status": "validation_search_running",
+  "benchmark": "MATH",
+  "model": "deepseek-flash",
+  "dittoVersion": "0.1.1",
+  "implementationCommit": "2d195ff0f77b358996fe8db222c63a8fd7ba5244",
+  "searchTasks": 119,
+  "testTasks": 486,
+  "config": "configs/math-search-v2.json",
+  "dataProtocol": "Pinned original AFlow membership; no held-out test feedback used for changes",
+  "localRun": "runs/math-search-v2-20260927-01",
+  "diagnostic": {
+    "purpose": "Eight selected validation tasks; mechanism check, not a benchmark estimate",
+    "tasks": 8,
+    "tasksWithSpawn": 7,
+    "actualTokens": 64205,
+    "limitations": "Diagnostic predates final independent unanchored prompt and text-answer grading repair; diagnostic scores are not used as full-run results."
+  },
+  "previousRun": {
+    "searchBaselineCorrect": 88,
+    "searchBaselineCount": 119,
+    "searchDerivedAgents": 0,
+    "testStatus": "aborted_invalid_model_json",
+    "testCompletedRows": 345,
+    "testIsNotComplete": true
+  },
+  "budget": {
+    "overallCeiling": 30000000,
+    "priorUsagePlusConservativeFailedCallAllowance": 1174777,
+    "searchCeiling": 12000000
+  },
+  "conclusion": "No measured full-validation search improvement claimed yet."
+}

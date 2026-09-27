@@ -69,7 +69,10 @@ test("AFlow-style proposals use validation feedback and execute only legal compl
 test("a searchable independent challenge can spawn even when Root reports no gap", async () => {
   const fake = new ScriptedProvider((input) => {
     const { kind, payload } = request(input);
-    if (kind === "factory") return { ...rootProfile, id: payload.id };
+    if (kind === "factory") {
+      assert.equal(payload.parent_evidence, undefined, "Independent solution must not be anchored to the parent answer");
+      return { ...rootProfile, id: payload.id };
+    }
     if (payload.profile.id !== "root") return { ...output("56"), artifacts: [{ id: "independent", type: "calculation", content: "7*8=56", deficit_refs: [payload.assigned.id] }] };
     return payload.incoming.length ? output("56", [], payload.owned_deficits.map((d: { id: string }) => d.id)) : output("0");
   });
