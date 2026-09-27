@@ -94,6 +94,7 @@ export class OrganizationRuntime {
     const retrievalAttempts = new Set<string>(restored?.retrievalAttempts);
     let peakActive = restored?.peakActive ?? 1,
       stopReason: Execution["stopReason"] = "steps";
+    let stopDetail: Execution["stopDetail"];
     const tokens = () =>
       (restored?.tokens ?? 0) +
       this.agents.provider.logicalTokens -
@@ -409,12 +410,13 @@ export class OrganizationRuntime {
         trace.push({ state: snapshot, decision, event });
       }
     } catch (error) {
-      if (error instanceof EpisodeExhausted) stopReason = "tokens";
+      if (error instanceof EpisodeExhausted) { stopReason = "tokens"; stopDetail = error.reason; }
       else throw error;
     } finally {
       this.agents.provider.endEpisode();
     }
     if (tokens() >= this.limits.maxTokens) stopReason = "tokens";
+    if (stopReason === "tokens" && !stopDetail) stopDetail = "episode_budget";
     return {
       taskId: task.id,
       strategyId: strategy.id,
@@ -436,6 +438,7 @@ export class OrganizationRuntime {
       peakActive,
       depth: Math.max(...population.map((a) => a.depth)),
       stopReason,
+      ...(stopDetail ? { stopDetail } : {}),
     };
   }
 }

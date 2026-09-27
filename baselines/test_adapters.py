@@ -4,6 +4,9 @@ import io
 import json
 import tempfile
 import unittest
+import runpy
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +17,20 @@ from repairs import parse_roles, validate_workflow, validate_role_plan
 
 
 class AdapterTests(unittest.TestCase):
+    def test_provider_output_limit_records_failed_task_and_continues(self):
+        class Method:
+            def solve(self,prompt):
+                if prompt=='first':raise common.TransportFailure('Provider context/output ceiling reached; response is incomplete')
+                return 'ok'
+        with tempfile.TemporaryDirectory() as folder:
+            rows=[{'id':'one','prompt':'first'},{'id':'two','prompt':'second'}]
+            with patch.object(common,'RUNS',Path(folder)),patch.object(common,'tasks',return_value=rows),patch.object(common,'freeze_run'),patch.object(common,'usage',return_value=20),patch.object(common,'grade',side_effect=lambda task,answer:int(answer=='ok')),patch.dict(sys.modules,{'dylan':types.SimpleNamespace(DyLAN=Method)}),patch.object(sys,'argv',['run.py','DyLAN','--phase','test']),contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(common.ROOT/'baselines/run.py'))
+            records=[json.loads(s) for s in (Path(folder)/'DyLAN/test/results.jsonl').read_text().splitlines()]
+            self.assertEqual([r['status'] for r in records],['provider_output_limit','completed'])
+            self.assertEqual([r['score'] for r in records],[0,1])
+            self.assertEqual(sum(r['tokens'] for r in records),40)
+
     def test_roles_ignore_question_braces_and_keep_braces_in_strings(self):
         role={'name':'Math_Expert','description':'math','tools':[],'suggestions':'check','prompt':'Prove {x} = {y}'}
         text='## Question or Task\nFind {x} in {1,2}.\n## Created Roles List\n'+json.dumps(role)+'\n## Execution Plan\n1. Math_Expert: solve'

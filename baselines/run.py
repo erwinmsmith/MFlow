@@ -16,6 +16,15 @@ rows=tasks('search' if a.phase=='pilot' else 'test');rows=rows[:a.limit] if a.li
 out=RUNS/a.method/a.phase;out.mkdir(parents=True,exist_ok=True);result=out/'results.jsonl'
 freeze_run(out,a.method,a.phase)
 done={r['taskId'] for r in map(json.loads,result.read_text().splitlines())} if result.exists() else set()
+provider_limit='Provider context/output ceiling reached; response is incomplete'
+# Recover terminal output-limit failures from older runners without buying the same failed task again.
+if (out/'errors.jsonl').exists():
+    previous={r['taskId']:r for r in map(json.loads,(out/'errors.jsonl').read_text().splitlines())}
+    for t in rows:
+        failure=previous.get(t['id'])
+        if t['id'] not in done and failure and provider_limit in failure['error']:
+            save_row(result,{'taskId':t['id'],'score':0,'answer':'','status':'provider_output_limit','tokens':usage(a.method,a.phase,t['id']),'seconds':None,'recoveredFailure':True})
+            done.add(t['id'])
 for t in rows:
     if t['id'] in done:continue
     SCOPE.set((a.method,a.phase,t['id']));started=time.monotonic();status='completed';answer=''
@@ -26,11 +35,13 @@ for t in rows:
         if 'GLOBAL_BUDGET' in status or 'SEARCH_BUDGET' in status:print(status,flush=True);sys.exit(2)
         answer=method.final()
     except TransportFailure as e:
-        save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])});raise
+        save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])})
+        if provider_limit in str(e):status='provider_output_limit'
+        else:raise
     except Exception as e:
         status='execution_error: '+repr(e);answer=''
         save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])})
     row={'taskId':t['id'],'score':grade(t,answer),'answer':answer,'status':status,'tokens':usage(a.method,a.phase,t['id']),'seconds':time.monotonic()-started}
     save_row(result,row);print(json.dumps({k:row[k] for k in ['taskId','score','status','tokens']}),flush=True)
 all_rows=[json.loads(s) for s in result.read_text().splitlines()]
-(out/'summary.json').write_text(json.dumps({'method':a.method,'phase':a.phase,'count':len(all_rows),'correct':sum(r['score'] for r in all_rows),'tokens':sum(r['tokens'] for r in all_rows)},indent=2)+'\n')
+(out/'summary.json').write_text(json.dumps({'method':a.method,'phase':a.phase,'count':len(all_rows),'correct':sum(r['score'] for r in all_rows),'failed':sum(r['status']!='completed' for r in all_rows),'tokens':sum(r['tokens'] for r in all_rows)},indent=2)+'\n')

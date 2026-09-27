@@ -12,6 +12,7 @@
 - AFlow 调用官方 `Optimizer.optimize('Graph')`，恢复入口默认的最多 20 轮、收敛检测、每轮 1 次完整 validate 和 Custom / ScEnsemble / Programmer 算子。
 - DyLAN 保留原生 4 agent、3 轮与共识停止；EvoAgent 保留原生默认 3 次专家迭代；AutoAgents 保留原生团队/管理/执行控制。取消的是外加资源限制，原算法的停止规则继续保留。
 - 全部调用记录 usage，不因预算提前返回中间答案。遇到供应商真正的长度上限会明确报未完成，不能伪装完整输出。
+- 实际出现约 393k 输出 token 的重复推导后，DyLAN/EvoAgent runner 曾整体退出。现将这类终态记为单题 `provider_output_limit`（失败、空答案、全额成本），继续后续题目；恢复时不重复购买已经记录的硬上限失败。AutoAgents 使用同一 runner；AFlow 保留原生重试规则。不是把部分答案当完成，也未加新的输出额度。
 
 ## 修复内容
 
@@ -57,6 +58,6 @@ node baselines/bridge.mjs
 
 每次正式运行锁定源文件、依赖、数据和评分器。`requests.jsonl` 在发出请求前记 request ID；`usage.jsonl` 记录完成后的实际 usage，未知 usage 单独标记并保守估计，不能混同精确实耗。崩溃恢复时可对账无终态的 request ID。网页搜索不计模型 tokens，其摘要与查询压缩模型调用仍计费。
 
-已验证：6 项离线适配检查；原工程测试（指定实验 Python 评分环境）40 通过、1 跳过、0 失败；跳过项为 Docker 代码评分集成测试；四种方法验证集试跑均完成；真实联网通过 Ditto 工具返回结果，并通过原生 AutoAgents SearchAndSummarize 链路。试跑用于功能检查，不作为性能结论。
+已验证：7 项离线适配检查；原工程测试（指定实验 Python 评分环境，含搜索 v3）44 通过、1 跳过、0 失败；跳过项为 Docker 代码评分集成测试；四种方法验证集试跑均完成；真实联网通过 Ditto 工具返回结果，并通过原生 AutoAgents SearchAndSummarize 链路。试跑用于功能检查，不作为性能结论。
 
 这轮与 MFlow 的固定 24k 单题预算、工具条件不同，应报告为**取消额外限制的基线对比**，同时报告成本与失败率，不能标成计算预算完全匹配的实验。

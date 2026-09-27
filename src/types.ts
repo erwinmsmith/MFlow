@@ -182,6 +182,7 @@ export interface Execution {
   peakActive: number;
   depth: number;
   stopReason: "strategy" | "steps" | "tokens";
+  stopDetail?: "episode_budget" | "output_limit" | "reasoning_token_limit";
 }
 
 export const taskSchema = z
@@ -248,6 +249,8 @@ export const searchConfigSchema = z
     temperature: z.number().positive().default(0.05),
     topParents: z.number().int().positive().default(4),
     patience: z.number().int().positive().default(5),
+    convergence: z.boolean().default(false),
+    minIterations: z.number().int().positive().default(8),
     informationThreshold: z.number().nonnegative().default(0.001),
     meanTokenLimit: z.number().positive().default(16000),
     meanActiveAgentLimit: z.number().positive().default(4),

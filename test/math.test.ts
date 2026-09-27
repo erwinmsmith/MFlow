@@ -31,8 +31,15 @@ test("a truncated model response exhausts only its episode, not the experiment",
     model: "fixture", baseUrl: "https://invalid.example", temperature: 0, seed: 42,
   }), limitsSchema.parse({})).run(initialStrategy, { id: "truncated", prompt: "q" });
   assert.equal(result.stopReason, "tokens");
+  assert.equal(result.stopDetail, "output_limit");
   assert.equal(result.answer, "");
   assert.equal(result.actualTokens, 20);
+  const tightProvider = new MeteredProvider({ async invoke() { throw new Error("must not call provider after reservation denial"); } });
+  const denied = await new OrganizationRuntime(new DittoAgents(tightProvider, {
+    model: "fixture", baseUrl: "https://invalid.example", temperature: 0, seed: 42,
+  }), limitsSchema.parse({ maxTokens: 1 })).run(initialStrategy, { id: "denied", prompt: "q" });
+  assert.equal(denied.stopDetail, "episode_budget");
+  assert.equal(tightProvider.calls, 0);
 });
 
 

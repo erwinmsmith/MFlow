@@ -1,0 +1,33 @@
+{
+  "seed": 42,
+  "variant": "mia-full",
+  "maxIterations": 20,
+  "maxExecutions": 2600,
+  "maxSearchTokens": 9007199254740991,
+  "batchSize": 5,
+  "minObservations": 3,
+  "monteCarloSamples": 1000,
+  "exploration": 0.3,
+  "temperature": 0.05,
+  "topParents": 4,
+  "patience": 5,
+  "informationThreshold": 0.001,
+  "meanTokenLimit": 24000,
+  "meanActiveAgentLimit": 4,
+  "episode": {
+    "maxSteps": 12,
+    "maxActiveAgents": 4,
+    "maxPoolAgents": 12,
+    "maxDepth": 3,
+    "maxTokens": 24000,
+    "maxOutputTokens": 4096,
+    "maxToolCalls": 4,
+    "timeoutMs": 90000
+  },
+  "prefixCache": true,
+  "agentCache": false,
+  "protocol": "standard",
+  "proposalMode": "aflow",
+  "convergence": true,
+  "minIterations": 8
+}

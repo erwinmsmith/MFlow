@@ -22,6 +22,7 @@ import { grade, checkScoring } from "./grading.js";
 import { BudgetExhausted, type ModelSettings } from "./ditto.js";
 import { Random, append, digest, mean, save } from "./util.js";
 import { SEARCH_PROMPT } from "./prompts.js";
+import { behavior, experience, searchExperience, stableTopScores } from "./search-feedback.js";
 
 export interface SearchNode {
   id: string;
@@ -201,6 +202,7 @@ export class Search {
         : undefined;
     let stale = 0,
       stopReason = "iterations";
+    const topScoreHistory: number[] = [];
     const filtered = ["mia-space", "mia-full"].includes(this.config.variant),
       active = ["mia-acq", "mia-full"].includes(this.config.variant);
     for (
@@ -231,7 +233,8 @@ export class Search {
           return { parent, edits };
         })
         .filter((x) => x.edits.length)
-        .sort((a, b) => (b.parent.utility ?? 0) - (a.parent.utility ?? 0));
+        .sort((a, b) => (b.parent.utility ?? 0) - (a.parent.utility ?? 0) ||
+          mean(a.parent.results.map((r) => r.execution.tokens)) - mean(b.parent.results.map((r) => r.execution.tokens)));
       const frontier = fullFrontier.slice(0, this.config.topParents);
       if (!frontier.length) {
         stopReason = "grammar-exhausted";
@@ -249,37 +252,39 @@ export class Search {
           Math.exp(((f.parent.utility ?? 0) - best) / this.config.temperature),
         ),
         sum = weights.reduce((a, b) => a + b, 0);
-      const selected = this.rng.weighted(
-        frontier,
-        weights.map(
+      const probabilities = weights.map(
           (w) =>
             ((1 - this.config.exploration) * w) / sum +
             this.config.exploration / frontier.length,
-        ),
       );
+      const selected = this.rng.weighted(frontier, probabilities);
       const parent = selected.parent;
       let edits = selected.edits;
       if (this.config.proposalMode === "aflow") {
         // Validation feedback informs legal proposals only; it never enters execution prompts.
-        const failures = parent.results.filter((r) => r.score === 0).slice(0, 3).map((r) => ({
+        const failures = this.rng.shuffle(parent.results.filter((r) => r.score === 0)).slice(0, 3).map((r) => ({
+          taskId: r.taskId,
           task: tasks.find((t) => t.id === r.taskId)?.prompt,
           prediction: r.execution.answer, score: r.score,
-          trace: r.execution.trace.slice(0, 8).map((t) => ({ decision: t.decision, deficits: t.state.deficits, event: t.event })),
+          behavior: behavior([r]),
+          trace: r.execution.trace.slice(-8).map((t) => ({ decision: t.decision, deficits: t.state.deficits, event: t.event })),
         }));
         try {
           const proposal = await this.runtime.agents.structured("mutation-proposal", SEARCH_PROMPT, {
             parent: parent.strategy, validationAccuracy: parent.utility,
             failure_examples: failures,
-            experience: this.nodes.slice(-10).map((n) => ({ id: n.id, parent: n.parent, edit: n.mutation?.description,
-              status: n.status, accuracy: n.utility, reason: n.reason })),
+            experience: searchExperience(parent, this.nodes),
+            parentBehavior: behavior(parent.results),
             legal_edits: edits.map(({ edit, affected }) => ({ id: edit.id, operator: edit.family,
               description: edit.description, affectedTasks: affected.size })),
           }, z.object({ ids: z.array(z.string()).min(1).max(4), rationale: z.string() }).strict(), this.config.episode);
           const ids = [...new Set(proposal.value.ids)];
           if (ids.some((id) => !edits.some((e) => e.edit.id === id))) throw new Error("Optimizer proposed an illegal edit");
           edits = ids.map((id) => edits.find((e) => e.edit.id === id)!);
-          await append(join(this.out, "proposals.jsonl"), { iteration, parent: parent.id, ...proposal.value });
+          await append(join(this.out, "proposals.jsonl"), { iteration, parent: parent.id,
+            experience: searchExperience(parent, this.nodes), failureTaskIds: failures.map((f) => f.taskId), ...proposal.value });
         } catch (error) {
+          await append(join(this.out, "errors.jsonl"), { phase: "mutation-proposal", iteration, parent: parent.id, error: String(error) });
           await this.persist();
           if (error instanceof BudgetExhausted) { stopReason = "budget"; break; }
           throw error;
@@ -359,6 +364,7 @@ export class Search {
         iteration,
         parent: parent.id,
         child: child.id,
+        parentCandidates: frontier.map((f, i) => ({ id: f.parent.id, accuracy: f.parent.utility, probability: probabilities[i] })),
         edit: editRecord,
         affectedIds: [...choice.affected],
         acquisition: eig[index],
@@ -407,8 +413,9 @@ export class Search {
           child.utility = mean(child.results.map((r) => r.score));
           child.feasible = feasible(child.results, this.config);
           const improves =
-            child.utility > (incumbent?.utility ?? -1) &&
-            child.utility > (parent.utility ?? -1);
+            child.utility > (incumbent?.utility ?? -1) ||
+            (child.utility === incumbent?.utility &&
+              mean(child.results.map((r) => r.execution.tokens)) < mean(incumbent.results.map((r) => r.execution.tokens)));
           if (child.feasible && improves) {
             child.confirmation = [];
             for (const t of confirmation)
@@ -443,6 +450,11 @@ export class Search {
       }
       stale++;
       await this.persist();
+      if (child.status === "evaluated" && child.feasible) {
+        const top = this.nodes.filter((n) => n.status === "evaluated" && n.feasible && n.utility !== undefined)
+          .map((n) => n.utility!).sort((a, b) => b - a).slice(0, 3);
+        if (top.length === 3) topScoreHistory.push(mean(top));
+      }
       await append(join(this.out, "curve.jsonl"), {
         iteration,
         executions: this.executions,
@@ -452,7 +464,14 @@ export class Search {
           ? mean(incumbent.confirmation.map((r) => r.score))
           : null,
         incumbent: incumbent?.id ?? null,
+        outcome: experience(child, this.nodes),
+        topThreeMean: topScoreHistory.at(-1) ?? null,
       });
+      if (this.config.convergence && iteration >= this.config.minIterations &&
+          child.status === "evaluated" && child.feasible && stableTopScores(topScoreHistory, this.config.patience)) {
+        stopReason = "top-three-validation-stable";
+        break;
+      }
       // An evaluated child opens a new frontier; do not infer its saturation from its parent's EIG.
       if (
         active &&
@@ -520,11 +539,14 @@ export class Search {
       tokens: this.runtime.agents.provider.tokens,
       incumbent: incumbent.id,
       utility: incumbent.utility,
+      candidateIterations: this.nodes.length - 1,
+      lineage: searchExperience(incumbent, this.nodes).lineage.map((n) => n.id),
     });
     return bundle;
   }
   private async persist() {
     await save(join(this.out, "tree.json"), this.nodes);
+    await save(join(this.out, "experience.json"), this.nodes.map((n) => experience(n, this.nodes)));
     await save(join(this.out, "posterior.json"), this.posterior.counts);
     await save(
       join(this.out, "usage.json"),

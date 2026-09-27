@@ -27,6 +27,7 @@ import {
 import { OrganizationRuntime } from "./runtime.js";
 import { CanonicalPool } from "./canonical.js";
 import { Search, type Bundle } from "./search.js";
+import { evaluateFrozen } from "./evaluation.js";
 import { save, append, digest, mean } from "./util.js";
 
 const { positionals, values } = parseArgs({
@@ -47,6 +48,7 @@ const { positionals, values } = parseArgs({
     "state-out": { type: "string" },
     name: { type: "string" },
     verify: { type: "boolean" },
+    resume: { type: "boolean" },
   },
 });
 const required = (key: keyof typeof values) => {
@@ -71,6 +73,8 @@ async function outputDirectory(path: string) {
 }
 async function run() {
   const command = positionals[0];
+  if (values.resume && (command !== "evaluate" || (values.protocol && values.protocol !== "standard")))
+    throw new Error("--resume supports frozen standard evaluation only");
   if (command === "benchmarks") {
     const exec = promisify(execFile);
     if (values.seed) throw new Error("AFlow benchmark splits are fixed; --seed cannot resplit them");
@@ -242,6 +246,33 @@ async function run() {
       console.log(`Retaining ${knownSourceOverlaps.length} documented AFlow DROP prompt overlaps for exact split replication.`);
     await checkScoring(tasks);
     const out = required("out");
+    if (protocol === "standard") {
+      const manifest = {
+        bundleHash: digest(bundle), testDataHash: digest(tasks), protocol,
+        gradingCode: digest(await readFile(new URL("./grading.js", import.meta.url), "utf8")),
+        mathGrader: digest(await readFile("scripts/grade_math.py", "utf8")),
+        dependencies: digest(await readFile("package-lock.json", "utf8")),
+        benchmarkPython: process.env.MFLOW_BENCH_PYTHON ?? "python3",
+        pythonEnvironment: (await promisify(execFile)(process.env.MFLOW_BENCH_PYTHON ?? "python3", ["-c",
+          "import sys,json,importlib.metadata as m; print(json.dumps([sys.version, sorted((p.metadata['Name'],p.version) for p in m.distributions())]))"])).stdout.trim(),
+      };
+      const result = await evaluateFrozen({ out, resume: !!values.resume, manifest, tasks, provider,
+        evaluate: async (task) => {
+          const execution = await execute({ id: task.id, prompt: task.prompt });
+          return { taskId: task.id, ...await grade(task, execution.answer), execution };
+        },
+      });
+      await save(join(out, "summary.json"), {
+        strategy: bundle.strategy.id, count: result.rows.length,
+        accuracy: mean(result.rows.map((r) => r.score)),
+        ...(result.rows.some((r) => r.f1 !== undefined) ? { meanF1: mean(result.rows.map((r) => r.f1 ?? 0)) } : {}),
+        meanTokens: mean(result.rows.map((r) => r.execution.tokens)),
+        testDataHash: digest(tasks), knownSourceOverlaps, protocol,
+        actualTokens: result.actualTokens, accounting: result.accounting, usage: result.usage,
+      });
+      console.log(`Test results written to ${out}`);
+      return;
+    }
     await outputDirectory(out);
     const results = [];
     try {
@@ -282,7 +313,7 @@ async function run() {
   benchmarks --name all [--verify]
   prepare --input tasks.jsonl --out data/prepared --seed 42
   search --search data/prepared/search.jsonl --confirmation data/prepared/confirmation.jsonl --config configs/search.json --out runs/search-1
-  evaluate --bundle runs/search-1/best.json --test data/prepared/test.jsonl --out runs/test-1
+  evaluate --bundle runs/search-1/best.json --test data/prepared/test.jsonl --out runs/test-1 [--resume]
   infer --bundle runs/search-1/best.json --question "..."
 Optional search --pool profiles.json; each invocation resets the frozen profile pool.
 Search supports prefixCache and agentCache.

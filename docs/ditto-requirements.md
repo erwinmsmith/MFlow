@@ -52,4 +52,19 @@ TokenBudget 可以严格控制**预留额度**，但无法自行知道任意 pro
 
 ## 后续接入约束
 
-外部资源与 provider 保证完成后：先发布新包 → MFlow 更新 registry lockfile → public API 验收 → 启用对应实验。继续禁止源码依赖、私有模块和 vendoring。当前没有运行真实模型或多 seed benchmark；现有脚本 provider 测试只证明执行协议。
+外部资源与 provider 保证完成后：先发布新包 → MFlow 更新 registry lockfile → public API 验收 → 启用对应实验。继续禁止源码依赖、私有模块和 vendoring。现已启动 DeepSeek Flash 的单 seed MATH 实验；脚本 provider 测试只证明执行协议，多 seed 质量结论尚未建立。
+
+## DITTO-004：长请求流式进度与取消后用量（待支持）
+
+2026-09-27 的全量基线重跑中，存在十多分钟未完成的模型调用；已记录 request ID、开始时间和任务 scope，但目前发布包的 `ModelProvider.invoke` 只有最终响应，`createHttpProvider` 未提供公开的流式增量/进度事件。进程和连接存活不足以证明生成正在推进。
+
+需要的是通用模型传输能力，适用于任何长回答/工具调用，与 spawn 策略无关：
+
+- 公共 opt-in 流式调用或事件回调，区分已发送、收到响应、内容/工具调用增量、完成；携带 run/request ID、时间和供应商 request ID（若有）。
+- 保留最终 `SampleOutput` 兼容接口，正确合并工具参数与输出；增量回调不得泄露 API key，也不得绕过 Sandbox。
+- 区分用户取消、连接空闲、总体期限、供应商输出上限。取消时保留已知 usage 和内容完整性标记；无法知道实耗则明确 unknown。
+- 可配置空闲检测应以实际传输进度为依据；已发送且结果不确定的付费调用不能静默重试或记为零成本。
+
+验收：用分块 HTTP fixture 验证连续输出、长时间无数据、仅 keep-alive、断流、工具参数分块、最终 usage 与主动取消；每条调用记录唯一且准确，回调异常不使计费记录丢失。真实长请求在最终完成前可看到有效进度，完成后与非流式输出和 usage 一致。
+
+本轮仅记录需求，不在 MFlow 里复制 SSE/流式 Provider。待 Ditto 通过 dev → main 更新并发布新包后，再从 registry 更新 MFlow 并验收。

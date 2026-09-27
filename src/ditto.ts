@@ -32,7 +32,7 @@ import {
   type TaskInput,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-explicit-state-v3/arithmetic-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-explicit-state-v4/transport-deadline/stop-detail/arithmetic-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -41,7 +41,9 @@ export interface ModelSettings {
   seed: number;
 }
 export class BudgetExhausted extends Error {}
-export class EpisodeExhausted extends Error {}
+export class EpisodeExhausted extends Error {
+  constructor(message: string, readonly reason: "episode_budget" | "output_limit" | "reasoning_token_limit" = "episode_budget") { super(message); }
+}
 /** All actual admission and settlement is owned by published Ditto. Serial episode facade. */
 export class MeteredProvider implements ModelProvider {
   private budget = new TokenBudget(Number.MAX_SAFE_INTEGER);
@@ -49,6 +51,7 @@ export class MeteredProvider implements ModelProvider {
   private admitted = 0;
   private scope: BudgetScope = { runId: "search" };
   denial?: "search" | "episode";
+  lastFinishReason?: SampleOutput["finishReason"];
   replayTokens = 0;
   replayCalls = 0;
   constructor(
@@ -85,6 +88,7 @@ export class MeteredProvider implements ModelProvider {
     this.episode = new TokenBudget(Math.max(1, limit));
     this.scope = scope;
     this.denial = undefined;
+    this.lastFinishReason = undefined;
   }
   endEpisode() {
     this.episode = undefined;
@@ -109,6 +113,7 @@ export class MeteredProvider implements ModelProvider {
   ): Promise<SampleOutput> {
     options.signal.throwIfAborted();
     this.denial = undefined;
+    this.lastFinishReason = undefined;
     const reservation = this.estimate(input);
     if (reservation > this.budget.remaining) {
       this.denial = "search";
@@ -129,6 +134,7 @@ export class MeteredProvider implements ModelProvider {
     let result: SampleOutput;
     try {
       result = await this.inner.invoke(input, options);
+      this.lastFinishReason = result.finishReason;
     } catch (error) {
       for (const settle of settlements) settle();
       throw error;
@@ -170,6 +176,8 @@ export function httpProvider(
     kind: "openai-compatible",
     baseUrl: settings.baseUrl,
     apiKey: key,
+    // The per-call Limits deadline below owns cancellation. Avoid a hidden 30s HTTP cutoff.
+    timeoutMs: 2147483647,
     ...(deepseek ? {
       maxTokensField: "max_tokens" as const,
       providerOptions: { thinking: { type: "disabled" }, response_format: { type: "json_object" } },
@@ -337,7 +345,8 @@ export class DittoAgents {
           { signal, timeoutMs: limits.timeoutMs },
         );
         if (result.stopReason === "max_tokens")
-          throw new EpisodeExhausted("Model output or episode token limit reached");
+          throw new EpisodeExhausted("Model output or reasoning token limit reached",
+            this.provider.lastFinishReason === "length" ? "output_limit" : "reasoning_token_limit");
         if (result.status !== "completed")
           throw new Error(
             `Ditto agent failed: ${result.stopReason} ${result.error?.message ?? ""}`,
@@ -374,7 +383,8 @@ export class DittoAgents {
         );
       const result = await runtime.run(plan, messages, { signal });
       if (result.reason.output?.stopReason === "max_tokens")
-        throw new EpisodeExhausted("Model output or episode token limit reached");
+        throw new EpisodeExhausted("Model output or reasoning token limit reached",
+          this.provider.lastFinishReason === "length" ? "output_limit" : "reasoning_token_limit");
       if (
         result.reason.status !== "success" ||
         result.reason.output?.status !== "completed"
