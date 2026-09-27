@@ -62,7 +62,6 @@ export const profileSchema = z
 export type AgentProfile = z.infer<typeof profileSchema>;
 export const agentOutputSchema = z
   .object({
-    candidate_answer: z.string(),
     claims: z.array(
       z
         .object({ text: z.string(), evidence_refs: z.array(z.string()) })
@@ -82,6 +81,7 @@ export const agentOutputSchema = z
       z.object({ id: z.string().min(1), text: z.string().min(1) }).strict(),
     ),
     resolved_deficits: z.array(z.string()),
+    candidate_answer: z.string(),
   })
   .strict();
 export type AgentOutput = z.infer<typeof agentOutputSchema>;
