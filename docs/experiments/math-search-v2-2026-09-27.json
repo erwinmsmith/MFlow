@@ -3,12 +3,12 @@
   "benchmark": "MATH",
   "model": "deepseek-flash",
   "dittoVersion": "0.1.1",
-  "implementationCommit": "2d195ff0f77b358996fe8db222c63a8fd7ba5244",
+  "implementationCommit": "c00a12f",
   "searchTasks": 119,
   "testTasks": 486,
   "config": "configs/math-search-v2.json",
   "dataProtocol": "Pinned original AFlow membership; no held-out test feedback used for changes",
-  "localRun": "runs/math-search-v2-20260927-01",
+  "localRun": "runs/math-search-v2-20260927-02",
   "diagnostic": {
     "purpose": "Eight selected validation tasks; mechanism check, not a benchmark estimate",
     "tasks": 8,
@@ -26,8 +26,14 @@
   },
   "budget": {
     "overallCeiling": 30000000,
-    "priorUsagePlusConservativeFailedCallAllowance": 1174777,
+    "priorUsagePlusConservativeFailedCallAllowance": 1262819,
     "searchCeiling": 12000000
   },
-  "conclusion": "No measured full-validation search improvement claimed yet."
+  "conclusion": "No measured full-validation search improvement claimed yet.",
+  "formatFailureDiagnostic": {
+    "completedValidationTasks": 65,
+    "tokens": 88042,
+    "status": "aborted_invalid_json",
+    "fix": "One metered format-only repair; complete validation restarted under a new execution version"
+  }
 }
