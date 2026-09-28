@@ -17,6 +17,7 @@ import { checkScoring, grade } from "./grading.js";
 import { append, save, digest, mean } from "./util.js";
 import { validateProgram, normalizeProgram, PolicyContractError } from "./strategy-program.js";
 import { organizationEvidence, summarizeOrganizations } from "./organization.js";
+import { ProviderFailure } from "./provider-progress.js";
 import type { Bundle } from "./search.js";
 
 export const aflowConfigSchema = z.object({
@@ -89,8 +90,10 @@ export async function runAFlowSearch(options: {
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
   const image = await pythonImage();
-  const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>) =>
-    new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? ''), undefined, observe), options.model, [arithmeticTool, createPythonTool(image)]);
+  const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>, context: Record<string, unknown> = {}) =>
+    new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? '', {
+      onProgress: progress => save(join(out, 'requests', `${progress.id}.json`), { ...context, ...progress }),
+    }), undefined, observe), options.model, [arithmeticTool, createPythonTool(image)]);
   // Check configuration before starting the Python optimizer or creating paid requests.
   makeAgents();
   const source = resolve(options.source);
@@ -106,7 +109,7 @@ export async function runAFlowSearch(options: {
   const code: Record<string, string> = {};
   for (const name of await readdir(codeDir))
     if (name.endsWith('.js')) code[name] = digest(await readFile(join(codeDir, name), 'utf8'));
-  const manifest = { protocol: 'official-aflow-mas-v2', config, model: options.model,
+  const manifest = { protocol: 'official-aflow-mas-v2', transport: 'ditto-public-stream-v1', config, model: options.model,
     dataHash: digest(tasks), source: lock, code, pythonImage: image,
     controller: digest(await readFile(controller, 'utf8')),
     pythonEnvironment: await pythonEnvironment(options.python),
@@ -152,7 +155,7 @@ export async function runAFlowSearch(options: {
         if (error.code !== 'ENOENT') throw error;
         return '[]';
       }));
-      const agents = makeAgents(async (records) => save(usagePath, [...previousUsage, ...records]));
+      const agents = makeAgents(async (records) => save(usagePath, [...previousUsage, ...records]), { round: number, repeat, taskId: task.id, index });
       let row: Row = { taskId: task.id, score: 0, answer: '', tokens: 0 };
       // Official MATHBenchmark._generate_output: five attempts, fixed one-second wait.
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -165,9 +168,9 @@ export async function runAFlowSearch(options: {
         } catch (error) {
           // A deterministic application/strategy contract failure is not a model
           // quality observation and cannot be repaired by five paid reruns.
-          if (error instanceof PolicyContractError || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error))) throw error;
-          row.error = String(error);
           await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', attempt, error: String(error), at: new Date().toISOString() });
+          if (error instanceof PolicyContractError || error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error))) throw error;
+          row.error = String(error);
           if (attempt < 4) await delay(1000);
         } finally {
           await save(usagePath, [...previousUsage, ...agents.provider.records]);
@@ -194,7 +197,7 @@ export async function runAFlowSearch(options: {
       if (req.url === '/bootstrap') result = { config, program: 'return { action: "STOP" };', prompts: programPrompts, organization: initialOrganization, interface: policyInterface };
       else if (req.url === '/propose') {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
-        const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }));
+        const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
         try {
           let proposal = (await agents.structured('aflow-optimizer', input.prompt, {}, proposalSchema, runtimeConfig.episode)).value;
           for (let attempt = 0; ; attempt++) {
@@ -234,7 +237,7 @@ export async function runAFlowSearch(options: {
       } else throw new Error('Unknown route');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(result));
-    } catch (error) { res.statusCode = 500; res.end(JSON.stringify({ error: String(error), unavailable: /HTTP \d{3}|Provider returned invalid JSON/.test(String(error)) })); }
+    } catch (error) { res.statusCode = 500; res.end(JSON.stringify({ error: String(error), unavailable: error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error)) })); }
   });
   server.requestTimeout = 0;
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));

@@ -20,6 +20,7 @@ import type {
   SampleOutput,
 } from "@codesoul-co/ditto/worker/infer";
 import { z } from "zod";
+import { observableProvider, ProviderFailure, type TransportOptions } from "./provider-progress.js";
 import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
 import { pythonExecutor } from "./python-tool.js";
 import {
@@ -54,6 +55,7 @@ export class MeteredProvider implements ModelProvider {
   private scope: BudgetScope = { runId: "search" };
   denial?: "search" | "episode";
   lastFinishReason?: SampleOutput["finishReason"];
+  lastFailure?: ProviderFailure;
   replayTokens = 0;
   replayCalls = 0;
   constructor(
@@ -92,6 +94,7 @@ export class MeteredProvider implements ModelProvider {
     this.scope = scope;
     this.denial = undefined;
     this.lastFinishReason = undefined;
+    this.lastFailure = undefined;
   }
   endEpisode() {
     this.episode = undefined;
@@ -117,6 +120,7 @@ export class MeteredProvider implements ModelProvider {
     options.signal.throwIfAborted();
     this.denial = undefined;
     this.lastFinishReason = undefined;
+    this.lastFailure = undefined;
     const reservation = this.estimate(input);
     if (reservation > this.budget.remaining) {
       this.denial = "search";
@@ -142,7 +146,10 @@ export class MeteredProvider implements ModelProvider {
     } catch (error) {
       for (const settle of settlements) settle();
       await this.observe?.(this.records);
-      throw error;
+      this.lastFailure = error instanceof ProviderFailure ? error : new ProviderFailure(
+        typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'PROVIDER_FAILURE',
+        error instanceof Error ? error.message : String(error), error);
+      throw this.lastFailure;
     }
     let failure: unknown;
     for (const settle of settlements) {
@@ -175,10 +182,11 @@ export class MeteredProvider implements ModelProvider {
 export function httpProvider(
   settings: ModelSettings,
   key: string,
+  transport: TransportOptions = {},
 ): ModelProvider {
   if (!key) throw new Error("MFLOW_API_KEY is required");
   const deepseek = new URL(settings.baseUrl).hostname === "api.deepseek.com";
-  return createHttpProvider({
+  const provider = createHttpProvider({
     kind: "openai-compatible",
     baseUrl: settings.baseUrl,
     apiKey: key,
@@ -192,6 +200,7 @@ export function httpProvider(
       network: [new URL(settings.baseUrl).origin],
     }),
   });
+  return observableProvider(provider, { stream: deepseek, ...transport });
 }
 
 export const arithmeticTool: RegisteredTool = {
@@ -406,6 +415,7 @@ export class DittoAgents {
         toolEvents: [],
       };
     } catch (error) {
+      if (this.provider.lastFailure) throw this.provider.lastFailure;
       if (this.provider.denial === "search")
         throw new BudgetExhausted("Search reservation denied");
       if (this.provider.denial === "episode")

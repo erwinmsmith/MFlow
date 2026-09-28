@@ -80,3 +80,11 @@ Python 计算无需新增 spawn 专用能力：现有 `RegisteredTool`、Interac
 ## 2026-09-28：异构 MAS 配置与动态能力复核
 
 v5 的可复用 profiles、运行图、父节点上下文、成员能力重配置均是应用的组织策略数据。执行时仍通过公开 Ditto reasoning 和工具配置组装；新建、复用、递归、工具隔离的测试使用 registry 0.1.1。未发现此次功能需要新增通用包能力；既有 DITTO-004（真实长请求增量进度及取消用量）仍未解决，不在应用内复制 Provider。
+
+## 2026-09-28 更正：0.1.1 已有公共流式接口
+
+重新核查 registry 安装包与公共导出后，确认 `ModelProvider.stream()` 已存在，提供 `text_delta` 和最终 `result`。此前 DITTO-004 中“没有公开流式接口”的判断不准确。MFlow 现在直接消费该公共接口，记录开始、文本增量计数、最后增量时间、完成或错误；SSE 解码、工具参数组装、网络权限及取消仍由 Ditto 负责。
+
+DITTO-004 尚缺的通用能力缩小为：工具参数/隐藏推理/keep-alive 的分型进度、供应商请求 ID、异常或取消时已知 usage，以及解析失败的具体字段路径。当前工具参数增量不会产生公共 text_delta，不能仅凭没有文本事件判定传输已卡死，也不应用文本空闲计时器终止有效工具生成。
+
+补充复现：供应商返回 `tool_calls[].function.arguments = "null"`，公共 provider 抛出 `INVALID_MODEL_OUTPUT: value must be an object`。即使供应商帧里有 usage，解析失败后公共错误未携带它；应用必须记 unknown，不能以预留值冒充实耗。验收应覆盖上述错误的字段路径和已知 usage 保存。MFlow 未复制解析器或修改 node_modules。
