@@ -19,7 +19,7 @@ import { validateProgram } from "./strategy-program.js";
 import type { Bundle } from "./search.js";
 
 export const aflowConfigSchema = z.object({
-  seed: z.number().int().default(42), maxRounds: z.number().int().positive().default(20),
+  seed: z.number().int().default(42), maxRounds: z.number().int().positive().nullable().default(null),
   validationRounds: z.number().int().positive().default(5),
   concurrency: z.number().int().positive().default(50),
   maxOutputTokens: z.number().int().positive().default(393216),
@@ -197,7 +197,7 @@ export async function runAFlowSearch(options: {
           experimentalScope: 'standard-isolated-state-v2' };
         await save(join(out, 'best.json'), bundle);
         await save(join(out, 'summary.json'), { selectedRound: input.round, validationAccuracy: input.score,
-          validationRounds: config.validationRounds, protocol: manifest.protocol, frozenBeforeTest: true });
+          validationRounds: config.validationRounds, protocol: manifest.protocol, stopReason: input.stopReason, frozenBeforeTest: true });
         result = { frozen: true };
       } else throw new Error('Unknown route');
       res.setHeader('Content-Type', 'application/json');

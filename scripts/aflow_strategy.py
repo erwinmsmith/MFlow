@@ -38,7 +38,7 @@ def main():
     llm = LLMConfig({'model': 'ditto', 'key': 'local', 'base_url': endpoint})
     optimizer = Optimizer(dataset='MATH', question_type='organization strategy', opt_llm_config=llm,
                           exec_llm_config=llm, operators=[], sample=4, check_convergence=True,
-                          optimized_path=str(out), initial_round=1, max_rounds=config['maxRounds'],
+                          optimized_path=str(out), initial_round=1, max_rounds=1,
                           validation_rounds=config['validationRounds'])
     workflows = Path(optimizer.root_path) / 'workflows'
     workflows.mkdir(parents=True, exist_ok=True)
@@ -162,10 +162,14 @@ def main():
         return score
     optimizer._optimize_graph = optimize_round
     optimizer.round = checkpoint['round']
-    optimizer.max_rounds = max(0, config['maxRounds'] - optimizer.round + 1)
-    if checkpoint['phase'] != 'finished' and not optimizer.convergence_utils.check_convergence(top_k=3)[0]:
+    # Run the native loop one iteration at a time, with no arbitrary total cap.
+    # Never use an interrupted candidate's partial repetitions to declare convergence.
+    converged = lambda: checkpoint['phase'] != 'evaluating' and optimizer.convergence_utils.check_convergence(top_k=3)[0]
+    while (checkpoint['phase'] != 'finished' and not converged()
+           and (config['maxRounds'] is None or optimizer.round <= config['maxRounds'])):
         optimizer.optimize('Graph')
-    checkpoint.update(phase='finished', round=optimizer.round)
+    checkpoint.update(phase='finished', round=optimizer.round,
+                      stopReason='converged' if converged() else 'max_rounds')
     persist()
     records = optimizer.data_utils.load_results(str(workflows))
     grouped = {}
@@ -175,7 +179,7 @@ def main():
     if not complete:
         raise RuntimeError('No fully evaluated candidate; refuse to export')
     score, number = max(complete, key=lambda item: (item[0], -item[1]))
-    rpc('freeze', {'round': number, 'score': score, 'strategy': json.loads((workflows / f'round_{number}/strategy.json').read_text())})
+    rpc('freeze', {'round': number, 'score': score, 'stopReason': checkpoint['stopReason'], 'strategy': json.loads((workflows / f'round_{number}/strategy.json').read_text())})
 
 
 if __name__ == '__main__':

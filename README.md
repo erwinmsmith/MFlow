@@ -11,7 +11,7 @@
 - 搜索完整 JavaScript 策略程序及 agent、factory、review、integrate、retrieve 提示词。程序读取任务运行状态，动态决定派生、复用、传递、整合和停止，不生成固定 agent graph。
 - 官方 AFlow 的父节点采样、经验去重、失败样例、优化循环和收敛检测直接从固定源码导入；完整候选由 Ditto 中的优化模型生成，不从枚举 edit 列表挑选。
 - 每个候选、每次重复都从头运行完整 validate。没有 MIA acquisition、affected-set 继承、前缀/agent 缓存、逐批淘汰或廉价候选替换规则。
-- 默认 20 次优化迭代、5 次完整验证重复、50 题并发。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
+- 默认不设优化轮数上限，按官方 top-3 均分连续五轮稳定判定收敛；每候选 5 次完整验证重复、50 题并发。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
 - Ditto Factory 开放生成不同 capability、objective、context、reasoning 和 tool manifest。可使用 arithmetic 和隔离 Python 工具，均通过发布包的 Interaction 执行。
 - 标准协议每题重置状态；test 在选择冻结后才打开，答案只交给评分器。不同轮次/重复不共享模型执行结果。
 - 每次请求保存 Ditto 用量账本；逐题结果和控制器状态可恢复。只有同一候选同一次重复的已完成题目可以在中断恢复时跳过。
@@ -114,7 +114,7 @@ MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- search \
 
 `--test` 可省略；提供时仅在搜索结束并冻结 `best.json` 后开始 test。搜索中断后使用同一命令增加 `--resume`；代码、配置、镜像或数据变化会拒绝混跑。控制器源码来源和依赖准备见 [v4 文档](docs/search-v4.md)。
 
-`configs/aflow-search.json` 指定 5 次完整验证重复。官方 `Optimizer` 构造器默认 5 次，但其 `run.py` CLI 默认 1 次；本项目显式选择 5 次，没有把两者混称同一个默认值。每轮均保留重复分数，按官方方法计算平均分、选择父节点并检测收敛。
+`configs/aflow-search.json` 的 `maxRounds:null` 表示只按收敛停止；设置正整数可显式启用兜底轮数。配置指定 5 次完整验证重复。官方 `Optimizer` 构造器默认 5 次，但其 `run.py` CLI 默认 1 次；本项目显式选择 5 次，没有把两者混称同一个默认值。每轮均保留重复分数，按官方方法计算平均分、选择父节点并检测收敛。
 
 历史 MIA 配置改用 `legacy-search`，例如 `npm run mflow -- legacy-search --search data/prepared/search.jsonl --confirmation data/prepared/confirmation.jsonl --config configs/search.json --out runs/legacy-1`。它保留历史算法，不参与当前默认实验。
 

@@ -7,7 +7,7 @@
 固定 `FoundationAgents/AFlow@3f457218fc716093fe53f6df8a5d5e6379d66346`，`baselines/sources.lock.json` 校验文件哈希。
 `scripts/aflow_strategy.py` 直接导入官方 `Optimizer`，复用它的：
 
-- `optimize` / `_optimize_graph`：初始节点评测，再进行最多 20 次优化；最多 21 个策略节点。
+- `optimize` / `_optimize_graph`：初始节点评测后，逐次调用原生迭代，直到官方收敛检测通过；默认不设总迭代上限。
 - `DataUtils`：历史重复分数取均值、top-4 父节点候选、指数权重与 0.3 均匀探索的混合采样。
 - `ExperienceUtils`：父节点的成功/失败修改、相同修改去重、结果回写。
 - `GraphUtils` 优化提示词模板：完整产物、单处修改、最多五行代码变化的指导、最多三个失败日志样例。
@@ -54,3 +54,11 @@ MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- search \
 运行过程保存每次调用的预留与结算、任务尝试、完整 execution、候选/重复结果、优化模型提案和控制器随机状态。更改源码、配置、评分器、数据或镜像会拒绝恢复到同一目录。官方候选格式/加载错误按原生轮次错误逻辑记录并跳过；任务执行按官方 MATH 五次尝试、间隔一秒的设置执行，最终失败计零分并保留成本。
 
 旧 v2/v3 的 `executionVersion` 与 v4 不兼容；复现旧实验必须使用各自的 frozen-dist，不使用新的解释器读取旧 bundle。
+
+## 收敛停止（2026-09-28 更新）
+
+`maxRounds` 默认及本轮配置改为 `null`。适配器每次调用官方 `optimize` 完成一个优化迭代，再依据官方 `ConvergenceUtils.check_convergence(top_k=3)` 判断是否继续；不改变父节点采样、优化提示词、全量评测或经验更新。
+
+官方 z=0、consecutive_rounds=5 表示历史最佳三个策略的平均验证准确率连续五次比较不变；任何 top-3 均值变化都会重新累计。不是“准确率必须超过某个值”，也不保证全局最优。test 从不参与停止或选择。
+
+如候选在多次重复评测中途被中断，必须先补完该候选，不能拿部分重复结果宣布收敛。结束原因保存为 `converged` 或显式配置的 `max_rounds`。模型/基础设施故障仍按故障处理，不能冒充收敛。

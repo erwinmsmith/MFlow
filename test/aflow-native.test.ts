@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision } from '../src/strategy-program.js';
-import { runAFlowSearch, programPrompts, parallelMap, unrestrictedConfig } from '../src/aflow-search.js';
+import { runAFlowSearch, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { initialStrategy, limitsSchema, rootProfile } from '../src/types.js';
@@ -71,6 +71,7 @@ test('parallel validation preserves task order and executes every task despite e
   assert.deepEqual(results, Array.from({ length: 17 }, (_, i) => i));
   assert.equal(calls, 17); assert.equal(peak, 3);
   assert.equal(unrestrictedConfig(393216).episode.maxTokens, Number.MAX_SAFE_INTEGER);
+  assert.equal(aflowConfigSchema.parse({}).maxRounds, null);
 });
 
 test('official AFlow controller fully repeats candidates, freezes selection, and resumes without new calls', async (t) => {
@@ -90,7 +91,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     let value;
     if (payload.kind === 'aflow-optimizer') {
       proposals++;
-      value = { modification: 'Change the agent instructions.', program: 'return {action:"STOP"};', prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
+      value = { modification: `Change the agent instructions (${proposals}).`, program: 'return {action:"STOP"};', prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
     } else {
       agents++;
       const candidate = input.messages[0].content.includes('NATIVE-CANDIDATE-MARKER');
@@ -128,6 +129,15 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(agents, 17); assert.equal(proposals, 1);
     assert.equal(JSON.parse(await readFile(join(options.out, 'round-2/pass-1/0.json'), 'utf8')).tokens, 40);
     await assert.rejects(runAFlowSearch({ ...options, resume: true, config: { ...options.config, validationRounds: 3 } }), /manifest mismatch/);
+    const unbounded = { ...options, out: join(dir, 'convergence'), config: { ...options.config, maxRounds: null, validationRounds: 1 } };
+    await runAFlowSearch(unbounded);
+    const stopped = JSON.parse(await readFile(join(unbounded.out, 'controller.json'), 'utf8'));
+    assert.equal(stopped.stopReason, 'converged');
+    // [1,0,0,0,0,0,0,0]: top-three mean stabilizes after the third node,
+    // then requires five more native convergence comparisons.
+    assert.equal(stopped.round, 8);
+    assert.equal(proposals, 8);
+    assert.equal(agents, 49);
   } finally {
     server.close(); await rm(dir, { recursive: true, force: true });
     if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;
