@@ -36,6 +36,7 @@ export class OrganizationRuntime {
     task: TaskInput,
     reuse?: { checkpoint: EpisodeCheckpoint; prefix: EpisodeCheckpoint[] },
   ): Promise<Execution> {
+    this.agents.prompts = strategy.prompts;
     if (reuse || this.captureCheckpoints) this.agents.assertReplaySafe();
     const version = stateDigest({
       code: "mflow-episode-v2",
@@ -114,6 +115,7 @@ export class OrganizationRuntime {
     });
     const state = (): PolicyState =>
       structuredClone({
+        ...(strategy.program ? { task, step: trace.length, outputs, artifacts, edges, toolEvents, usage: { tokens: tokens(), calls: calls() } } : {}),
         deficits,
         agents: population.map((a) => ({
           id: a.profile.id,
@@ -123,6 +125,7 @@ export class OrganizationRuntime {
           stalled: a.stalled,
           reviewed: a.reviewed ?? false,
           challenged: a.challenged ?? false,
+          ...(strategy.program ? { profile: a.profile, assigned: a.assigned } : {}),
         })),
         maxDepth: this.limits.maxDepth,
       });
@@ -280,7 +283,14 @@ export class OrganizationRuntime {
           );
         const snapshot = state(),
           decision = decide(strategy, snapshot);
-        const d = deficits.find((d) => d.id === decision.deficitId);
+        let d = deficits.find((d) => d.id === decision.deficitId);
+        if (decision.request) {
+          const id = `policy:${step}:${deficits.length}`;
+          d = { id, text: decision.request, owner: decision.agentId ?? "root",
+            status: "MISSING", artifactIds: [], deliveredIds: [] };
+          deficits.push(d);
+          decision.deficitId = id;
+        }
         const owner =
           population.find((a) => a.profile.id === d?.owner) ?? population[0];
         let event: string = decision.action;

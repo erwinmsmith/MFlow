@@ -40,6 +40,12 @@ export const strategySchema = z
     id: z.string().min(1),
     rules: z.array(ruleSchema).min(1).max(24),
     fallback: z.enum(actions),
+    program: z.string().min(1).optional(),
+    prompts: z.object({
+      agent: z.string().min(1), factory: z.string().min(1),
+      review: z.string().min(1), integrate: z.string().min(1),
+      retrieve: z.string().min(1),
+    }).strict().optional(),
   })
   .strict()
   .refine(
@@ -125,6 +131,13 @@ export interface Edge {
   artifactIds: string[];
 }
 export interface PolicyState {
+  task?: TaskInput;
+  step?: number;
+  outputs?: { agentId: string; output: AgentOutput }[];
+  artifacts?: Artifact[];
+  edges?: Edge[];
+  toolEvents?: unknown[];
+  usage?: { tokens: number; calls: number };
   deficits: Deficit[];
   agents: {
     id: string;
@@ -134,6 +147,8 @@ export interface PolicyState {
     stalled: boolean;
     reviewed?: boolean;
     challenged?: boolean;
+    profile?: AgentProfile;
+    assigned?: string;
   }[];
   maxDepth: number;
 }
@@ -142,6 +157,7 @@ export interface Decision {
   agentId?: string;
   deficitId?: string;
   ruleId: string;
+  request?: string;
 }
 export interface TraceStep {
   state: PolicyState;

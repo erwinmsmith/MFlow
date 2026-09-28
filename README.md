@@ -2,36 +2,25 @@
 
 搜索一个可复用的组织策略 `π`；推理时，`π` 根据任务中的信息缺口动态组织不同能力的 agent。每个搜索节点是一套完整策略，每条搜索边是一处局部策略修改。
 
-项目使用 npm 发布的 **`@codesoul-co/ditto@0.1.1`**。agent 的 Context、推理、工具调用由 Ditto Worker/Graph/Runtime 执行。没有本地 Ditto 源码依赖、私有路径导入、vendoring、monkey patch 或直接调用模型 SDK。
+项目使用 npm 发布的 **`@codesoul-co/ditto@0.1.1`**。agent 的 Context、推理、工具调用由 Ditto Worker/Graph/Runtime 执行。没有本地 Ditto 源码依赖、私有路径导入、vendoring、Ditto monkey patch 或直接调用模型 SDK。
 
-原 AFlow 实现已清理；参考基线为 [FoundationAgents/AFlow 的 `3f45721`](https://github.com/FoundationAgents/AFlow/commit/3f45721)，原许可证保留。研究方案原文保存在 [docs/research-proposal.md](docs/research-proposal.md)。
+默认搜索直接调用外部固定版本 [FoundationAgents/AFlow 的 `3f45721`](https://github.com/FoundationAgents/AFlow/commit/3f45721) 优化器；模型和 agent 执行仍由发布的 Ditto 包负责。研究方案原文保存在 [docs/research-proposal.md](docs/research-proposal.md)，其中 MIA、部分评测和缓存方案已退出默认搜索。
 
 ## 当前实现范围
 
-- 类型化、有序规则 DSL：`CONTINUE / REVIEW / CHALLENGE / REACTIVATE / DERIVE / CONNECT / DISCONNECT / DORMANT / STOP`。
-- Ditto 组合的 agent 执行器：独立 objective、capability、private context、reasoning 和 tool manifest。Factory 依据 deficit 开放生成 agent，不使用固定 verifier/programmer 角色表。
-- `MISSING / LATENT / ACTIVE / DELIVERED / RESOLVED` 状态；artifact 定向传递；只有 owner 能关闭自己的 deficit。
-- 按真实 utility 选择父节点；局部修改；逐步评估；完整受影响集合评估后才能晋升；可选独立 confirmation。
-- MIA 方向过滤、真实成败观测的 Dirichlet 后验、Monte Carlo 信息增益选择；五种消融配置。
-- 固定种子且保留 group 边界的数据划分、manifest、标准答案隔离、test overlap 检查、冻结策略推理。
-- 每个任务从相同不可变 profile pool 开始。可重用预先提供的 dormant profile，也可在任务内派生与失活。
+- 搜索完整 JavaScript 策略程序及 agent、factory、review、integrate、retrieve 提示词。程序读取任务运行状态，动态决定派生、复用、传递、整合和停止，不生成固定 agent graph。
+- 官方 AFlow 的父节点采样、经验去重、失败样例、优化循环和收敛检测直接从固定源码导入；完整候选由 Ditto 中的优化模型生成，不从枚举 edit 列表挑选。
+- 每个候选、每次重复都从头运行完整 validate。没有 MIA acquisition、affected-set 继承、前缀/agent 缓存、逐批淘汰或廉价候选替换规则。
+- 默认 20 次优化迭代、5 次完整验证重复、50 题并发。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
+- Ditto Factory 开放生成不同 capability、objective、context、reasoning 和 tool manifest。可使用 arithmetic 和隔离 Python 工具，均通过发布包的 Interaction 执行。
+- 标准协议每题重置状态；test 在选择冻结后才打开，答案只交给评分器。不同轮次/重复不共享模型执行结果。
+- 每次请求保存 Ditto 用量账本；逐题结果和控制器状态可恢复。只有同一候选同一次重复的已完成题目可以在中断恢复时跳过。
 
-新增 Ditto 发布包能力已接入：
+实现与复现见 [官方 AFlow 搜索控制 v4](docs/search-v4.md)。旧的规则/MIA 实现仅保留在显式 `legacy-search` 入口供历史复现，旧结果不覆盖。历史协议见 [v2](docs/search-v2.md)、[v3](docs/search-v3.md)。
 
-- `prefixCache:true`（默认）在 parent/child 第一个决策分歧之前恢复显式 episode 状态，只执行 suffix；checkpoint 包含资源/配置版本与完整性校验。
-- `agentCache:true` 可缓存同一任务、profile、上下文、配置和资源版本下的完整 agent turn，最多保留 256 项，默认关闭。回放保留逻辑 token 成本，新增模型成本为零。
-- Ditto `TokenBudget` 对 search 和 episode 预留、结算和记录 provenance。缺失 usage 保守扣留预留量并报错；默认按 UTF-8 输入字节数 + 最大输出 + 1024 估计，**未经 provider 上界验证，不能承诺物理硬 token 上限**。
-- standard 每题重置；另有显式 `--protocol continual`，通过 Ditto 生成压缩记忆，并原子提交 profile、memory 和任务来源到 `BranchStore`，可导出和恢复 JSON 状态。
+原有 standard/continual、BranchStore 和 checkpoint 能力保留；程序策略默认使用 standard，Python 工具不参与跨任务事务或前缀恢复。发布包边界与尚未满足的通用需求见 [Ditto 需求](docs/ditto-requirements.md)。
 
-当前隔离范围为显式 JSON 状态与内置纯算术工具。注入其他工具时，缓存、prefix 恢复与 continual commit 会拒绝运行，直至接入经过验证的资源隔离适配器。
-
-AFlow 式失败反馈提议、独立复核、完整派生与整合操作见 [搜索控制 v2](docs/search-v2.md)。
-
-详见 [Ditto 通用能力需求](docs/ditto-requirements.md) 和 [架构与实验协议](docs/architecture.md)。
-
-MFlow 多轮父子策略、父节点经验、收敛控制与评测续跑见 [搜索控制 v3](docs/search-v3.md)，完整 MATH 配置为 `configs/math-search-v3.json`。
-
-官方 AFlow、DyLAN、AutoAgents、EvoAgent 的源码复用、统一 MATH 划分、Ditto 搜索接入和复现命令见 [baseline 完整重跑协议](docs/baseline-rerun.md)。本轮已按用户要求取消额外单题及总 token 限制；旧受限实验另行归档。
+官方基线的独立运行协议见 [baseline 完整重跑协议](docs/baseline-rerun.md)。v4 默认验证重复次数为 5，当前旧 AFlow baseline 为 1，比较时必须报告这一计算量差异。
 
 ## 安装和验证
 
@@ -61,7 +50,7 @@ npm exec --yes --package=node@24 --package=npm@11 -- npm run mflow -- doctor
 {"id":"unique-id","prompt":"Task text","answer":"reference answer","metric":"exact","group":"optional-source-group"}
 ```
 
-`metric` 支持 `exact`、`numeric` 以及下文的 benchmark 专用评分。搜索使用 0/1 分数，对应三分类成败后验。`group` 相同的任务必须进入同一个 split；ID 全局唯一，规范化 prompt 不能跨 split 重复。官方数据同一 split 内的重复题目保留。
+`metric` 支持 `exact`、`numeric` 以及下文的 benchmark 专用评分。搜索使用真实 0/1 分数；三分类成败后验仅属于历史 legacy-search。`group` 相同的任务必须进入同一个 split；ID 全局唯一，规范化 prompt 不能跨 split 重复。官方数据同一 split 内的重复题目保留。
 
 ```sh
 npm run build
@@ -109,39 +98,25 @@ docker pull python:3.12-alpine
 
 默认使用 DeepSeek Flash：`MFLOW_BASE_URL=https://api.deepseek.com`，`MFLOW_MODEL=deepseek-flash`。模型名和接口以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/harness) 为准。`MFLOW_API_KEY` 只放在被 Git 忽略的本地 `.env`。DeepSeek 请求通过 Ditto 发布包的 OpenAI 兼容 Provider 发送，并使用其要求的 `max_tokens` 字段；当前默认关闭 DeepSeek thinking，以便结构化 JSON 输出遵守本项目的输出预算。`seed` 仅用于本地搜索/抽样，DeepSeek 请求不会发送该字段。
 
+需要固定 AFlow checkout、其 Python 依赖环境，以及本地 Docker 的 `python:3.12-alpine` 镜像。现有 baseline 环境可以直接复用。镜像 ID、源文件哈希、配置、数据、编译代码和评分器均写入运行 manifest。
+
 ```sh
 mkdir -p runs
-npm run mflow -- search \
-  --search data/prepared/search.jsonl \
-  --confirmation data/prepared/confirmation.jsonl \
-  --config configs/search.json \
-  --out runs/search-1
+npm run build
+MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- search \
+  --search data/benchmarks/math/search.jsonl \
+  --config configs/aflow-search.json \
+  --source ../MFlow-baselines/sources/AFlow \
+  --python ../MFlow-baselines/.venv-aflow/bin/python \
+  --out runs/math-aflow-strategy \
+  --test data/benchmarks/math/test.jsonl
 ```
 
-上述命令演示自定义数据的三分协议。AFlow benchmark 使用以下命令，不传 `--confirmation`：
+`--test` 可省略；提供时仅在搜索结束并冻结 `best.json` 后开始 test。搜索中断后使用同一命令增加 `--resume`；代码、配置、镜像或数据变化会拒绝混跑。控制器源码来源和依赖准备见 [v4 文档](docs/search-v4.md)。
 
-```sh
-npm run mflow -- search --search data/benchmarks/gsm8k/search.jsonl \
-  --config configs/aflow-search.json --out runs/gsm8k-search
-npm run mflow -- evaluate --bundle runs/gsm8k-search/best.json \
-  --test data/benchmarks/gsm8k/test.jsonl --out runs/gsm8k-test
-```
+`configs/aflow-search.json` 指定 5 次完整验证重复。官方 `Optimizer` 构造器默认 5 次，但其 `run.py` CLI 默认 1 次；本项目显式选择 5 次，没有把两者混称同一个默认值。每轮均保留重复分数，按官方方法计算平均分、选择父节点并检测收敛。
 
-`configs/aflow-search.json` 是预算示例（最多 1000 次任务执行、500 万 tokens），不是 AFlow 论文的计算预算。原来的 200 次小样例预算不足以覆盖 GSM8K 的 264 题基线，且 DROP 基线后没有候选预算；请按实验预算配置，系统不会因此缩减数据集。
-
-输出目录必须尚不存在，避免覆盖旧实验。默认所有 agent 使用同一模型；能力差异来自 Ditto 推理组织、上下文和工具。当前注册工具为 `arithmetic`。可通过 `DittoAgents` 注入其他 Ditto `RegisteredTool`，但没有隔离契约的工具只能用于关闭缓存的普通执行，不得据此宣称具有事务回滚能力。
-
-配置 `variant` 可选：
-
-| 变体 | MIA 方向限制 | MIA acquisition | 实际表现评估 |
-| --- | --- | --- | --- |
-| `random` | 否 | 否，随机编辑 | 真执行 |
-| `llm-guided` | 否 | 否，Ditto 中的模型选择合法编辑 | 真执行 |
-| `mia-space` | 是 | 否，随机编辑 | 真执行 |
-| `mia-acq` | 否 | 是 | 真执行 |
-| `mia-full` | 是 | 是 | 真执行 |
-
-所有变体的父节点选择都基于真实 utility。LLM 不给 agent、边或编辑打数值分。`--pool profiles.json` 可提供冻结初始 profile；必须含唯一 `root`。默认只含 Root。
+历史 MIA 配置改用 `legacy-search`，例如 `npm run mflow -- legacy-search --search data/prepared/search.jsonl --confirmation data/prepared/confirmation.jsonl --config configs/search.json --out runs/legacy-1`。它保留历史算法，不参与当前默认实验。
 
 ## 推理与测试
 
@@ -169,7 +144,17 @@ npm run mflow -- infer --bundle runs/search-1/best.json --question "A new task" 
 
 Consolidation 只接收任务输入与 agent 输出，不接收评分或参考答案。每次任务完成后由 Ditto 压缩程序性经验、选择保留的 agent，再在同一分支中提交 profiles、memory 和已见任务来源。无效输出/失败不会污染 canonical state。状态绑定 frozen bundle；重复任务或不兼容 bundle 会被拒绝。consolidation 单独计量，进入实际总用量，不能与 standard 准确率混为一组。
 
-## 产物
+## 默认搜索产物
+
+- `manifest.json`：冻结的官方源码、运行代码、数据、配置与 Python 镜像。
+- `controller.json`：官方轮次、当前阶段、父节点经验以及 Python/NumPy 随机状态。
+- `MATH/workflows/round_N/strategy.json`：完整策略程序与提示词；`experience.json` 保存原生父子经验。
+- `MATH/workflows/results.json`：每轮每次完整重复的准确率与成本。
+- `round-N/pass-K/`：逐题结果、完整执行轨迹、逐调用用量与尝试记录。
+- `optimizer-calls/`、`proposals.jsonl`：优化模型调用成本与完整提案。
+- `best.json`：冻结部署包；可供 `infer` / `evaluate` 使用。
+
+### 历史 legacy-search 产物
 
 | 文件 | 内容 |
 | --- | --- |
@@ -183,6 +168,6 @@ Consolidation 只接收任务输入与 agent 输出，不接收评分或参考�
 | `best.json` | 可直接推理的冻结部署包 |
 | `errors.jsonl` | 实际执行异常；不会伪造 correctness observation |
 
-运行失败或预算中断会保留已执行数据；当前未实现自动断点续搜。中断候选不具备晋升资格。
+仅 legacy-search 尚未实现断点续搜；默认原生 AFlow 搜索已支持 `--resume`。运行失败或预算中断会保留已执行数据。中断候选不具备晋升资格。
 
 本轮发布、验证证据及剩余包需求见 [发布与接入记录](docs/release-2026-09-26.md)。

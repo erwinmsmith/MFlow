@@ -68,3 +68,11 @@ TokenBudget 可以严格控制**预留额度**，但无法自行知道任意 pro
 验收：用分块 HTTP fixture 验证连续输出、长时间无数据、仅 keep-alive、断流、工具参数分块、最终 usage 与主动取消；每条调用记录唯一且准确，回调异常不使计费记录丢失。真实长请求在最终完成前可看到有效进度，完成后与非流式输出和 usage 一致。
 
 本轮仅记录需求，不在 MFlow 里复制 SSE/流式 Provider。待 Ditto 通过 dev → main 更新并发布新包后，再从 registry 更新 MFlow 并验收。
+
+## 2026-09-28：完整 AFlow 策略搜索的能力复核
+
+搜索控制、策略程序、数据评测和实验恢复属于 MFlow 应用。模型优化、agent 推理与工具调用继续使用 registry 0.1.1 公共导出。
+
+Python 计算无需新增 spawn 专用能力：现有 `RegisteredTool`、Interaction、`Sandbox.run` 和 `createLocalSandboxExecutor` 足以正常注册并执行一次性容器工具。新 adapter 只提供工具 schema 和 Docker 参数；未复制执行器、未使用 Ditto 源码或私有模块。容器不挂载 host 文件、不继承模型凭据、不保留跨调用状态，镜像 ID 写入实验清单。已验证工具执行结果通过 Ditto 返回 agent。
+
+这不满足 DITTO-002 的任意外部资源事务要求，因此 Python 工具不参与 prefix/cache/continual commit。v4 默认关闭这些机制；标准协议逐题重置，可直接使用现有包。DITTO-004 的请求增量进度仍待发布包支持，当前逐请求账本只证明请求已发送/已结算，不能证明长调用正在生成。

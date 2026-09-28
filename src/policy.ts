@@ -9,6 +9,7 @@ import {
   strategySchema,
 } from "./types.js";
 import { canonical, digest } from "./util.js";
+import { programDecision } from "./strategy-program.js";
 
 function matches(
   rule: Rule,
@@ -44,6 +45,7 @@ function matches(
   );
 }
 export function decide(strategy: Strategy, state: PolicyState): Decision {
+  if (strategy.program) return programDecision(strategy.program, state);
   for (const rule of strategy.rules) {
     if (rule.status === "NONE" && matches(rule, undefined, state)) {
       const decision = bind(rule.action, rule.id, undefined, state);

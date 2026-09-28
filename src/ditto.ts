@@ -21,6 +21,7 @@ import type {
 } from "@codesoul-co/ditto/worker/infer";
 import { z } from "zod";
 import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
+import { pythonExecutor } from "./python-tool.js";
 import {
   agentOutputSchema,
   profileSchema,
@@ -30,9 +31,10 @@ import {
   type Deficit,
   type Limits,
   type TaskInput,
+  type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-explicit-state-v4/transport-deadline/stop-detail/arithmetic-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-aflow-program-v5/custom-prompts/arithmetic-python-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -60,6 +62,7 @@ export class MeteredProvider implements ModelProvider {
       Buffer.byteLength(JSON.stringify(input), "utf8") +
       (input.generation?.maxTokens ?? 1200) +
       1024,
+    readonly observe?: (records: MeteredProvider["records"]) => Promise<void>,
   ) {}
   get records() {
     return this.budget.records;
@@ -131,12 +134,14 @@ export class MeteredProvider implements ModelProvider {
     if (this.episode)
       settlements.push(this.episode.reserve(reservation, scope));
     this.admitted++;
+    await this.observe?.(this.records);
     let result: SampleOutput;
     try {
       result = await this.inner.invoke(input, options);
       this.lastFinishReason = result.finishReason;
     } catch (error) {
       for (const settle of settlements) settle();
+      await this.observe?.(this.records);
       throw error;
     }
     let failure: unknown;
@@ -147,6 +152,7 @@ export class MeteredProvider implements ModelProvider {
         failure = error;
       }
     }
+    await this.observe?.(this.records);
     if (failure instanceof BudgetExceededError)
       throw new Error(
         "Provider exceeded token estimate; stop and correct provider bound",
@@ -252,6 +258,7 @@ export class DittoAgents {
     readonly tools: RegisteredTool[] = [arithmeticTool],
   ) {}
   cacheEnabled = false;
+  prompts?: Strategy["prompts"];
   private cache = new BranchStore("agent-cache");
   private cacheKeys: string[] = [];
   assertReplaySafe() {
@@ -268,6 +275,7 @@ export class DittoAgents {
     if (chosen.length !== new Set(tools).size)
       throw new Error("Agent requested an unregistered tool");
     return createDitto({
+      ...(chosen.some((t) => t.name === 'python') ? { sandboxExecutor: pythonExecutor() } : {}),
       workers: [
         createContextWorker(),
         createInferWorker({
@@ -278,6 +286,7 @@ export class DittoAgents {
         createInteractionWorker({ tools: chosen }),
       ],
       sandbox: {
+        execute: chosen.some((t) => t.name === 'python'),
         tools: chosen.map((t) => t.name),
         network: [new URL(this.model.baseUrl).origin],
       },
@@ -336,7 +345,7 @@ export class DittoAgents {
               })),
             metadata: { kind },
             constraints: {
-              maxSteps: 4,
+              maxSteps: this.prompts ? limits.maxSteps : 4,
               maxActionCalls: limits.maxToolCalls,
               maxTotalTokens: limits.maxTokens,
               timeoutMs: limits.timeoutMs,
@@ -425,6 +434,7 @@ export class DittoAgents {
           incoming,
           limits,
           review,
+          prompts: this.prompts,
         })
       : "";
     type Cached = {
@@ -446,7 +456,9 @@ export class DittoAgents {
     try {
       result = await this.structured(
         review ? "review" : "agent",
-        review ? REVIEW_PROMPT : AGENT_PROMPT,
+        review ? (this.prompts?.review ?? REVIEW_PROMPT) :
+          incoming.length ? (this.prompts?.integrate ?? this.prompts?.agent ?? AGENT_PROMPT) :
+            (this.prompts?.agent ?? AGENT_PROMPT),
         {
           task,
           profile: agent.profile,
@@ -488,7 +500,7 @@ export class DittoAgents {
   ): Promise<AgentProfile> {
     const result = await this.structured(
       "factory",
-      FACTORY_PROMPT,
+      this.prompts?.factory ?? FACTORY_PROMPT,
       {
         id,
         deficit,
@@ -518,7 +530,7 @@ export class DittoAgents {
     if (!profiles.length) return undefined;
     const result = await this.structured(
       "retrieve",
-      "Classify whether an existing capability is relevant to the deficit. Return the ID of one relevant agent, or null. This is a categorical relevance decision, not a utility or confidence score.",
+      this.prompts?.retrieve ?? "Classify whether an existing capability is relevant to the deficit. Return the ID of one relevant agent, or null. This is a categorical relevance decision, not a utility or confidence score.",
       {
         deficit,
         candidates: profiles.map(({ id, capability, objective, tools }) => ({

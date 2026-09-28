@@ -40,6 +40,7 @@ export interface Bundle {
   version: 3;
   executionVersion: string;
   dittoVersion: "0.1.1";
+  pythonImage?: string;
   strategy: Strategy;
   pool: AgentProfile[];
   model: ModelSettings;

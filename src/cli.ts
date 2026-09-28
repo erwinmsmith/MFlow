@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createDitto,
@@ -12,7 +12,8 @@ import {
   stateDigest,
   type StoreSnapshot,
 } from "@codesoul-co/ditto";
-import { DittoAgents, MeteredProvider, httpProvider, executionVersion } from "./ditto.js";
+import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool } from "./ditto.js";
+import { createPythonTool } from './python-tool.js';
 import { prepare, readTasks, assertTestDisjoint } from "./data.js";
 import { grade, checkScoring } from "./grading.js";
 import { execFile } from "node:child_process";
@@ -49,6 +50,8 @@ const { positionals, values } = parseArgs({
     name: { type: "string" },
     verify: { type: "boolean" },
     resume: { type: "boolean" },
+    source: { type: "string" },
+    python: { type: "string" },
   },
 });
 const required = (key: keyof typeof values) => {
@@ -73,7 +76,7 @@ async function outputDirectory(path: string) {
 }
 async function run() {
   const command = positionals[0];
-  if (values.resume && (command !== "evaluate" || (values.protocol && values.protocol !== "standard")))
+  if (values.resume && ((command !== "evaluate" && command !== "search") || (values.protocol && values.protocol !== "standard")))
     throw new Error("--resume supports frozen standard evaluation only");
   if (command === "benchmarks") {
     const exec = promisify(execFile);
@@ -145,6 +148,30 @@ async function run() {
     return;
   }
   if (command === "search") {
+    if (values.confirmation || values.pool || values.state || values['state-out'] || (values.protocol && values.protocol !== 'standard'))
+      throw new Error('Official AFlow search uses the full validation split and fresh standard episodes');
+    const { runAFlowSearch, aflowConfigSchema } = await import('./aflow-search.js');
+    const config = aflowConfigSchema.parse(values.config ? await json(values.config) : {});
+    await runAFlowSearch({ out: required('out'), search: required('search'), config,
+      model: model(config.seed), resume: !!values.resume,
+      source: values.source ?? '../MFlow-baselines/sources/AFlow',
+      python: values.python ?? '../MFlow-baselines/.venv-aflow/bin/python' });
+    console.log(`Exported frozen strategy to ${join(required('out'), 'best.json')}`);
+    if (values.test) {
+      // Test is opened only after the controller has returned and frozen its selection.
+      const testOut = join(required('out'), 'test');
+      const resumeTest = await access(join(testOut, 'manifest.json')).then(() => true, () => false);
+      const child = (await import('node:child_process')).spawn(process.execPath,
+        [new URL('./cli.js', import.meta.url).pathname, 'evaluate', '--bundle', join(required('out'), 'best.json'),
+          '--test', values.test, '--out', testOut, ...(resumeTest ? ['--resume'] : [])], { stdio: 'inherit' });
+      await new Promise<void>((done, reject) => {
+        child.on('error', reject);
+        child.on('exit', (code) => code === 0 ? done() : reject(new Error(`Frozen test exited ${code}`)));
+      });
+    }
+    return;
+  }
+  if (command === "legacy-search") {
     if (
       (values.protocol && values.protocol !== "standard") ||
       values.state ||
@@ -196,7 +223,8 @@ async function run() {
     if (protocol === "standard" && (values.state || values["state-out"]))
       throw new Error("Canonical state requires --protocol continual");
     if (protocol === "continual") required("state-out");
-    const agents = new DittoAgents(provider, bundle.model);
+    const agents = new DittoAgents(provider, bundle.model,
+      bundle.pythonImage ? [arithmeticTool, createPythonTool(bundle.pythonImage)] : undefined);
     // Independent held-out evaluation does not share the training execution cache.
     const canonical =
       protocol === "continual"
@@ -312,11 +340,11 @@ async function run() {
   doctor
   benchmarks --name all [--verify]
   prepare --input tasks.jsonl --out data/prepared --seed 42
-  search --search data/prepared/search.jsonl --confirmation data/prepared/confirmation.jsonl --config configs/search.json --out runs/search-1
+  search --search data/benchmarks/math/search.jsonl --config configs/aflow-search.json --out runs/search-1 [--test data/benchmarks/math/test.jsonl] [--resume]
+  legacy-search --search data/prepared/search.jsonl --config configs/search.json --out runs/legacy-1
   evaluate --bundle runs/search-1/best.json --test data/prepared/test.jsonl --out runs/test-1 [--resume]
   infer --bundle runs/search-1/best.json --question "..."
-Optional search --pool profiles.json; each invocation resets the frozen profile pool.
-Search supports prefixCache and agentCache.
+Default search reuses the official AFlow controller and fully reexecutes every validation pass.
 For continual infer/evaluate: --protocol continual --state-out state.json [--state previous-state.json].`);
 }
 async function loadBundle(path: string): Promise<Bundle> {
