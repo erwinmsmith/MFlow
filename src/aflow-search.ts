@@ -15,7 +15,7 @@ import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
 import { checkScoring, grade } from "./grading.js";
 import { append, save, digest, mean } from "./util.js";
-import { validateProgram } from "./strategy-program.js";
+import { validateProgram, normalizeProgram, PolicyContractError } from "./strategy-program.js";
 import type { Bundle } from "./search.js";
 
 export const aflowConfigSchema = z.object({
@@ -35,10 +35,11 @@ const proposalSchema = z.object({
   prompts: strategySchema.shape.prompts.unwrap(),
 }).strict();
 
-export const policyInterface = `SEARCH OBJECT: a JavaScript function BODY: (state) => Decision.
+export const policyInterface = `SEARCH OBJECT: a JavaScript function BODY, for example: return {action: "STOP"}; . A complete (state) => Decision function is also accepted and normalized to a body.
 It is called after Root solves once, and after every organization action. Use arbitrary conditionals, array operations, loops and local helper functions. No pre-enumerated edits or role catalogue.
 State: task {id,prompt}, step, usage {tokens,calls}, agents [{id,status,depth,turns,stalled,reviewed,challenged,profile,assigned?}], deficits [{id,text,owner,status,source?,artifactIds,deliveredIds}], outputs [{agentId,output}], artifacts [{id,source,type,content,deficitRefs}], edges and toolEvents. Profiles contain capability, objective, private_context, tools and reasoning. All are fresh task-local data. No reference answers are available at execution.
 Decision: {action, agentId?, deficitId?, request?, ruleId?}.
+Deficit status values are exactly MISSING, LATENT, ACTIVE, DELIVERED, RESOLVED (uppercase); there is no 'open' status. An unresolved deficit has status !== 'RESOLVED'. Every deficit has an owner. Return a Decision object on every path, never undefined. request is permitted ONLY for DERIVE without deficitId. For CONTINUE-specific guidance, edit the agent/integrate prompt; do not attach request to CONTINUE.
 CONTINUE executes agentId (default root), integrating delivered evidence. REVIEW executes a review prompt. DERIVE with deficitId creates an agent for that deficit; DERIVE with request and agentId creates a NEW open semantic assignment owned by that agent. The Factory generates its capability, objective, context and tools. CONNECT with deficitId delivers source artifacts to the owner; CONTINUE must then consume them. REACTIVATE resumes a dormant deficit source. DORMANT deactivates agentId; DISCONNECT removes delivery links; STOP returns Root's latest answer. CHALLENGE is a convenience independent-check action; DERIVE request is fully open-ended.
 To spawn several agents or recurse, inspect state and issue successive decisions. Return one action per invocation, route and integrate the results, then terminate. A strategy program cannot itself call a model, tool, filesystem, network, import, clock or process. Agent execution is owned by published Ditto.
 Return the entire program and all five editable prompts: agent, factory, review, integrate, retrieve. These fields replace the corresponding inference instructions. Factory must select tools from available_tools: arithmetic and python (isolated Python 3 standard library, print results, no network or host files). Use react reasoning for tools. Agent outputs remain structured: claims, artifacts, open_deficits, resolved_deficits, candidate_answer. Preserve the schema contract; only owners can resolve their deficits. There is no fixed sampling count, spawned-agent count, depth or episode token limit. Do not embed validation answers or task IDs into the policy or prompts.
@@ -47,13 +48,17 @@ This interface replaces AFlow's Python imports/Custom prompt representation. All
 export async function parallelMap<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let failed = false, failure: unknown;
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     for (;;) {
+      if (failed) return;
       const index = next++;
       if (index >= items.length) return;
-      results[index] = await fn(items[index], index);
+      try { results[index] = await fn(items[index], index); }
+      catch (error) { failed = true; failure = error; return; }
     }
   }));
+  if (failed) throw failure;
   return results;
 }
 
@@ -148,6 +153,9 @@ export async function runAFlowSearch(options: {
           await save(join(dir, `${index}.execution.json`), execution);
           break;
         } catch (error) {
+          // A deterministic application/strategy contract failure is not a model
+          // quality observation and cannot be repaired by five paid reruns.
+          if (error instanceof PolicyContractError) throw error;
           row.error = String(error);
           await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', attempt, error: String(error), at: new Date().toISOString() });
           if (attempt < 4) await delay(1000);
@@ -176,10 +184,20 @@ export async function runAFlowSearch(options: {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }));
         try {
-          const proposal = await agents.structured('aflow-optimizer', input.prompt, {}, proposalSchema, runtimeConfig.episode);
-          validateProgram(proposal.value.program);
-          result = proposal.value;
-          await append(join(out, 'proposals.jsonl'), { round: input.round, ...proposal.value });
+          let proposal = (await agents.structured('aflow-optimizer', input.prompt, {}, proposalSchema, runtimeConfig.episode)).value;
+          for (let attempt = 0; ; attempt++) {
+            try { validateProgram(proposal.program); break; }
+            catch (error) {
+              await append(join(out, 'contract-errors.jsonl'), { round: input.round, attempt, proposal, error: String(error) });
+              if (attempt >= 2) throw error;
+              proposal = (await agents.structured('aflow-contract-repair',
+                'Repair only the program/interface contract. Preserve the proposed optimization and substantive prompts. Do not solve any benchmark or optimize answers. Return the complete corrected artifact.\n' + policyInterface,
+                { proposal, error: String(error) }, proposalSchema, runtimeConfig.episode)).value;
+            }
+          }
+          proposal.program = normalizeProgram(proposal.program);
+          result = proposal;
+          await append(join(out, 'proposals.jsonl'), { round: input.round, ...proposal });
         } finally {
           await append(join(out, 'optimizer-usage.jsonl'), { round: input.round, records: agents.provider.records });
         }

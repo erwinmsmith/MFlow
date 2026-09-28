@@ -134,7 +134,13 @@ def main():
             (Path(directory) / 'log.json').write_text(json.dumps(failures, indent=2) + '\n')
             return result['score'], result['meanTokens'], result['tokens']
         Evaluator.graph_evaluate = graph_evaluate
-        return await original_evaluate(optimizer, directory, validation_n, data, initial)
+        try:
+            return await original_evaluate(optimizer, directory, validation_n, data, initial)
+        except Exception:
+            # A technical failure is not zero accuracy or a partially eligible parent.
+            data[:] = [r for r in data if r['round'] != number]
+            optimizer.data_utils.save_results(str(workflows / 'results.json'), data)
+            raise
     optimizer.evaluation_utils.evaluate_graph = evaluate
 
     original_optimize = optimizer._optimize_graph

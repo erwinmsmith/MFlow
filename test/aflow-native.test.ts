@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { programDecision } from '../src/strategy-program.js';
+import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
 import { runAFlowSearch, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
@@ -43,6 +43,30 @@ test('program faults cannot fabricate a valid action or access host globals', ()
   assert.throws(() => programDecision('while(true) {}', state), /timed out/);
   assert.throws(() => programDecision('return process.env;', state), /process is not defined/);
   assert.throws(() => programDecision('return {action:"STOP",agentId:"unknown"}', state), /unknown agent/);
+});
+
+test('complete functions normalize without changing decisions; invalid contracts fail before benchmark calls', () => {
+  const state = { deficits: [], agents: [{ id: 'root', status: 'ACTIVE' as const, depth: 0, turns: 1, stalled: false }], maxDepth: 3 };
+  for (const code of ['state => ({action:"STOP"})', '(state) => { return {action:"STOP"}; }', 'function policy(state) { return {action:"STOP"}; }']) {
+    validateProgram(code);
+    assert.equal(programDecision(normalizeProgram(code), state).action, 'STOP');
+  }
+  assert.throws(() => validateProgram('const answer = 1;'), PolicyContractError);
+  const helperBody = 'function stop() { return {action:"STOP"}; } return stop();';
+  assert.equal(normalizeProgram(helperBody), helperBody);
+  validateProgram(helperBody);
+  assert.throws(() => validateProgram('(state) => { return {action:"CONTINUE", request:"format answer"}; }'), /request requires DERIVE/);
+  assert.throws(() => validateProgram('return {action:"FAKE"};'), PolicyContractError);
+});
+
+test('validation drains in-flight work and stops scheduling after a technical failure', async () => {
+  let calls = 0, active = 0;
+  await assert.rejects(parallelMap([0, 1, 2, 3, 4], 2, async (i) => {
+    calls++; active++;
+    if (i === 0) { active--; throw new PolicyContractError('bad policy'); }
+    await new Promise((r) => setTimeout(r, 10)); active--; return i;
+  }), PolicyContractError);
+  assert.equal(calls, 2); assert.equal(active, 0);
 });
 
 test('published Ditto executes isolated Python and returns its observation to the agent', async (t) => {
