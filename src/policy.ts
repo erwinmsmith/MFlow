@@ -118,7 +118,7 @@ const directions: Record<string, Action[]> = {
   DELIVERED: ["CONTINUE", "DERIVE", "REACTIVATE"],
   RESOLVED: ["DORMANT", "DISCONNECT", "STOP"],
   NONE: ["STOP", "REVIEW", "CHALLENGE", "DORMANT"],
-  ANY: [...actions],
+  ANY: actions.filter(action => action !== "RECONFIGURE"),
 };
 export function mutations(
   parent: Strategy,
@@ -272,5 +272,6 @@ export function policyHash(strategy: Strategy): string {
   return digest({
     rules: strategy.rules.map(({ id: _id, ...r }) => r),
     fallback: strategy.fallback,
+    program: strategy.program, prompts: strategy.prompts, organization: strategy.organization,
   });
 }

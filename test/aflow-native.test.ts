@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
-import { runAFlowSearch, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
+import { runAFlowSearch, initialOrganization, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { initialStrategy, limitsSchema, rootProfile } from '../src/types.js';
@@ -115,7 +115,10 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     let value;
     if (payload.kind === 'aflow-optimizer') {
       proposals++;
-      value = { modification: `Change the agent instructions (${proposals}).`, program: 'return {action:"STOP"};', prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
+      assert.ok(input.messages[0].content.includes('parent_execution'));
+      assert.ok(input.messages[0].content.includes('initialAgents'));
+      assert.ok(input.messages[0].content.includes('transitions'));
+      value = { organization: initialOrganization, modification: `Change the agent instructions (${proposals}).`, program: 'return {action:"STOP"};', prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
     } else {
       agents++;
       const candidate = input.messages[0].content.includes('NATIVE-CANDIDATE-MARKER');
@@ -139,6 +142,14 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.deepEqual(records.map((r: {score: number}) => r.score), [1, 1, 0, 0]);
     const bundle = JSON.parse(await readFile(join(options.out, 'best.json'), 'utf8'));
     assert.equal(bundle.strategy.id, 's1');
+    assert.deepEqual(bundle.pool, initialOrganization.initialAgents);
+    assert.deepEqual(bundle.strategy.organization, initialOrganization);
+    const child = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/strategy.json'), 'utf8'));
+    assert.deepEqual(child.organization, initialOrganization);
+    const parentContext = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/parent_context.json'), 'utf8'));
+    assert.deepEqual(parentContext.strategy.organization, initialOrganization);
+    assert.equal(parentContext.execution.length, 2);
+    assert.equal(parentContext.execution[0].evaluated, 4);
     assert.equal(bundle.config.prefixCache, false);
     await runAFlowSearch({ ...options, resume: true });
     assert.equal(agents, 16); assert.equal(proposals, 1);
@@ -165,5 +176,27 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
   } finally {
     server.close(); await rm(dir, { recursive: true, force: true });
     if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;
+  }
+});
+
+test('provider unavailability aborts native search without writing zero scores', async (t) => {
+  const python=resolve('../MFlow-baselines/.venv-aflow/bin/python'), source=resolve('../MFlow-baselines/sources/AFlow');
+  try { await access(python); await access(source); await pythonImage(); }
+  catch { t.skip('Native controller and Docker required'); return; }
+  const dir=await mkdtemp(join(tmpdir(),'mflow-outage-'));
+  const oldKey=process.env.MFLOW_API_KEY; process.env.MFLOW_API_KEY='fixture';
+  let calls=0;
+  const server=createServer((_req,res)=>{calls++;res.writeHead(402,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'fixture unavailable'}}));});
+  await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));
+  const addr=server.address();assert.ok(addr&&typeof addr!=='string');
+  try {
+    const search=join(dir,'tasks.jsonl');await writeFile(search,JSON.stringify({id:'fixture',prompt:'fixture',answer:'42',metric:'exact'})+'\n');
+    await assert.rejects(runAFlowSearch({out:join(dir,'search'),search,source,python,config:{maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${addr.port}`,temperature:0,seed:42}}),/controller exited/);
+    assert.equal(calls,1);
+    await assert.rejects(access(join(dir,'search/round-1/pass-0/0.json')));
+    await assert.rejects(access(join(dir,'search/best.json')));
+  } finally {
+    server.close();await rm(dir,{recursive:true,force:true});
+    if(oldKey===undefined)delete process.env.MFLOW_API_KEY;else process.env.MFLOW_API_KEY=oldKey;
   }
 });

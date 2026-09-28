@@ -11,6 +11,7 @@ export const actions = [
   "DISCONNECT",
   "DORMANT",
   "STOP",
+  "RECONFIGURE",
 ] as const;
 export const statuses = [
   "MISSING",
@@ -35,12 +36,34 @@ export const ruleSchema = z
     action: z.enum(actions),
   })
   .strict();
+export const profileSchema = z
+  .object({
+    id: z.string().min(1),
+    objective: z.string().min(1),
+    capability: z.string().min(1),
+    private_context: z.string(),
+    tools: z.array(z.string()),
+    reasoning: z.enum(["cot", "long-cot", "react"]),
+    expected_output: z.string().min(1),
+    stop_condition: z.string().min(1),
+  })
+  .strict();
+export type AgentProfile = z.infer<typeof profileSchema>;
+export const organizationSchema = z.object({
+  initialAgents: z.array(profileSchema).min(1),
+}).strict().superRefine(({ initialAgents }, ctx) => {
+  if (initialAgents.filter(p => p.id === "root").length !== 1 ||
+      new Set(initialAgents.map(p => p.id)).size !== initialAgents.length)
+    ctx.addIssue({ code: "custom", message: "Organization needs exactly one root and unique agent IDs" });
+});
+export const capabilitySchema = profileSchema.omit({ id: true });
 export const strategySchema = z
   .object({
     id: z.string().min(1),
     rules: z.array(ruleSchema).min(1).max(24),
     fallback: z.enum(actions),
     program: z.string().min(1).optional(),
+    organization: organizationSchema.optional(),
     prompts: z.object({
       agent: z.string().min(1), factory: z.string().min(1),
       review: z.string().min(1), integrate: z.string().min(1),
@@ -57,19 +80,6 @@ export type Rule = z.infer<typeof ruleSchema>;
 export type Action = (typeof actions)[number];
 export type DeficitStatus = (typeof statuses)[number];
 
-export const profileSchema = z
-  .object({
-    id: z.string().min(1),
-    objective: z.string().min(1),
-    capability: z.string().min(1),
-    private_context: z.string(),
-    tools: z.array(z.string()),
-    reasoning: z.enum(["cot", "long-cot", "react"]),
-    expected_output: z.string().min(1),
-    stop_condition: z.string().min(1),
-  })
-  .strict();
-export type AgentProfile = z.infer<typeof profileSchema>;
 export const agentOutputSchema = z
   .object({
     claims: z.array(
@@ -138,6 +148,7 @@ export interface PolicyState {
   edges?: Edge[];
   toolEvents?: unknown[];
   usage?: { tokens: number; calls: number };
+  availableTools?: string[];
   deficits: Deficit[];
   agents: {
     id: string;
@@ -158,6 +169,7 @@ export interface Decision {
   deficitId?: string;
   ruleId: string;
   request?: string;
+  profile?: z.infer<typeof capabilitySchema>;
 }
 export interface TraceStep {
   state: PolicyState;

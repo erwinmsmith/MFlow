@@ -1,6 +1,6 @@
 import { Script } from "node:vm";
 import { z } from "zod";
-import { actions, statuses, rootProfile, type PolicyState, type Decision } from "./types.js";
+import { actions, statuses, rootProfile, capabilitySchema, type AgentProfile, type PolicyState, type Decision } from "./types.js";
 
 export class PolicyContractError extends Error {}
 
@@ -22,9 +22,10 @@ const decisionSchema = z.object({
   action: z.enum(actions), agentId: z.string().optional(),
   deficitId: z.string().optional(), request: z.string().min(1).optional(),
   ruleId: z.string().default("program"),
+  profile: capabilitySchema.optional(),
 }).strict();
 
-export function validateProgram(body: string) {
+export function validateProgram(body: string, profiles: AgentProfile[] = [rootProfile]) {
   body = normalizeProgram(body);
   new Script(`(function(state) { "use strict";\n${body}\n})`);
   // Interface fixtures contain no benchmark questions/labels. These are contract
@@ -33,15 +34,15 @@ export function validateProgram(body: string) {
     for (const status of [undefined, ...statuses]) {
       const state: PolicyState = {
         task: { id: 'contract-fixture', prompt: 'Synthetic interface fixture, not a benchmark problem.' },
-        step: status ? 1 : 0, usage: { tokens: 0, calls: 1 }, maxDepth: Number.MAX_SAFE_INTEGER,
-        agents: [{ id: 'root', profile: rootProfile, status: 'ACTIVE', depth: 0, turns: 1, stalled: false, reviewed: false, challenged: false },
-          ...(status && status !== 'MISSING' ? [{ id: 'agent-1', profile: { ...rootProfile, id: 'agent-1' }, status: status === 'LATENT' ? 'DORMANT' as const : 'ACTIVE' as const, depth: 1, turns: 1, stalled: false, assigned: 'd' }] : [])],
+        availableTools: ['arithmetic', 'python'], step: status ? 1 : 0, usage: { tokens: 0, calls: 1 }, maxDepth: Number.MAX_SAFE_INTEGER,
+        agents: [...profiles.map(profile => ({ id: profile.id, profile, status: profile.id === 'root' ? 'ACTIVE' as const : 'DORMANT' as const, depth: 0, turns: profile.id === 'root' ? 1 : 0, stalled: false, reviewed: false, challenged: false })),
+          ...(status && status !== 'MISSING' ? [{ id: 'contract-child', profile: { ...rootProfile, id: 'contract-child' }, status: status === 'LATENT' ? 'DORMANT' as const : 'ACTIVE' as const, depth: 1, turns: 1, stalled: false, assigned: 'd' }] : [])],
         deficits: status ? [{ id: 'd', text: 'Synthetic missing evidence', owner: 'root', status,
-          ...(status !== 'MISSING' ? { source: 'agent-1' } : {}),
+          ...(status !== 'MISSING' ? { source: 'contract-child' } : {}),
           artifactIds: ['ACTIVE', 'DELIVERED', 'RESOLVED'].includes(status) ? ['e'] : [],
           deliveredIds: ['DELIVERED', 'RESOLVED'].includes(status) ? ['e'] : [] }] : [],
         outputs: [{ agentId: 'root', output: { candidate_answer: answer, claims: [], artifacts: [], open_deficits: [], resolved_deficits: [] } }],
-        artifacts: status && ['ACTIVE', 'DELIVERED', 'RESOLVED'].includes(status) ? [{ id: 'e', source: 'agent-1', type: 'evidence', content: 'Synthetic evidence', deficitRefs: ['d'] }] : [],
+        artifacts: status && ['ACTIVE', 'DELIVERED', 'RESOLVED'].includes(status) ? [{ id: 'e', source: 'contract-child', type: 'evidence', content: 'Synthetic evidence', deficitRefs: ['d'] }] : [],
         edges: [], toolEvents: [],
       };
       programDecision(body, state);
@@ -54,19 +55,27 @@ export function validateProgram(body: string) {
 export function programDecision(body: string, state: PolicyState): Decision {
   const script = new Script(`JSON.stringify((function(state) { "use strict";\n${normalizeProgram(body)}\n})(${JSON.stringify(state)}))`);
   try {
-  const result = script.runInNewContext(Object.create(null), {
-    timeout: 100, contextCodeGeneration: { strings: false, wasm: false },
-    microtaskMode: "afterEvaluate",
-  });
-  if (result === undefined) throw new Error('Policy returned undefined; return a Decision object on every reachable path');
-  const decision = decisionSchema.parse(JSON.parse(result));
-  if (decision.agentId && !state.agents.some((a) => a.id === decision.agentId))
-    throw new Error("Policy selected an unknown agent");
-  if (decision.deficitId && !state.deficits.some((d) => d.id === decision.deficitId))
-    throw new Error("Policy selected an unknown deficit");
-  if (decision.request && (decision.action !== "DERIVE" || decision.deficitId))
-    throw new Error("A new request requires DERIVE without an existing deficitId");
-  return decision;
+    const result = script.runInNewContext(Object.create(null), {
+      timeout: 100, contextCodeGeneration: { strings: false, wasm: false },
+      microtaskMode: "afterEvaluate",
+    });
+    if (result === undefined) throw new Error('Policy returned undefined; return a Decision object on every reachable path');
+    const decision = decisionSchema.parse(JSON.parse(result));
+    if (decision.agentId && !state.agents.some((a) => a.id === decision.agentId))
+      throw new Error("Policy selected an unknown agent");
+    if (decision.deficitId && !state.deficits.some((d) => d.id === decision.deficitId))
+      throw new Error("Policy selected an unknown deficit");
+    if (decision.request && (decision.action !== "DERIVE" || decision.deficitId))
+      throw new Error("A new request requires DERIVE without an existing deficitId");
+    if (decision.profile?.tools.some(t => state.availableTools && !state.availableTools.includes(t)))
+      throw new Error("Profile requested an unavailable tool");
+    if (decision.profile && !["DERIVE", "RECONFIGURE"].includes(decision.action))
+      throw new Error("profile is allowed only for DERIVE or RECONFIGURE");
+    if (decision.action === "RECONFIGURE" && !decision.profile)
+      throw new Error("RECONFIGURE requires a complete profile");
+    if (["CONTINUE", "REVIEW", "RECONFIGURE"].includes(decision.action) && !decision.agentId)
+      decision.agentId = "root";
+    return decision;
   } catch (error) {
     throw new PolicyContractError(`Policy contract violation: ${String(error)}`);
   }

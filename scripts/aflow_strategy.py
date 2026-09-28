@@ -23,13 +23,19 @@ def main():
     from scripts.prompts.optimize_prompt import WORKFLOW_INPUT, WORKFLOW_OPTIMIZE_PROMPT
     import numpy as np
 
+    class ProviderUnavailable(BaseException):
+        """Abort the search without scoring an unavailable provider as policy failure."""
+
     def rpc(route, data=None):
         req = urllib.request.Request(endpoint + '/' + route, data=json.dumps(data or {}).encode(), headers={'Content-Type': 'application/json'})
         try:
             with urllib.request.urlopen(req, timeout=None) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
-            raise RuntimeError(error.read().decode()) from None
+            body = error.read().decode()
+            if json.loads(body).get('unavailable'):
+                raise ProviderUnavailable(body) from None
+            raise RuntimeError(body) from None
 
     init = rpc('bootstrap')
     config = init['config']
@@ -63,14 +69,18 @@ def main():
     def write_graph(directory, response, number, dataset):
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
-        (path / 'strategy.json').write_text(json.dumps({'id': f's{number}', 'program': response['graph'], 'prompts': json.loads(response['prompt'])}, indent=2) + '\n')
+        (path / 'strategy.json').write_text(json.dumps({'id': f's{number}', **json.loads(response['graph']), 'prompts': json.loads(response['prompt'])}, indent=2) + '\n')
 
     if not (workflows / 'round_1/strategy.json').exists():
-        write_graph(workflows / 'round_1', {'graph': init['program'], 'prompt': json.dumps(init['prompts'])}, 1, 'MATH')
+        write_graph(workflows / 'round_1', {'graph': json.dumps({'program': init['program'], 'organization': init['organization']}), 'prompt': json.dumps(init['prompts'])}, 1, 'MATH')
+
+    def execution_context(number, path):
+        directory = Path(path) / f'round_{number}'
+        return [json.loads(p.read_text()) for p in sorted(directory.glob('organization_*.json'))]
 
     def read_graph(number, path):
         strategy = json.loads((Path(path) / f'round_{number}/strategy.json').read_text())
-        return json.dumps(strategy['prompts']), strategy['program']
+        return json.dumps(strategy['prompts']), json.dumps({'program': strategy['program'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)})
 
     optimizer.graph_utils.write_graph_files = write_graph
     optimizer.graph_utils.read_graph_files = read_graph
@@ -93,13 +103,13 @@ def main():
         begin = system.index('The prompt you need to generate')
         end = system.index('Considering information loss', begin)
         system = system[:begin] + 'Generate the complete JSON map of agent, factory, review, integrate and retrieve prompts. All five fields are editable.\n' + system[end:]
-        return system + '\n' + user + '\n' + init['interface'] + '\nReturn modification, program and prompts according to the response schema. The strategy dynamically organizes agents; do not generate a fixed task-specific graph or benchmark answers.'
+        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members and routing from this parent, and make one focused change. Do not copy task answers or episodic memory into reusable profiles. Return program and organization only as executable fields; parent_execution is evidence.\n' + user + '\n' + init['interface'] + '\nReturn modification, organization, program and prompts according to the response schema. The strategy dynamically organizes agents; do not generate a fixed task-specific graph or benchmark answers.'
 
     optimizer.graph_utils.create_graph_optimize_prompt = prompt
 
     async def propose(self, prompt, formatter):
         result = await asyncio.to_thread(rpc, 'propose', {'round': optimizer.round + 1, 'prompt': prompt})
-        return {'modification': result['modification'], 'graph': result['program'], 'prompt': json.dumps(result['prompts'])}
+        return {'modification': result['modification'], 'graph': json.dumps({'program': result['program'], 'organization': result['organization']}), 'prompt': json.dumps(result['prompts'])}
     AsyncLLM.call_with_format = propose
     # Prevent the native formatting fallback from bypassing Ditto.
     async def raw(self, prompt):
@@ -109,6 +119,12 @@ def main():
     original_experience = optimizer.experience_utils.create_experience_data
     def create_experience(parent, modification):
         experience = original_experience(parent, modification)
+        directory = workflows / f'round_{optimizer.round + 1}'
+        (directory / 'parent_context.json').write_text(json.dumps({
+            'parentRound': parent['round'],
+            'strategy': json.loads((workflows / f"round_{parent['round']}" / 'strategy.json').read_text()),
+            'execution': execution_context(parent['round'], workflows),
+        }, indent=2) + '\n')
         checkpoint.update(round=optimizer.round, phase='evaluating', experience=experience)
         persist()
         return experience
@@ -127,6 +143,7 @@ def main():
             pass_index += 1
             strategy = json.loads((Path(directory) / 'strategy.json').read_text())
             result = await asyncio.to_thread(rpc, 'evaluate', {'round': number, 'repeat': repeat, 'strategy': strategy})
+            (Path(directory) / f'organization_{repeat}.json').write_text(json.dumps(result['organizationSummary'], indent=2) + '\n')
             (Path(directory) / f'failures_{repeat}.json').write_text(json.dumps(result['failures']) + '\n')
             failures = []
             for prior in range(repeat + 1):

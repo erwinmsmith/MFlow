@@ -34,7 +34,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-aflow-program-v6/policy-contract/custom-prompts/arithmetic-python-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-aflow-program-v7/mas-population/capability-evolution/arithmetic-python-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -490,6 +490,11 @@ export class DittoAgents {
       throw error;
     }
   }
+  validateProfile(profile: AgentProfile) {
+    profileSchema.parse(profile);
+    if (profile.tools.some(name => !this.tools.some(tool => tool.name === name)))
+      throw new Error("Agent requested an unavailable tool");
+  }
   async derive(
     deficit: Deficit,
     parent: AgentProfile,
@@ -518,8 +523,7 @@ export class DittoAgents {
     );
     if (result.value.id !== id)
       throw new Error("Factory changed assigned agent ID");
-    if (result.value.tools.some((t) => !this.tools.some((x) => x.name === t)))
-      throw new Error("Factory requested an unavailable tool");
+    this.validateProfile(result.value);
     return result.value;
   }
   async retrieve(

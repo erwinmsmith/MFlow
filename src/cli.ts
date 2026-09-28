@@ -242,7 +242,7 @@ async function run() {
         agents,
         bundle.config.episode,
         canonical?.profiles() ?? bundle.pool,
-      ).run(bundle.strategy, task);
+      ).run(canonical ? { ...bundle.strategy, organization: undefined } : bundle.strategy, task);
     };
     const commit = async (
       execution: Awaited<ReturnType<typeof execute>>,

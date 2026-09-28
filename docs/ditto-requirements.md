@@ -76,3 +76,7 @@ TokenBudget 可以严格控制**预留额度**，但无法自行知道任意 pro
 Python 计算无需新增 spawn 专用能力：现有 `RegisteredTool`、Interaction、`Sandbox.run` 和 `createLocalSandboxExecutor` 足以正常注册并执行一次性容器工具。新 adapter 只提供工具 schema 和 Docker 参数；未复制执行器、未使用 Ditto 源码或私有模块。容器不挂载 host 文件、不继承模型凭据、不保留跨调用状态，镜像 ID 写入实验清单。已验证工具执行结果通过 Ditto 返回 agent。
 
 这不满足 DITTO-002 的任意外部资源事务要求，因此 Python 工具不参与 prefix/cache/continual commit。v4 默认关闭这些机制；标准协议逐题重置，可直接使用现有包。DITTO-004 的请求增量进度仍待发布包支持，当前逐请求账本只证明请求已发送/已结算，不能证明长调用正在生成。
+
+## 2026-09-28：异构 MAS 配置与动态能力复核
+
+v5 的可复用 profiles、运行图、父节点上下文、成员能力重配置均是应用的组织策略数据。执行时仍通过公开 Ditto reasoning 和工具配置组装；新建、复用、递归、工具隔离的测试使用 registry 0.1.1。未发现此次功能需要新增通用包能力；既有 DITTO-004（真实长请求增量进度及取消用量）仍未解决，不在应用内复制 Provider。

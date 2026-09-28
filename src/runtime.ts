@@ -37,11 +37,13 @@ export class OrganizationRuntime {
     reuse?: { checkpoint: EpisodeCheckpoint; prefix: EpisodeCheckpoint[] },
   ): Promise<Execution> {
     this.agents.prompts = strategy.prompts;
+    const pool = strategy.organization?.initialAgents ?? this.pool;
+    for (const profile of pool) this.agents.validateProfile(profile);
     if (reuse || this.captureCheckpoints) this.agents.assertReplaySafe();
     const version = stateDigest({
-      code: "mflow-episode-v2",
+      code: "mflow-episode-v3-mas",
       limits: this.limits,
-      pool: this.pool,
+      pool,
       model: this.agents.model,
       resources: this.agents.resourceVersion,
       task,
@@ -77,7 +79,7 @@ export class OrganizationRuntime {
       startedCalls = this.agents.provider.calls;
     const population: AgentState[] =
       restored?.population ??
-      structuredClone(this.pool).map((profile) => ({
+      structuredClone(pool).map((profile) => ({
         profile,
         status: profile.id === "root" ? "ACTIVE" : "DORMANT",
         depth: 0,
@@ -115,6 +117,7 @@ export class OrganizationRuntime {
     });
     const state = (): PolicyState =>
       structuredClone({
+        availableTools: this.agents.tools.map(t => t.name),
         ...(strategy.program ? { task, step: trace.length, outputs, artifacts, edges, toolEvents, usage: { tokens: tokens(), calls: calls() } } : {}),
         deficits,
         agents: population.map((a) => ({
@@ -292,14 +295,21 @@ export class OrganizationRuntime {
           decision.deficitId = id;
         }
         const owner =
-          population.find((a) => a.profile.id === d?.owner) ?? population[0];
+          population.find((a) => a.profile.id === (d?.owner ?? decision.agentId ?? "root"))!;
         let event: string = decision.action;
         if (decision.action === "STOP") {
           trace.push({ state: snapshot, decision, event });
           stopReason = "strategy";
           break;
         }
-        if (decision.action === "CONTINUE" || decision.action === "REVIEW") {
+        if (decision.action === "RECONFIGURE") {
+          const target = population.find(a => a.profile.id === decision.agentId)!;
+          const profile = { ...decision.profile!, id: target.profile.id };
+          this.agents.validateProfile(profile);
+          target.profile = profile;
+          target.reviewed = false;
+          retrievalAttempts.clear();
+        } else if (decision.action === "CONTINUE" || decision.action === "REVIEW") {
           const target = population.find(
             (a) => a.profile.id === decision.agentId,
           );
@@ -328,7 +338,9 @@ export class OrganizationRuntime {
             const assignment = requested!;
             let n = population.length;
             while (population.some((a) => a.profile.id === `agent-${n}`)) n++;
-            const profile = await this.agents.derive(
+            const profile = decision.profile
+              ? { ...decision.profile, id: `agent-${n}` }
+              : await this.agents.derive(
               assignment,
               owner.profile,
               task,
@@ -336,6 +348,7 @@ export class OrganizationRuntime {
               remaining(),
               challenge ? undefined : owner.output,
             );
+            this.agents.validateProfile(profile);
             const agent: AgentState = {
               profile,
               status: "ACTIVE",
@@ -356,7 +369,7 @@ export class OrganizationRuntime {
             await execute(agent);
           }
         } else if (decision.action === "REACTIVATE") {
-          const source = population.find((a) => a.profile.id === d?.source);
+          const source = population.find((a) => a.profile.id === (decision.agentId ?? d?.source));
           if (
             !d ||
             !source ||
@@ -366,6 +379,7 @@ export class OrganizationRuntime {
           )
             event = "REACTIVATE:unavailable";
           else {
+            d.source = source.profile.id;
             source.status = "ACTIVE";
             source.depth = owner.depth + 1;
             source.assigned = d.id;
