@@ -57,7 +57,7 @@ test("prefix recovery matches full child execution, charges only suffix and surv
   assert.deepEqual(restored.trace, full.trace);
   assert.equal(restored.tokens, full.tokens);
   assert.equal(restored.calls, full.calls);
-  assert.equal(restored.actualTokens, full.actualTokens - saved.state.tokens);
+  assert.equal(restored.actualTokens, full.actualTokens! - saved.state.tokens);
   assert.equal(restored.actualCalls, full.actualCalls - saved.state.calls);
   assert.deepEqual(saved, parent.checkpoints[0]);
   const other = await runtime.run(
@@ -122,7 +122,7 @@ test("agent cache preserves logical cost and invalidates on task or configuratio
     second = await runtime.run(adaptive, task);
   assert.equal(second.answer, first.answer);
   assert.equal(second.tokens, first.tokens);
-  assert.ok(second.actualTokens < first.actualTokens);
+  assert.ok(second.actualTokens! < first.actualTokens!);
   const different = await runtime.run(adaptive, {
     ...task,
     prompt: "Different multiplication",
@@ -132,7 +132,7 @@ test("agent cache preserves logical cost and invalidates on task or configuratio
     { ...rootProfile, private_context: "new resource state" },
   ]);
   assert.ok(
-    (await changed.run(adaptive, task)).actualTokens > second.actualTokens,
+    (await changed.run(adaptive, task)).actualTokens! > second.actualTokens!,
   );
 });
 

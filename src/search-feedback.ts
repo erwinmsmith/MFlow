@@ -18,7 +18,7 @@ export function behavior(results: Evaluated[]) {
   return {
     count: results.length,
     meanLogicalTokens: mean(results.map((r) => r.execution.tokens)),
-    actualTokens: results.reduce((n, r) => n + r.execution.actualTokens, 0),
+    actualTokens: results.some(r => r.execution.actualTokens === null) ? null : results.reduce((n, r) => n + r.execution.actualTokens!, 0),
     spawnedTasks: spawned, spawnWithoutRootIntegration: unintegrated, stops,
   };
 }

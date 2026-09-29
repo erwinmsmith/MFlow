@@ -230,7 +230,7 @@ export interface Execution {
   toolEvents: unknown[];
   tokens: number;
   calls: number;
-  actualTokens: number;
+  actualTokens: number | null;
   actualCalls: number;
   reusedPrefixSteps: number;
   checkpoints: EpisodeCheckpoint[];

@@ -85,7 +85,7 @@ test("search grows full strategies and promotes only after affected set and hold
       .some((n) =>
         n.results.some(
           (r) =>
-            !r.inheritedFrom && r.execution.actualTokens < r.execution.tokens,
+            !r.inheritedFrom && r.execution.actualTokens! < r.execution.tokens,
         ),
       ),
   );

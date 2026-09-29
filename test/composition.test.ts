@@ -5,7 +5,7 @@ import { OrganizationRuntime } from '../src/runtime.js';
 import { initialComposition, validateComposition } from '../src/composition.js';
 import { organizationEvidence, summarizeOrganizations } from '../src/organization.js';
 import { initialStrategy, limitsSchema, rootProfile, type AgentProfile, type Strategy } from '../src/types.js';
-import { programPrompts, initialOrganization } from '../src/aflow-search.js';
+import { legacyPrompts as programPrompts, legacyOrganization as initialOrganization } from '../src/aflow-search.js';
 import { ScriptedProvider, output } from './fixtures.js';
 import type { ModelProvider } from '@codesoul-co/ditto/worker/infer';
 

@@ -35,7 +35,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v2/reliable-node-feedback", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3/text-reasoning-local-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -56,6 +56,7 @@ export class MeteredProvider implements ModelProvider {
   denial?: "search" | "episode";
   lastFinishReason?: SampleOutput["finishReason"];
   lastFailure?: ProviderFailure;
+  readonly nodeFailures = new Map<string, ProviderFailure>();
   replayTokens = 0;
   replayCalls = 0;
   constructor(
@@ -95,6 +96,7 @@ export class MeteredProvider implements ModelProvider {
     this.denial = undefined;
     this.lastFinishReason = undefined;
     this.lastFailure = undefined;
+    this.nodeFailures.clear();
   }
   endEpisode() {
     this.episode = undefined;
@@ -118,6 +120,8 @@ export class MeteredProvider implements ModelProvider {
     options: { signal: AbortSignal },
   ): Promise<SampleOutput> {
     options.signal.throwIfAborted();
+    const nodeId = String(input.metadata?.nodeId ?? '');
+    this.nodeFailures.delete(nodeId);
     this.denial = undefined;
     this.lastFinishReason = undefined;
     const reservation = this.estimate(input);
@@ -145,10 +149,14 @@ export class MeteredProvider implements ModelProvider {
     } catch (error) {
       for (const settle of settlements) settle();
       await this.observe?.(this.records);
-      this.lastFailure = error instanceof ProviderFailure ? error : new ProviderFailure(
+      const failure = error instanceof ProviderFailure ? error : new ProviderFailure(
         typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'PROVIDER_FAILURE',
         error instanceof Error ? error.message : String(error), error);
-      throw this.lastFailure;
+      this.nodeFailures.set(nodeId, failure);
+      // A detected generation cycle belongs to this node. Network/auth/service
+      // failures remain episode-fatal, including when sibling nodes succeed.
+      if (!['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(failure.code)) this.lastFailure = failure;
+      throw failure;
     }
     let failure: unknown;
     for (const settle of settlements) {

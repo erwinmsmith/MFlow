@@ -70,6 +70,7 @@ export const initialVerifierComposition = `return loop({ id: 'verifier', plan: f
     const result = yield* graphStep(plan, null);
     if (result[node].status !== 'success') {
       failure = result[node].error;
+      if (failure?.code !== 'INVALID_MODEL_OUTPUT') break;
       continue;
     }
     const review = ctx.unwrap(result[node]);
@@ -115,6 +116,18 @@ function compile(source: string, context = createContext({ graph, loop, graphSte
   } catch (error) { throw new PolicyContractError(`Composition contract: ${String(error)}`); }
 }
 export function validateComposition(source: string) { compile(source); }
+
+/** Task-independent extraction used for routing; all full solutions stay in artifacts. */
+export function boxedAnswer(text: string): string | undefined {
+  const start = text.lastIndexOf('\\boxed{');
+  if (start < 0) return undefined;
+  let depth = 1;
+  for (let i = start + 7; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    if (text[i] === '}' && --depth === 0) return text.slice(start, i + 1);
+  }
+  return undefined;
+}
 
 export async function runComposition(agents: DittoAgents, limits: Limits, strategy: Strategy, task: TaskInput): Promise<Execution> {
   if (!strategy.composition || !strategy.organization || !strategy.prompts)
@@ -195,11 +208,30 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       return [{ role: 'system', content: instruction + '\nReturn one JSON object matching this schema:\n' + schema },
         { role: 'user', content: JSON.stringify({ kind: 'agent', payload: { task: api.task, profile: member(id).profile, evidence } }) }];
     },
+    textMessages: (id: string, evidence: unknown = '', prompt: keyof NonNullable<Strategy['prompts']> = 'agent') => {
+      const instruction = strategy.prompts![prompt];
+      if (!instruction) throw new PolicyContractError(`Unknown prompt ${prompt}`);
+      const p = member(id).profile;
+      return [{ role: 'user', content: instruction + '\n\n' + api.task.prompt +
+        (evidence ? '\n\n' + (typeof evidence === 'string' ? evidence : JSON.stringify(evidence)) : '') +
+        `\n\nAssignment: ${p.objective}\nCapability: ${p.capability}\nReasoning approach: ${p.reasoning}\nExpected output: ${p.expected_output}\nStopping criterion: ${p.stop_condition}\n${p.private_context}` }];
+    },
+    answerKey: (text: string) => boxedAnswer(text)?.replace(/\s/g, '') ?? '',
+    publishText: (id: string, text: string) => api.publish(id, {
+      claims: [], artifacts: [{ id: `${id}/solution-${outputs.length}`, type: 'solution', content: text, deficit_refs: [] }],
+      open_deficits: [], resolved_deficits: [], candidate_answer: boxedAnswer(text) ?? text,
+    }),
+    failedAgent: (id: string, error: unknown) => api.publish(id, {
+      claims: [], artifacts: [{ id: `${id}/failure-${outputs.length}`, type: 'execution_error', content: JSON.stringify(error), deficit_refs: [] }],
+      open_deficits: [{ id: `${id}/execution`, text: 'This execution produced no complete answer or verification evidence.' }],
+      resolved_deficits: [], candidate_answer: '',
+    }),
     formatMessages: (output: unknown) => [
       { role: 'system', content: 'Repair JSON syntax/schema only. Preserve the supplied answer and claims; do not solve again. JSON schema:\n' + schema },
       { role: 'user', content: JSON.stringify({ kind: 'agent-format-repair', output }) }],
-    request: (id: string, messages: unknown, useTools = true) => ({
-      messages, model: { provider: 'mflow', model: agents.model.model },
+    request: (id: string, messages: unknown, useTools = true, format: 'json' | 'text' = 'json') => ({
+      messages, model: { provider: 'mflow', model: agents.model.model,
+        providerOptions: { response_format: { type: format === 'text' ? 'text' : 'json_object' } } },
       generation: { temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens,
         ...(new URL(agents.model.baseUrl).hostname === 'api.deepseek.com' ? {} : { seed: agents.model.seed }) },
       actions: useTools ? agents.tools.filter(t => member(id).profile.tools.includes(t.name)).map(t => ({
@@ -208,6 +240,8 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     }),
     unwrap: (value: { status: string; output?: unknown; error?: unknown }) => {
       if (value.status !== 'success') throw new Error(`Ditto node failed: ${JSON.stringify(value.error)}`);
+      const output = value.output as { finishReason?: string; stopReason?: string };
+      if (output?.finishReason === 'length' || output?.stopReason === 'max_tokens') throw new Error('Incomplete node output');
       return value.output;
     },
     decode: (content: string) => agentOutputSchema.parse(JSON.parse(content.trim().replace(/^```(?:json)?\s*\n|\n```$/g, ''))),
@@ -246,7 +280,10 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           throw new PolicyContractError(`Agent ${id} requested an unavailable action`);
       }
       // Deployment settings cannot be optimized into another provider/model.
-      value = { ...value, model: { provider: 'mflow', model: agents.model.model },
+      const format = value.model?.providerOptions?.response_format?.type ?? 'json_object';
+      if (!['text', 'json_object'].includes(format)) throw new PolicyContractError('Unsupported response format');
+      value = { ...value, model: { provider: 'mflow', model: agents.model.model,
+        providerOptions: { response_format: { type: format } } },
         generation: { ...value.generation, temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens },
         metadata: { ...value.metadata, kind: 'agent', agentId: id, nodeId: task.id } };
       if (task.node === 'INFER.REASONING.TRAJECTORY')
@@ -259,7 +296,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     }
     return value;
   };
-  const before = agents.provider.tokens, callsBefore = agents.provider.calls;
+  const before = agents.provider.tokens, callsBefore = agents.provider.calls, recordsBefore = agents.provider.records.length;
   agents.provider.beginEpisode(limits.maxTokens, { runId: task.id, branchId: strategy.id });
   const runtime = agents.runtime(agents.tools.map(t => t.name), limits.timeoutMs);
   const signal = AbortSignal.timeout(limits.timeoutMs);
@@ -286,25 +323,28 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           });
           topology.push({ id: node.id, type: node.node, dependencies: [...node.dependencies] });
         }
-        const result = yield* graphStep(checked, invocation.input, { concurrency: invocation.options.concurrency, signal });
-        orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: structuredClone(result) });
+        const result = { ...(yield* graphStep(checked, invocation.input, { concurrency: invocation.options.concurrency, signal })) };
+        // Return recoverable generation failures as node feedback. The searched
+        // policy decides whether to switch method, derive another member or keep
+        // an earlier complete answer. No partial output becomes a valid answer.
+        if (agents.provider.lastFailure) throw agents.provider.lastFailure;
         for (const node of topology) {
           const output = result[node.id] as any;
           if (node.type.startsWith('INFER.')) {
-            if (output?.status !== 'success') {
-              // Native structured-node schema failures are visible to the policy,
-              // which may retry that node against the same target. Transport and
-              // incomplete responses still abort; never turn them into evidence.
-              if (node.type === 'INFER.REASONING.REFLECT' && output?.error?.code === 'INVALID_MODEL_OUTPUT' && !agents.provider.lastFailure) continue;
-              throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
-            }
-            if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
-              throw new EpisodeExhausted('Model output limit reached', 'output_limit');
-            if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))
-              throw new Error(`Ditto node ${node.id} did not complete`);
+            const providerError = agents.provider.nodeFailures.get(node.id);
+            if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(providerError.code))
+              result[node.id] = { status: 'error', error: { code: providerError.code, message: providerError.message } };
+            else if (output?.status !== 'success') {
+              if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(output?.error?.code))
+                throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
+            } else if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
+              result[node.id] = { status: 'error', error: { code: 'OUTPUT_LIMIT', message: 'Provider output limit reached; partial output is not evidence' } };
+            else if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))
+              result[node.id] = { status: 'error', error: { code: 'INCOMPLETE_MODEL_OUTPUT', message: 'Node produced no complete response' } };
           }
           if (node.type === 'INTERACTION.OBSERVE') toolEvents.push(output);
         }
+        orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: structuredClone(result) });
         next = advance(result);
       }
       if (typeof next.value !== 'string') throw new PolicyContractError('MAS loop must return the final answer string');
@@ -314,7 +354,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     return { taskId: task.id, strategyId: strategy.id, answer, orchestration,
       trace: [], agents: [...population.values()].map(a => a.profile), outputs,
       artifacts: [], edges: [], toolEvents, tokens: agents.provider.tokens - before,
-      calls: agents.provider.calls - callsBefore, actualTokens: agents.provider.tokens - before,
+      calls: agents.provider.calls - callsBefore, actualTokens: agents.provider.records.slice(recordsBefore).some(r => r.status !== 'known') ? null : agents.provider.tokens - before,
       actualCalls: agents.provider.calls - callsBefore, reusedPrefixSteps: 0, checkpoints: [],
       peakActive, depth: Math.max(...[...population.values()].map(a => a.depth)), stopReason: 'strategy' };
   } catch (error) { throw agents.provider.lastFailure ?? error; }
