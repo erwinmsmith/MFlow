@@ -28,7 +28,7 @@ import {
 import { OrganizationRuntime } from "./runtime.js";
 import { CanonicalPool } from "./canonical.js";
 import { Search, type Bundle } from "./search.js";
-import { evaluateFrozen } from "./evaluation.js";
+import { evaluateFrozen, checkpointExecution } from "./evaluation.js";
 import { save, append, digest, mean } from "./util.js";
 
 const { positionals, values } = parseArgs({
@@ -286,7 +286,8 @@ async function run() {
       };
       const result = await evaluateFrozen({ out, resume: !!values.resume, manifest, tasks, provider,
         evaluate: async (task) => {
-          const execution = await execute({ id: task.id, prompt: task.prompt });
+          const execution = await checkpointExecution(join(out, 'executions', `${digest(task.id)}.json`), task.id,
+            () => execute({ id: task.id, prompt: task.prompt }));
           return { taskId: task.id, ...await grade(task, execution.answer), execution };
         },
       });

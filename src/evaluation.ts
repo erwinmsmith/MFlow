@@ -1,8 +1,21 @@
 import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { MeteredProvider } from "./ditto.js";
-import type { Evaluated, Task } from "./types.js";
+import type { Evaluated, Task, Execution } from "./types.js";
 import { append, digest, save } from "./util.js";
+
+/** Persist model work before grading, including across a failed grading/resume. */
+export async function checkpointExecution(path: string, taskId: string, execute: () => Promise<Execution>): Promise<Execution> {
+  try {
+    const execution = JSON.parse(await readFile(path, 'utf8')) as Execution;
+    if (execution.taskId !== taskId || typeof execution.answer !== 'string') throw new Error('Invalid execution checkpoint');
+    return execution;
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  const execution = await execute();
+  await mkdir(dirname(path), { recursive: true });
+  await save(path, execution);
+  return execution;
+}
 
 /** Frozen standard evaluation: persist failures/usage and resume completed tasks exactly once. */
 export async function evaluateFrozen(options: {

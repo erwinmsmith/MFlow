@@ -255,3 +255,37 @@ test('library contracts reject missing templates, capability mismatches and infi
   await assert.rejects(run(fake, candidate), /cannot execute node/);
   assert.equal(fake.inputs.length, 0);
 });
+
+test('malformed verification retries the same target locally without regenerating the root', async () => {
+  const { initialLibraryComposition } = await import('../src/composition.js');
+  const candidate: Strategy = { ...strategy(), composition: initialLibraryComposition, organization: fixtureLibrary() };
+  let rootCalls = 0, checks = 0;
+  const targets: unknown[] = [];
+  const fake = new ScriptedProvider(input => {
+    if (input.messages[0].content.toString().includes('Assess the supplied target')) {
+      checks++; targets.push(JSON.parse(String(input.messages[1].content)).target);
+      if (checks === 1) return { assessment: { passed: true, summary: 'first' }, issues: null };
+      return { assessment: { passed: true, summary: 'VALID-EVIDENCE' }, issues: [] };
+    }
+    rootCalls++;
+    return rootCalls === 1 ? output('tentative', [{ id: 'gap', text: 'check boundary' }]) : output('final');
+  });
+  const result = await run(fake, candidate);
+  assert.equal(result.answer, 'final'); assert.equal(rootCalls, 2); assert.equal(checks, 2);
+  assert.deepEqual(targets[0], targets[1]);
+  assert.equal(organizationEvidence(result).actions.SPAWN, 1);
+  assert.equal(result.orchestration!.graphs.length, 4);
+});
+
+test('exhausted verifier schema repair remains missing evidence and preserves the provisional answer', async () => {
+  const { initialLibraryComposition } = await import('../src/composition.js');
+  let roots = 0, checks = 0;
+  const fake = new ScriptedProvider(input => {
+    if (input.messages[0].content.toString().includes('Assess the supplied target')) { checks++; return { issues: null }; }
+    roots++; return output('original', [{ id: 'gap', text: 'unresolved' }]);
+  });
+  const result = await run(fake, { ...strategy(), composition: initialLibraryComposition, organization: fixtureLibrary() });
+  assert.equal(roots, 1); assert.equal(checks, 2); assert.equal(result.answer, 'original');
+  const child = result.outputs.find(o => o.agentId !== 'root')!.output;
+  assert.equal(child.artifacts[0].type, 'verification_error'); assert.equal(child.open_deficits.length, 1);
+});

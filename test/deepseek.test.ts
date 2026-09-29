@@ -64,3 +64,35 @@ test('partial stream is not a completed answer', async () => {
   await assert.rejects(provider.invoke({model:{provider:'fixture',model:'fixture'},messages:[{role:'user',content:'fixture'}]}, {signal:AbortSignal.timeout(1000)}), /INCOMPLETE_MODEL_OUTPUT/);
   assert.equal(events.at(-1)!.state,'failed');
 });
+
+test('exact output cycles abort through public cancellation without accepting partial text', async () => {
+  const events: ProviderProgress[] = [];
+  let signal: AbortSignal | undefined;
+  let closed = false;
+  const provider = observableProvider({
+    async invoke() { throw new Error('not used'); },
+    async *stream(_input, options) {
+      signal = options.signal;
+      try { for (let i = 0; i < 100; i++) yield { type: 'text_delta' as const, delta: 'Repeated derivation with no new information.\n'.repeat(100) }; }
+      finally { closed = true; }
+    },
+  }, { stream: true, onProgress: async p => { events.push(p); } });
+  await assert.rejects(provider.invoke({ model: { model: 'fixture' }, messages: [{ role: 'user', content: 'fixture' }] },
+    { signal: AbortSignal.timeout(1000) }), /DEGENERATE_OUTPUT/);
+  assert.equal(signal?.aborted, true); assert.equal(closed, true);
+  assert.equal(events.at(-1)?.usage, undefined);
+  assert.ok(events.at(-1)?.outputTail?.includes('Repeated derivation'));
+});
+
+test('long distinct output is not subject to a length or context cutoff', async () => {
+  const text = Array.from({ length: 10000 }, (_, i) => `Unique item ${i}: ${i * 37}\n`).join('');
+  const provider = observableProvider({
+    async invoke() { throw new Error('not used'); },
+    async *stream() {
+      for (let i = 0; i < text.length; i += 1000) yield { type: 'text_delta' as const, delta: text.slice(i, i + 1000) };
+      yield { type: 'result' as const, output: { message: { role: 'assistant' as const, content: text }, finishReason: 'stop' as const, usage: { totalTokens: 123 } } };
+    },
+  }, { stream: true });
+  const result = await provider.invoke({ model: { model: 'fixture' }, messages: [{ role: 'user', content: 'fixture' }] }, { signal: AbortSignal.timeout(1000) });
+  assert.equal(result.message.content, text); assert.equal(result.usage?.totalTokens, 123);
+});

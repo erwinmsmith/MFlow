@@ -170,8 +170,8 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     await writeFile(checkpointPath, JSON.stringify(checkpoint));
     await rm(join(options.out, 'round-2/pass-1/0.json'));
     await runAFlowSearch({ ...options, resume: true });
-    assert.equal(agents, 17); assert.equal(proposals, 1);
-    assert.equal(JSON.parse(await readFile(join(options.out, 'round-2/pass-1/0.json'), 'utf8')).tokens, 40);
+    assert.equal(agents, 16); assert.equal(proposals, 1);
+    assert.equal(JSON.parse(await readFile(join(options.out, 'round-2/pass-1/0.json'), 'utf8')).tokens, 20);
     await assert.rejects(runAFlowSearch({ ...options, resume: true, config: { ...options.config, validationRounds: 3 } }), /manifest mismatch/);
     const unbounded = { ...options, out: join(dir, 'convergence'), config: { ...options.config, maxRounds: null, validationRounds: 1 } };
     await runAFlowSearch(unbounded);
@@ -181,7 +181,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     // then requires five more native convergence comparisons.
     assert.equal(stopped.round, 8);
     assert.equal(proposals, 8);
-    assert.equal(agents, 49);
+    assert.equal(agents, 48);
   } finally {
     server.close(); await rm(dir, { recursive: true, force: true });
     if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;

@@ -13,13 +13,16 @@ import { OrganizationRuntime } from "./runtime.js";
 import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy } from "./types.js";
 import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
-import { checkScoring, grade } from "./grading.js";
+import { checkScoring, grade, GradingFailure } from "./grading.js";
 import { append, save, digest, mean } from "./util.js";
 import { PolicyContractError } from "./strategy-program.js";
 import { organizationEvidence, summarizeOrganizations } from "./organization.js";
 import { initialLibraryComposition, initialAgentComposition, initialVerifierComposition, validateComposition } from "./composition.js";
 import { ProviderFailure } from "./provider-progress.js";
+import { checkpointExecution } from "./evaluation.js";
 import type { Bundle } from "./search.js";
+
+class GenerationExhausted extends Error {}
 
 export const aflowConfigSchema = z.object({
   seed: z.number().int().default(42), maxRounds: z.number().int().positive().nullable().default(null),
@@ -187,24 +190,32 @@ export async function runAFlowSearch(options: {
       }));
       const agents = makeAgents(async (records) => save(usagePath, [...previousUsage, ...records]), { round: number, repeat, taskId: task.id, index });
       let row: Row = { taskId: task.id, score: 0, answer: '', tokens: 0 };
-      // Official MATHBenchmark._generate_output: five attempts, fixed one-second wait.
-      for (let attempt = 0; attempt < 5; attempt++) {
-        await append(join(dir, `${index}.attempts.jsonl`), { event: 'started', attempt, at: new Date().toISOString() });
-        try {
-          const execution = await new OrganizationRuntime(agents, runtimeConfig.episode).run(strategy, { id: task.id, prompt: task.prompt });
-          row = { taskId: task.id, ...await grade(task, execution.answer), answer: execution.answer, tokens: agents.provider.tokens, organization: organizationEvidence(execution) };
-          await save(join(dir, `${index}.execution.json`), execution);
-          break;
-        } catch (error) {
-          // A deterministic application/strategy contract failure is not a model
-          // quality observation and cannot be repaired by five paid reruns.
-          await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', attempt, error: String(error), at: new Date().toISOString() });
-          if (error instanceof PolicyContractError || error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error))) throw error;
-          row.error = String(error);
-          if (attempt < 4) await delay(1000);
-        } finally {
-          await save(usagePath, [...previousUsage, ...agents.provider.records]);
+      const execution = await checkpointExecution(join(dir, `${index}.execution.json`), task.id, async () => {
+        // Native generation retries do not include grading or persistence failures.
+        for (let attempt = 0; ; attempt++) {
+          await append(join(dir, `${index}.attempts.jsonl`), { event: 'started', phase: 'generation', attempt, at: new Date().toISOString() });
+          try {
+            return await new OrganizationRuntime(agents, runtimeConfig.episode).run(strategy, { id: task.id, prompt: task.prompt });
+          } catch (error) {
+            await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', phase: 'generation', attempt, error: String(error), at: new Date().toISOString() });
+            if (error instanceof PolicyContractError || error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error))) throw error;
+            if (attempt >= 4) throw new GenerationExhausted(String(error));
+            await delay(1000);
+          } finally {
+            await save(usagePath, [...previousUsage, ...agents.provider.records]);
+          }
         }
+      }).catch(error => {
+        if (!(error instanceof GenerationExhausted)) throw error;
+        row.error = error.message;
+        return undefined;
+      });
+      try {
+        if (execution) row = { taskId: task.id, ...await grade(task, execution.answer), answer: execution.answer,
+          tokens: agents.provider.tokens, organization: organizationEvidence(execution) };
+      } catch (error) {
+        await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', phase: 'grading', error: String(error), at: new Date().toISOString() });
+        throw error;
       }
       row.tokens = agents.provider.tokens + previousUsage.reduce((n, r) => n + r.charged, 0);
       await save(path, row);
@@ -269,7 +280,7 @@ export async function runAFlowSearch(options: {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(result));
     } catch (error) { res.statusCode = 500; res.end(JSON.stringify({ error: String(error),
-      fatal: req.url === '/propose' && !(error instanceof PolicyContractError),
+      fatal: error instanceof GradingFailure || req.url === '/evaluate' || (req.url === '/propose' && !(error instanceof PolicyContractError)),
       unavailable: error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error)) })); }
   });
   server.requestTimeout = 0;

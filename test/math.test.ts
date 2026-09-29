@@ -50,3 +50,10 @@ test("MATH plain textual final answers match boxed text without accepting other 
   assert.equal((await grade(task, "TAKE")).score, 0);
   assert.equal((await grade(task, "MAKE or TAKE")).score, 0);
 });
+
+test('concurrent MATH grading queues local processes and keeps answer equivalence unchanged', async t => {
+  const task = taskSchema.parse({ id: 'load-fixture', prompt: 'Synthetic arithmetic', answer: 'The result is \\boxed{2}.', metric: 'math' });
+  try { await checkScoring([task]); } catch { t.skip('math-verify unavailable'); return; }
+  const scores = await Promise.all(Array.from({ length: 24 }, (_, i) => grade(task, i % 2 ? '3' : '2')));
+  assert.deepEqual(scores.map(s => s.score), Array.from({ length: 24 }, (_, i) => i % 2 ? 0 : 1));
+});

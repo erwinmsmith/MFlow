@@ -54,16 +54,31 @@ return loop({ id: 'solver', plan: function* (ctx) {
 
 export const initialVerifierComposition = `return loop({ id: 'verifier', plan: function* (ctx) {
   const id = ctx.self, node = id + '/verify';
-  const plan = graph(id + '/verify').node(node, 'INFER.REASONING.REFLECT', [], () => ({
-    ...ctx.request(id, [{ role: 'user', content: JSON.stringify({
-      task: ctx.task, profile: ctx.profile(id), evidence: ctx.evidence
-    }) }], false),
-    mode: 'verify', target: { artifact: ctx.evidence }
-  }));
-  const result = yield* graphStep(plan, null);
-  const review = ctx.unwrap(result[node]);
-  return ctx.publish(id, { candidate_answer: '', claims: [], open_deficits: [], resolved_deficits: [],
-    artifacts: [{id: id + '/review', type: 'verification', content: JSON.stringify(review), deficit_refs: []}] });
+  let failure;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const plan = graph(id + '/verify').node(node, 'INFER.REASONING.REFLECT', [], () => ({
+      ...ctx.request(id, [{ role: 'user', content: JSON.stringify({
+        task: ctx.task, profile: ctx.profile(id), evidence: ctx.evidence
+      }) }], false),
+      mode: 'verify', target: { artifact: ctx.evidence },
+      criteria: [
+        { id: 'check', description: 'Verify the assigned gap against the original problem. Return the decisive calculation or counterexample, without repeating the full solution.' },
+        { id: 'format', description: 'Return one JSON object with assessment:{passed:boolean,summary:string} and issues:array. Use issues:[] when there are no issues, never null or an object. Use plain mathematical notation in prose, valid JSON escaping, and no Markdown fences. Finish after the closing brace. Do not output AgentOutput fields or an unbounded list of cases.' },
+        ...(attempt ? [{ id: 'retry', description: 'Previous verification output had an invalid schema. Recheck the SAME supplied target and use the required JSON shape.' }] : [])
+      ]
+    }));
+    const result = yield* graphStep(plan, null);
+    if (result[node].status !== 'success') {
+      failure = result[node].error;
+      continue;
+    }
+    const review = ctx.unwrap(result[node]);
+    return ctx.publish(id, { candidate_answer: '', claims: [], open_deficits: [], resolved_deficits: [],
+      artifacts: [{id: id + '/review', type: 'verification', content: JSON.stringify(review), deficit_refs: []}] });
+  }
+  return ctx.publish(id, { candidate_answer: '', claims: [], resolved_deficits: [],
+    open_deficits: [{id: id + '/invalid-review', text: 'Verifier produced no valid evidence; the original gap remains unresolved.'}],
+    artifacts: [{id: id + '/failure', type: 'verification_error', content: JSON.stringify(failure), deficit_refs: []}] });
 } });`;
 
 /** Both this outer policy and every template below are editable search artifacts. */
@@ -71,13 +86,14 @@ export const initialLibraryComposition = `return loop({ id: 'mas', plan: functio
   const first = yield* ctx.runAgent('root');
   if (!first.open_deficits.length) return first.candidate_answer;
   const evidence = [];
-  for (const deficit of first.open_deficits) {
-    const id = 'verifier-' + evidence.length;
+  for (const [index, deficit] of first.open_deficits.entries()) {
+    const id = 'verifier-' + index;
     ctx.spawnTemplate('verifier', id, 'root');
     const result = yield* ctx.runAgent(id, { candidate: first, deficit });
-    evidence.push({ deficit, result });
+    if (result.artifacts.some(a => a.type === 'verification')) evidence.push({ deficit, result });
     ctx.dormant(id);
   }
+  if (!evidence.length) return first.candidate_answer;
   const final = yield* ctx.runAgent('root', { candidate: first, evidence }, 'integrate');
   return final.candidate_answer;
 } });`;
@@ -232,7 +248,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       // Deployment settings cannot be optimized into another provider/model.
       value = { ...value, model: { provider: 'mflow', model: agents.model.model },
         generation: { ...value.generation, temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens },
-        metadata: { ...value.metadata, kind: 'agent', agentId: id } };
+        metadata: { ...value.metadata, kind: 'agent', agentId: id, nodeId: task.id } };
       if (task.node === 'INFER.REASONING.TRAJECTORY')
         value.constraints = { maxSteps: limits.maxSteps, maxTotalTokens: limits.maxTokens,
           timeoutMs: limits.timeoutMs, ...value.constraints };
@@ -275,7 +291,13 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
         for (const node of topology) {
           const output = result[node.id] as any;
           if (node.type.startsWith('INFER.')) {
-            if (output?.status !== 'success') throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
+            if (output?.status !== 'success') {
+              // Native structured-node schema failures are visible to the policy,
+              // which may retry that node against the same target. Transport and
+              // incomplete responses still abort; never turn them into evidence.
+              if (node.type === 'INFER.REASONING.REFLECT' && output?.error?.code === 'INVALID_MODEL_OUTPUT' && !agents.provider.lastFailure) continue;
+              throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
+            }
             if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
               throw new EpisodeExhausted('Model output limit reached', 'output_limit');
             if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))

@@ -14,11 +14,19 @@ export function organizationEvidence(execution: Execution) {
     actions[change.action] = (actions[change.action] ?? 0) + 1;
   const graphs = native?.graphs.map(({ id, nodes }) => ({ id, nodes }));
   const nodeCalls: Record<string, number> = {};
+  const nodeFailures: Record<string, number> = {};
   for (const graph of graphs ?? []) for (const node of graph.nodes)
     nodeCalls[node.type] = (nodeCalls[node.type] ?? 0) + 1;
+  for (const graph of native?.graphs ?? []) for (const node of graph.nodes) {
+    const result = (graph.outputs as Record<string, { status?: string; error?: { code?: string } }>)[node.id];
+    if (result?.status === 'error' || result?.status === 'failed') {
+      const key = `${node.type}:${result.error?.code ?? 'UNKNOWN'}`;
+      nodeFailures[key] = (nodeFailures[key] ?? 0) + 1;
+    }
+  }
   return {
     agents: execution.agents, actions, noops,
-    ...(native ? { graphs, nodeCalls, lifecycle: native.lifecycle,
+    ...(native ? { graphs, nodeCalls, nodeFailures, lifecycle: native.lifecycle,
       executedAgents: [...new Set(native.graphs.flatMap(g => g.nodes.map(n => n.id.split('/')[0])))],
       publishedAnswers: execution.outputs.map(o => ({ agentId: o.agentId, answer: o.output.candidate_answer })),
     } : {}),
@@ -41,10 +49,12 @@ export function summarizeOrganizations(rows: { taskId: string; score: number; or
   const examples: typeof rows = [];
   const patterns = new Set<string>();
   const templateUsage: Record<string, { runs: number; tasks: number; correctTasks: number }> = {};
+  const nodeFailures: Record<string, number> = {};
   let spawnedTasks = 0, unroutedTasks = 0;
   for (const row of rows) {
     const org = row.organization;
     if (!org) continue;
+    for (const [key, count] of Object.entries(org.nodeFailures ?? {})) nodeFailures[key] = (nodeFailures[key] ?? 0) + count;
     for (const [k, n] of Object.entries(org.actions)) actions[k] = (actions[k] ?? 0) + n;
     for (const [k, n] of Object.entries(org.noops)) noops[k] = (noops[k] ?? 0) + n;
     if (org.actions.DERIVE || org.actions.CHALLENGE || org.actions.SPAWN) spawnedTasks++;
@@ -60,5 +70,5 @@ export function summarizeOrganizations(rows: { taskId: string; score: number; or
     if (!patterns.has(pattern) && examples.length < 6) { patterns.add(pattern); examples.push(row); }
   }
   return { evaluated: rows.length, correct: rows.reduce((n, r) => n + r.score, 0),
-    actions, noops, spawnedTasks, unroutedTasks, templateUsage, examples };
+    actions, noops, spawnedTasks, unroutedTasks, templateUsage, nodeFailures, examples };
 }

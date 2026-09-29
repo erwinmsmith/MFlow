@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import { availableParallelism } from 'node:os';
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Sandbox, createLocalSandboxExecutor } from "@codesoul-co/ditto";
@@ -11,6 +12,39 @@ const exec = promisify(execFile);
 const docker = process.env.MFLOW_DOCKER ?? (process.platform === "darwin" ? "/opt/homebrew/bin/docker" : "docker");
 const image = "python:3.12-alpine";
 const python = process.env.MFLOW_BENCH_PYTHON ?? "python3";
+
+export class GradingFailure extends Error {
+  constructor(readonly detail: { code?: string; signal?: string; killed?: boolean; stderr?: string }) {
+    super(`Grader infrastructure failure: ${JSON.stringify(detail)}`);
+    this.name = 'GradingFailure';
+  }
+}
+
+// Limit local Python contention, not model/search concurrency. Queue time does
+// not consume the child execution deadline.
+const mathConcurrency = Math.min(4, availableParallelism());
+let activeMath = 0;
+const mathQueue: (() => void)[] = [];
+async function gradeMath(task: Task, answer: string): Promise<0 | 1> {
+  if (activeMath >= mathConcurrency) await new Promise<void>(resolve => mathQueue.push(resolve));
+  else activeMath++;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const { stdout } = await exec(python, [resolve('scripts/grade_math.py'), JSON.stringify({ gold: task.answer, answer })], { timeout: 30_000 });
+        if (!['0', '1'].includes(stdout.trim())) throw new Error('Invalid grader result');
+        return stdout.trim() === '1' ? 1 : 0;
+      } catch (error) {
+        if (attempt < 2) continue; // Regrade the identical answer; never resample it.
+        const e = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean; stderr?: string };
+        throw new GradingFailure({ code: e.code ?? 'INVALID_RESULT', signal: e.signal, killed: e.killed, stderr: e.stderr?.slice(-1000) });
+      }
+    }
+  } finally {
+    const next = mathQueue.shift();
+    if (next) next(); else activeMath--;
+  }
+}
 
 function normalized(text: string): string {
   return text.toLowerCase().split(/[ -]/).map((part) => {
@@ -151,6 +185,5 @@ export async function grade(task: Task, answer: string): Promise<{ score: 0 | 1;
   if (task.metric === "exact" || task.metric === "numeric") return { score: score(task, answer) };
   if (task.metric === "drop") return dropScore(answer, task.reference!.answers!);
   if (task.metric === "python") return { score: await gradePython(task, answer) };
-  const { stdout } = await exec(python, [resolve("scripts/grade_math.py"), JSON.stringify({ gold: task.answer, answer })], { timeout: 10_000 });
-  return { score: stdout.trim() === "1" ? 1 : 0 };
+  return { score: await gradeMath(task, answer) };
 }

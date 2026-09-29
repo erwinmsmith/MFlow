@@ -18,6 +18,8 @@
 - 标准协议每题重置状态；test 在选择冻结后才打开，答案只交给评分器。不同轮次/重复不共享模型执行结果。
 - 每次请求保存 Ditto 用量账本；逐题结果和控制器状态可恢复。只有同一候选同一次重复的已完成题目可以在中断恢复时跳过。
 
+评分失败只重评已保存答案、REFLECT 格式错误在节点局部恢复；生成异常与运行保护见 [v7 可靠性说明](docs/search-v7.md#2026-09-29工程可靠性与提示词修复)。
+
 当前实现见 [v7 模板库与动态 MAS 联合搜索](docs/search-v7.md)，底层原生编排见 [v6](docs/search-v6.md)，官方优化控制来源见 [v4](docs/search-v4.md)。旧的规则/MIA 实现仅保留在显式 `legacy-search` 入口供历史复现，旧结果不覆盖。历史协议见 [v2](docs/search-v2.md)、[v3](docs/search-v3.md)。
 
 原有 standard/continual、BranchStore 和 checkpoint 能力保留；原生编排使用 standard 逐题重置，不使用旧动作 checkpoint 或跨任务记忆。发布包边界与尚未满足的通用需求见 [Ditto 需求](docs/ditto-requirements.md)。
