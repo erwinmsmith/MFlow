@@ -26,7 +26,8 @@ def guard_transport(call, transport_error):
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(root / 'baselines'))
+    # The local scripts/benchmarks.py must not shadow AFlow's benchmarks package.
+    sys.path = [str(root / 'baselines')] + [p for p in sys.path if Path(p).resolve() != root / 'scripts']
     sys.argv = ['aflow.py', '--phase', 'search-test']
     import aflow
     from bench_common import TransportFailure
