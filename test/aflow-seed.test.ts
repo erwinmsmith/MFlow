@@ -102,6 +102,7 @@ test('Python stderr reaches the tool observation without violating the interacti
     if(calls===1)return response('4');
     if(calls===2)return response('5');
     if(calls===3)return {message:{role:'assistant',content:''},finishReason:'action_request',actionRequests:[{id:'py-failed',name:'python',arguments:{code:"raise ValueError('fixture calculation error')"}}],usage:{totalTokens:10}};
+    assert.equal(typeof input.messages.at(-1)?.content,'string');
     assert.ok(JSON.stringify(input.messages).includes('ValueError'));
     assert.ok(JSON.stringify(input.messages).includes('PYTHON_EXECUTION'));
     assert.equal(input.messages.at(-1)?.metadata?.actionRequestId,'py-failed');

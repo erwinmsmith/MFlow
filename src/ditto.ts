@@ -35,7 +35,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.1/text-reasoning-local-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.2/text-reasoning-local-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;

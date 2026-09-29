@@ -230,7 +230,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       { role: 'system', content: 'Repair JSON syntax/schema only. Preserve the supplied answer and claims; do not solve again. JSON schema:\n' + schema },
       { role: 'user', content: JSON.stringify({ kind: 'agent-format-repair', output }) }],
     request: (id: string, messages: unknown, useTools = true, format: 'json' | 'text' = 'json') => ({
-      messages, model: { provider: 'mflow', model: agents.model.model,
+      messages: Array.isArray(messages) ? messages.map(message => message.role === 'tool' && typeof message.content !== 'string'
+        ? { ...message, content: JSON.stringify(message.content) } : message) : messages,
+      model: { provider: 'mflow', model: agents.model.model,
         providerOptions: { response_format: { type: format === 'text' ? 'text' : 'json_object' } } },
       generation: { temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens,
         ...(new URL(agents.model.baseUrl).hostname === 'api.deepseek.com' ? {} : { seed: agents.model.seed }) },
