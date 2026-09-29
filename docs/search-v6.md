@@ -50,3 +50,13 @@ AFlow 官方父节点采样、经验处理、5 次完整验证与收敛检测保
 ## 验证
 
 `test/composition.test.ts` 使用公开 Ditto + 脚本 Provider 验证真实工具节点、异构图交织、反思结果回流、独立 generator 交替、图内并发、权限拒绝、标签隔离、任务重置及冻结工件复载。`test/aflow-native.test.ts` 验证完整 composition 的父子继承、全量重复、官方收敛、断点恢复与故障处理。这些 fixture 只验证实现，不证明真实 benchmark 提升。
+
+## 运行限额（2026-09-29 确认）
+
+用户确认：取消实验额度与 Context 人为限制，保留代码执行保护。
+
+- maxRounds=null；总 token、单题 token、组织步数、成员数、深度、工具调用次数不另设实验额度（使用接口可表示的最大整数）。收敛仍按原生 AFlow 控制。
+- 优化器完整消息直接送入 Ditto INFER，不受 Context inline 默认值影响，不截断父编排与反馈。
+- agent 的 ContextPolicy 使用包允许的最大配置：maxInlineBytes=1,000,000、maxItems=1,000,000；不是额外的模型 token 预算。包还没有真正 unbounded 配置，见 DITTO-006。
+- 保留同步编排代码的死循环保护、Python 工具的运行时间和资源隔离、节点/工具权限检查。
+- 模型服务的上下文/单次输出硬上限仍适用，不能由 MFlow 取消。

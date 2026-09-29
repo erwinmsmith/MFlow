@@ -154,3 +154,14 @@ test('optimizer context preserves full parent feedback above Ditto default 64 Ki
     limitsSchema.parse({maxTokens:1000000}));
   assert.equal(result.value.candidate_answer,'ok');assert.equal(fake.inputs.length,1);
 });
+
+test('agent Context uses published maximums instead of default storage cutoffs',async()=>{
+  const {graph}=await import('@codesoul-co/ditto');
+  const runtime=new DittoAgents(new MeteredProvider(new ScriptedProvider()),model).runtime([],1000);
+  const text='long-evidence-'.repeat(6000);
+  const sources=Array.from({length:300},(_,i)=>({role:'user' as const,content:i===0?text:`evidence-${i}`}));
+  try{
+    const result=await runtime.run(graph<typeof sources>('context-capacity').node('load','CONTEXT.LOAD',[],input=>({sources:input})),sources);
+    assert.equal(result.load.items.length,300);assert.equal(result.load.items[0].content,text);
+  }finally{await runtime.close();}
+});

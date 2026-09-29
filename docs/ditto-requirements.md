@@ -108,3 +108,13 @@ DITTO-004 尚缺的通用能力缩小为：工具参数/隐藏推理/keep-alive 
 5. 用一个“生成纯计算工具 -> 调用 -> 观察 -> 撤销”的普通 workflow 验证；无须任何 MAS/spawn 特有概念。
 
 MFlow v6 继续使用已有 arithmetic/Python 工具和原生节点。该扩展不阻塞 Graph/Loop 搜索；真正搜索新工具创建流程需 Ditto 按 dev -> main 更新、发布 registry 包后再接入。
+
+## DITTO-006：Context 可关闭的存储规模限制（待支持）
+
+2026-09-29 核查 registry 0.1.1：公开 `createContextWorker({policy})` 可配置 `maxInlineBytes` / `maxItems`，默认分别为 65,536 字节和 256 项；当前校验器仅接受 1..1,000,000 的整数，没有关闭限制的表示。`Infinity`、`null`、`Number.MAX_SAFE_INTEGER` 都不能作为不设限配置使用。
+
+复现：通过公开 createDitto/createContextWorker 创建 runtime，在 CONTEXT.LOAD 中加载超过 64 KiB 的单条消息，默认配置失败；提高到 1,000,000 后超过该值仍失败，不能声明不设存储上限。此限制不等于模型上下文窗口，也不应被当作候选质量差或推进搜索 round。
+
+需求：提供显式关闭 maxInlineBytes/maxItems 的公共配置，或提供透明的 Artifact/reference 存储路径，保证完整内容可以由后续 INFER 使用。两种方案均需要明确定义序列化、原始消息顺序与 metadata、内存/外部存储归属、取消与错误处理。
+
+验收：默认保持兼容；显式不限时，1 MiB 以上的消息及超过默认数量的 ContextItem 不被截断、遗漏或重排；外部模型的上下文限制仍明确报错；应用不需要拆分提示词或复制 Context 实现。MFlow 的优化器已用公开 INFER 直接接收完整消息绕过无必要的 inline 转换，agent 显式使用 Context 的路径仍受包契约约束。

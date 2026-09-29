@@ -285,7 +285,9 @@ export class DittoAgents {
     return createDitto({
       ...(chosen.some((t) => t.name === 'python') ? { sandboxExecutor: pythonExecutor() } : {}),
       workers: [
-        createContextWorker(),
+        // Largest values accepted by the published ContextPolicy validator.
+        // The package has no unbounded setting; tracked as DITTO-006.
+        createContextWorker({ policy: { maxInlineBytes: 1_000_000, maxItems: 1_000_000 } }),
         createInferWorker({
           providers: { mflow: this.provider },
           defaultProvider: "mflow",
