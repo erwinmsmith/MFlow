@@ -40,6 +40,7 @@ export function summarizeOrganizations(rows: { taskId: string; score: number; or
   const actions: Record<string, number> = {}, noops: Record<string, number> = {};
   const examples: typeof rows = [];
   const patterns = new Set<string>();
+  const templateUsage: Record<string, { runs: number; tasks: number; correctTasks: number }> = {};
   let spawnedTasks = 0, unroutedTasks = 0;
   for (const row of rows) {
     const org = row.organization;
@@ -47,10 +48,17 @@ export function summarizeOrganizations(rows: { taskId: string; score: number; or
     for (const [k, n] of Object.entries(org.actions)) actions[k] = (actions[k] ?? 0) + n;
     for (const [k, n] of Object.entries(org.noops)) noops[k] = (noops[k] ?? 0) + n;
     if (org.actions.DERIVE || org.actions.CHALLENGE || org.actions.SPAWN) spawnedTasks++;
+    const used = new Set<string>();
+    for (const event of org.lifecycle ?? []) {
+      if (event.action !== 'RUN_TEMPLATE' || !event.templateId) continue;
+      const usage = templateUsage[event.templateId] ??= { runs: 0, tasks: 0, correctTasks: 0 };
+      usage.runs++; used.add(event.templateId);
+    }
+    for (const id of used) { templateUsage[id].tasks++; templateUsage[id].correctTasks += row.score; }
     if (org.deficits.some(d => d.artifacts > d.delivered && d.status !== 'RESOLVED')) unroutedTasks++;
     const pattern = JSON.stringify([row.score, org.transitions.map(t => t.action), org.edges, org.graphs, org.lifecycle]);
     if (!patterns.has(pattern) && examples.length < 6) { patterns.add(pattern); examples.push(row); }
   }
   return { evaluated: rows.length, correct: rows.reduce((n, r) => n + r.score, 0),
-    actions, noops, spawnedTasks, unroutedTasks, examples };
+    actions, noops, spawnedTasks, unroutedTasks, templateUsage, examples };
 }

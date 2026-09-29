@@ -10,14 +10,14 @@ import { z } from "zod";
 import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool, type ModelSettings } from "./ditto.js";
 import { pythonImage, createPythonTool } from './python-tool.js';
 import { OrganizationRuntime } from "./runtime.js";
-import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy, type AgentProfile } from "./types.js";
+import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy } from "./types.js";
 import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
 import { checkScoring, grade } from "./grading.js";
 import { append, save, digest, mean } from "./util.js";
 import { PolicyContractError } from "./strategy-program.js";
 import { organizationEvidence, summarizeOrganizations } from "./organization.js";
-import { initialComposition, validateComposition } from "./composition.js";
+import { initialLibraryComposition, initialAgentComposition, initialVerifierComposition, validateComposition } from "./composition.js";
 import { ProviderFailure } from "./provider-progress.js";
 import type { Bundle } from "./search.js";
 
@@ -28,10 +28,23 @@ export const aflowConfigSchema = z.object({
   maxOutputTokens: z.number().int().positive().default(393216),
 }).strict();
 
-export const initialOrganization: { initialAgents: AgentProfile[] } = { initialAgents: [{ ...rootProfile,
-  tools: ["arithmetic", "python"], reasoning: "react" as const,
-  nodes: ["CONTEXT.LOAD", "INFER.REASONING.SAMPLE", "INTERACTION.ACT.TOOL", "INTERACTION.OBSERVE"],
-}] };
+const solverProfile = { ...rootProfile, tools: ['arithmetic', 'python'], reasoning: 'react' as const,
+  nodes: ['CONTEXT.LOAD', 'INFER.REASONING.SAMPLE', 'INTERACTION.ACT.TOOL', 'INTERACTION.OBSERVE'] as const };
+const { id: _rootId, ...solverCapability } = solverProfile;
+export const initialOrganization = organizationSchema.parse({
+  initialAgents: [solverProfile], initialBindings: { root: 'solver' },
+  agentTemplates: [
+    { id: 'solver', description: 'General reasoning with explicit tool/observation loop and evidence integration.',
+      profile: solverCapability, composition: initialAgentComposition },
+    { id: 'verifier', description: 'Independently verify a concrete gap against the original problem.',
+      profile: { ...solverCapability, tools: [], nodes: ['INFER.REASONING.REFLECT'], reasoning: 'cot',
+        objective: 'Check the assigned gap and return concrete verification evidence.',
+        capability: 'Independent verification of assumptions, cases and calculations',
+        expected_output: 'A verification artifact identifying supported conclusions and remaining errors.',
+        stop_condition: 'The assigned verification is complete or its unresolved obstacle is explicit.' },
+      composition: initialVerifierComposition },
+  ],
+});
 export const programPrompts = {
   agent: AGENT_PROMPT, factory: FACTORY_PROMPT, review: REVIEW_PROMPT,
   integrate: AGENT_PROMPT,
@@ -40,13 +53,20 @@ export const programPrompts = {
 const proposalSchema = z.object({
   modification: z.string().min(1), composition: z.string().min(1),
   prompts: strategySchema.shape.prompts.unwrap(),
-  organization: organizationSchema,
+  organization: organizationSchema.safeExtend({
+    agentTemplates: organizationSchema.shape.agentTemplates.unwrap().min(1),
+    initialBindings: organizationSchema.shape.initialBindings.unwrap(),
+  }),
 }).strict();
 
-export const policyInterface = `SEARCH OBJECT: a complete dynamic MAS built with the published Ditto graph(), loop(), graphStep() APIs. Return composition (JavaScript source), organization.initialAgents and all five prompts. composition executes once per task and RETURNS loop({id, plan: function* (ctx) {...}}). The generator must yield* graphStep(nativeGraph, input) and return the final answer STRING. Nested generators and yield* allow different agent loops to be serial, interleaved, recursive, or combined into one DAG. Do not reduce this to an outer action selector or a fixed shared agent implementation.
+export const policyInterface = `SEARCH OBJECT: a complete dynamic MAS built with the published Ditto graph(), loop(), graphStep() APIs. Return composition (JavaScript source), organization (initialAgents, initialBindings, agentTemplates) and all five prompts. composition executes once per task and RETURNS loop({id, plan: function* (ctx) {...}}). The generator must yield* graphStep(nativeGraph, input) and return the final answer STRING. Nested generators and yield* allow different agent loops to be serial, interleaved, recursive, or combined into one DAG. Do not reduce this to an outer action selector or a fixed shared agent implementation.
 Every profile has id, objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. nodes is the agent's permitted Ditto leaf capabilities; different agents SHOULD have different internal graph topology, node types, bindings, inference strategies and loop conditions when justified by feedback. Graph builders/functions in composition define those structures explicitly, rather than a universal template selected only by role prompts. Each node ID is agentId/localName. Cross-agent dependencies are allowed within one graph. Agent IDs are unique, cannot contain '/', and root must exist. tools must be drawn from arithmetic and python. reasoning is a profile description (cot/long-cot/react/tot/got/self-consistency); the actual searched nodes and bindings determine inference.
+JOINT SEARCH: optimize (1) individual agent graphs/loops and capabilities, (2) a reusable task-family template library, and (3) dynamic MAS topology, selection, spawning, evidence routing and stopping. The library supplements the full MAS program; never replace the MAS with a fixed list of independent agents. organization.agentTemplates is an array of {id,description,profile,composition}. profile has all profile fields EXCEPT id; composition is complete source returning loop({id,plan:function*(ctx){...}}) whose generator returns an AgentOutput OBJECT. Each template can have its own nodes, graph topology, inference method, prompts in profile.private_context, and nested loop. Template code has ctx.self (instance ID), ctx.evidence, ctx.prompt, plus the entire public ctx API. It may spawn/delegate recursively or yield cross-agent graphs. Use ctx.self in node IDs so multiple instances remain independent. Templates are inherited and frozen with the selected candidate, never reconstructed from test responses or collected indiscriminately from losing candidates.
+organization.initialBindings maps initial agent IDs to template IDs for their internal programs; initialAgents remains their authoritative initial profile. ctx.templates returns the current candidate library. ctx.spawnTemplate(templateId,newId,parentId='root') instantiates its profile and binds its program; it performs no model call. yield* ctx.runAgent(id,evidence=[],prompt='agent') delegates to that agent's template generator and returns its AgentOutput. Templates should ctx.publish their results. ctx.bindTemplate(id,templateId) replaces future profile AND program; ctx.reconfigure changes only the profile. Generator instances can be interleaved, and outer composition can still build arbitrary cross-agent graphs directly. A template is a reusable program, not an already-running agent or episode memory.
+Use observed failures to decide whether to improve a root/subagent graph, add a distinct specialist, or change the MAS routing/derivation policy. If parent execution has no spawning, consider a concrete unresolved deficit and a complementary specialist instead of repeatedly adding root samples. Do not force spawning on every task or claim template benefit from mere usage. Fully validate the resulting MAS with its library as one candidate; evaluate accuracy and actual node/lifecycle cost. Keep one focused AFlow modification (including the template and routing needed for that single modification). No test-based library selection or cross-task mutable state.
 Public bindings: graph(id).node(id, nodeType, dependencyIds, (input, outputs) => nodeInput); graphStep(graph, input, {concurrency?}); loop({id, plan: function*(ctx){...}}). Dependencies must refer to already added nodes. Independent nodes can run concurrently under Ditto. Loop generators may inspect every completed graph, spawn/reconfigure profiles, build new graphs and route outputs before yielding the next graph. This supports dynamic topology, internal agent loops and node-level cross-agent weaving. No fixed population, derivation depth, sampling count or experiment token budget.
 ctx.task is {id,prompt}, without reference answers. ctx.agents returns [{profile,status,depth}] where status is exactly ACTIVE or DORMANT. ctx.profile(id) returns a profile. ctx.spawn(completeProfile,parentId='root') adds a task-local profile and returns it; this does not call a model. A factory can first yield a Ditto inference graph to generate a profile. ctx.reconfigure(id,completeProfile) changes future capabilities while preserving identity. ctx.dormant(id) releases activity. Executing a graph node activates its owning agent. Each task starts with fresh profiles; no episode memory enters the next task.
+For REFLECT/DELIBERATE nodes with native output schemas, pass task/profile/evidence as data messages and let Ditto supply the node's schema; do not combine conflicting AgentOutput instructions with native reflection/deliberation contracts.
 ctx.messages(id,evidence=[],prompt='agent') builds JSON-output messages from the profile, original task and explicitly routed evidence. prompt selects agent/factory/review/integrate/retrieve. ctx.request(id,messages,useTools=true) creates a SAMPLE input using the experiment model, generation settings and allowed action descriptors. ctx.formatMessages(content) requests syntax-only JSON repair. ctx.unwrap(nodeResult) checks success and returns output. ctx.decode(content) parses the fixed AgentOutput schema; ctx.publish(id,output) records and returns it. ctx.outputs contains published outputs; ctx.graphs contains completed graph topology/results. These helpers do not execute models, tools or choose a workflow. Explicitly pass prior outputs as evidence to downstream nodes/agents. A dynamic plan may use its own local state, functions, conditions and generators.
 Configured native nodes (declare only needed capabilities on each profile):
 CONTEXT.LOAD: {sources: Message[]} -> {items}; CONTEXT.SELECT: {context,purpose:'infer'|'memory',query?,limit?,maxTokens?,strategy?:{kind:'default'}} -> {context,selectedItemIds}; CONTEXT.UPDATE: {context,add?:ContextItem[],removeIds?:string[]} -> Context; CONTEXT.COMPRESS: {context,maxTokens?,maxItems?} -> Context.
@@ -113,7 +133,7 @@ export async function runAFlowSearch(options: {
   const code: Record<string, string> = {};
   for (const name of await readdir(codeDir))
     if (name.endsWith('.js')) code[name] = digest(await readFile(join(codeDir, name), 'utf8'));
-  const manifest = { protocol: 'official-aflow-ditto-composition-v1', transport: 'ditto-public-stream-v1', config, model: options.model,
+  const manifest = { protocol: 'official-aflow-ditto-library-v1', transport: 'ditto-public-stream-v1', config, model: options.model,
     dataHash: digest(tasks), source: lock, code, pythonImage: image,
     controller: digest(await readFile(controller, 'utf8')),
     pythonEnvironment: await pythonEnvironment(options.python),
@@ -132,10 +152,14 @@ export async function runAFlowSearch(options: {
     if (!parsed.composition || !parsed.prompts) throw new Error('Complete Ditto composition and prompts required');
     if (!parsed.organization) throw new Error('Complete organization required');
     validateComposition(parsed.composition);
-    for (const profile of parsed.organization.initialAgents)
+    if (!parsed.organization.agentTemplates?.length || !parsed.organization.initialBindings)
+      throw new PolicyContractError('Complete reusable agentTemplates and initialBindings required');
+    for (const template of parsed.organization.agentTemplates) validateComposition(template.composition);
+    const profiles = [...parsed.organization.initialAgents, ...parsed.organization.agentTemplates.map(t => ({ ...t.profile, id: t.id }))];
+    for (const profile of profiles) {
       if (!profile.nodes?.length || profile.id.includes('/')) throw new Error('Every native agent requires node capabilities and an ID without /');
-    for (const profile of parsed.organization.initialAgents)
       if (profile.tools.some(t => !['arithmetic', 'python'].includes(t))) throw new Error('Unknown organization tool');
+    }
     return parsed;
   };
   type Row = { taskId: string; score: number; answer: string; tokens: number; error?: string; organization?: ReturnType<typeof organizationEvidence> };
@@ -200,7 +224,7 @@ export async function runAFlowSearch(options: {
       for await (const chunk of req) body += chunk;
       const input = JSON.parse(body || '{}');
       let result: unknown;
-      if (req.url === '/bootstrap') result = { config, composition: initialComposition, prompts: programPrompts, organization: initialOrganization, interface: policyInterface };
+      if (req.url === '/bootstrap') result = { config, composition: initialLibraryComposition, prompts: programPrompts, organization: initialOrganization, interface: policyInterface };
       else if (req.url === '/propose') {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
@@ -235,6 +259,7 @@ export async function runAFlowSearch(options: {
           selectionGroups: [...new Set(tasks.map((t) => t.group ?? t.id))],
           experimentalScope: 'standard-isolated-state-v2' };
         await save(join(out, 'best.json'), bundle);
+        await save(join(out, 'agent-library.json'), { templates: strategy.organization!.agentTemplates, initialBindings: strategy.organization!.initialBindings, selectedRound: input.round, strategyHash: digest(strategy), frozenBeforeTest: true });
         await save(join(out, 'organization.json'), { organization: strategy.organization, composition: strategy.composition,
           prompts: strategy.prompts, note: 'Reusable MAS specification. Task-specific graphs are in round/pass organizations.json and execution logs; no episode memory is imported into inference.' });
         await save(join(out, 'summary.json'), { selectedRound: input.round, validationAccuracy: input.score,

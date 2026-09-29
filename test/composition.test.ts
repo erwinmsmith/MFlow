@@ -5,7 +5,7 @@ import { OrganizationRuntime } from '../src/runtime.js';
 import { initialComposition, validateComposition } from '../src/composition.js';
 import { organizationEvidence, summarizeOrganizations } from '../src/organization.js';
 import { initialStrategy, limitsSchema, rootProfile, type AgentProfile, type Strategy } from '../src/types.js';
-import { programPrompts } from '../src/aflow-search.js';
+import { programPrompts, initialOrganization } from '../src/aflow-search.js';
 import { ScriptedProvider, output } from './fixtures.js';
 import type { ModelProvider } from '@codesoul-co/ditto/worker/infer';
 
@@ -13,6 +13,12 @@ const model = { model: 'fixture', baseUrl: 'https://invalid.example', temperatur
 const profile: AgentProfile = { ...rootProfile, tools: ['arithmetic'], nodes: ['CONTEXT.LOAD', 'INFER.REASONING.SAMPLE', 'INTERACTION.ACT.TOOL', 'INTERACTION.OBSERVE'] };
 const strategy = (composition = initialComposition, profiles = [profile]): Strategy => ({ ...initialStrategy,
   composition, organization: { initialAgents: profiles }, prompts: programPrompts });
+const fixtureLibrary = () => {
+  const organization = structuredClone(initialOrganization);
+  for (const p of [...organization.initialAgents, ...organization.agentTemplates!.map(t => t.profile)])
+    p.tools = p.tools.filter(t => t !== 'python');
+  return organization;
+};
 const run = (provider: ModelProvider, candidate = strategy(), prompt = 'Synthetic fixture') =>
   new OrganizationRuntime(new DittoAgents(new MeteredProvider(provider), model), limitsSchema.parse({maxSteps: 20, maxTokens: 100000}))
     .run(candidate, { id: 'fixture', prompt });
@@ -164,4 +170,88 @@ test('agent Context uses published maximums instead of default storage cutoffs',
     const result=await runtime.run(graph<typeof sources>('context-capacity').node('load','CONTEXT.LOAD',[],input=>({sources:input})),sources);
     assert.equal(result.load.items.length,300);assert.equal(result.load.items[0].content,text);
   }finally{await runtime.close();}
+});
+
+test('searched library freezes heterogeneous internal graphs together with dynamic MAS routing', async () => {
+  const { initialLibraryComposition } = await import('../src/composition.js');
+  const candidate: Strategy = { ...strategy(), composition: initialLibraryComposition,
+    organization: fixtureLibrary() };
+  // Optimize one subagent's internal graph without replacing the outer MAS policy.
+  candidate.organization!.agentTemplates![1].composition = candidate.organization!.agentTemplates![1].composition.replace("mode: 'verify'", "mode: 'critique'");
+  const frozen = JSON.stringify(candidate);
+  let roots = 0;
+  const fake = new ScriptedProvider(input => {
+    const text = JSON.stringify(input.messages);
+    assert.ok(!text.includes('SECRET-LABEL'));
+    // REFLECT supplies its own system prompt before the task messages.
+    if (input.messages[0].content.toString().includes('Assess the supplied target'))
+      return { assessment: { passed: false, summary: 'CHECK-OMITTED-CASE' }, issues: [] };
+    if (++roots === 1) return output('tentative', [{ id: 'gap', text: 'Check omitted boundary case' }]);
+    assert.ok(text.includes('CHECK-OMITTED-CASE'));
+    return output('correct');
+  });
+  const runtime = new OrganizationRuntime(new DittoAgents(new MeteredProvider(fake), model), limitsSchema.parse({ maxTokens: 100000 }));
+  const result = await runtime.run(JSON.parse(frozen), { id: 'heldout', prompt: 'Synthetic problem', answer: 'SECRET-LABEL' } as any);
+  assert.equal(result.answer, 'correct');
+  const org = organizationEvidence(result);
+  assert.equal(org.actions.SPAWN, 1);
+  assert.equal(org.actions.RUN_TEMPLATE, 3);
+  assert.deepEqual(result.agents[1].nodes, ['INFER.REASONING.REFLECT']);
+  assert.equal((result.orchestration!.graphs[1].inputs['verifier-0/verify'] as any).mode, 'critique');
+  assert.deepEqual(summarizeOrganizations([{ taskId: 'heldout', score: 1, organization: org }]).templateUsage,
+    { solver: { runs: 2, tasks: 1, correctTasks: 1 }, verifier: { runs: 1, tasks: 1, correctTasks: 1 } });
+  // Same frozen artifact, fresh task: routing can skip derivation entirely.
+  const second = await run(new ScriptedProvider(() => output('fresh')), JSON.parse(frozen));
+  assert.equal(second.answer, 'fresh'); assert.equal(second.agents.length, 1);
+  assert.equal(organizationEvidence(second).actions.SPAWN, undefined);
+  assert.equal(JSON.stringify(candidate), frozen);
+});
+
+test('template instances retain independent loop state while MAS interleaves their graph steps', async () => {
+  const candidate: Strategy = { ...strategy(), organization: fixtureLibrary(), composition: `
+  return loop({id:'woven-library',plan:function*(ctx){
+    ctx.spawnTemplate('solver','child','root');
+    ctx.bindTemplate('child','solver');
+    const a=ctx.runAgent('root',{route:'root'}), b=ctx.runAgent('child',{route:'child'});
+    let x=a.next(), y=b.next();
+    while(!x.done || !y.done){
+      if(!x.done) x=a.next(yield x.value);
+      if(!y.done) y=b.next(yield y.value);
+    }
+    return x.value.candidate_answer+'+'+y.value.candidate_answer;
+  }});` };
+  candidate.organization!.agentTemplates![0].composition = `return loop({id:'twice',plan:function*(ctx){
+    let output;
+    for(let i=0;i<2;i++){
+      const n=ctx.self+'/sample';
+      const g=graph(ctx.self+'/'+i).node(n,'INFER.REASONING.SAMPLE',[],()=>ctx.request(ctx.self,ctx.messages(ctx.self,{round:i,evidence:ctx.evidence})));
+      const result=yield* graphStep(g,null);
+      output=ctx.publish(ctx.self,ctx.decode(ctx.unwrap(result[n]).message.content));
+    }
+    return output;
+  }});`;
+  const fake = new ScriptedProvider(input => {
+    const payload = JSON.parse(String(input.messages[1].content)).payload;
+    assert.equal(payload.profile.id, payload.evidence.evidence.route);
+    return output(payload.profile.id);
+  });
+  const result = await run(fake, JSON.parse(JSON.stringify(candidate)));
+  assert.equal(result.answer, 'root+child');
+  assert.deepEqual(result.orchestration!.graphs.map(g => g.id), ['root/0','child/0','root/1','child/1']);
+  assert.equal(result.orchestration!.lifecycle.find(e => e.action === 'SPAWN')?.templateId, 'solver');
+});
+
+test('library contracts reject missing templates, capability mismatches and infinite nested loops', async () => {
+  const { organizationSchema } = await import('../src/types.js');
+  assert.throws(() => organizationSchema.parse({ ...initialOrganization, initialBindings: { root: 'missing' } }), /Invalid initial template/);
+  assert.throws(() => organizationSchema.parse({ ...initialOrganization, agentTemplates: [initialOrganization.agentTemplates![0], initialOrganization.agentTemplates![0]] }), /unique/);
+  const candidate: Strategy = { ...strategy(), organization: fixtureLibrary(),
+    composition: `return loop({id:'main',plan:function*(ctx){return (yield* ctx.runAgent('root')).candidate_answer;}});` };
+  candidate.organization!.agentTemplates![0].composition = `return loop({id:'bad',plan:function*(){while(true){} }});`;
+  const fake = new ScriptedProvider(() => output('unused'));
+  await assert.rejects(run(fake, candidate), /timed out/);
+  candidate.organization!.agentTemplates![0].composition = `return loop({id:'bad',plan:function*(ctx){
+    yield* graphStep(graph('bad').node('root/check','INFER.REASONING.REFLECT',[],()=>({})),null);}});`;
+  await assert.rejects(run(fake, candidate), /cannot execute node/);
+  assert.equal(fake.inputs.length, 0);
 });

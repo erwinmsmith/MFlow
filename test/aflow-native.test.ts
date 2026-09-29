@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
 import { runAFlowSearch, initialOrganization, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
-import { initialComposition } from '../src/composition.js';
+import { initialLibraryComposition } from '../src/composition.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { initialStrategy, limitsSchema, rootProfile } from '../src/types.js';
@@ -120,7 +120,9 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       assert.ok(input.messages[0].content.includes('initialAgents'));
       assert.ok(input.messages[0].content.includes('nodeCalls'));
       assert.ok(input.messages[0].content.includes('composition'));
-      value = { organization: initialOrganization, modification: `Change the agent instructions (${proposals}).`, composition: initialComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
+      assert.ok(input.messages[0].content.includes('agentTemplates'));
+      assert.ok(input.messages[0].content.includes('RUN_TEMPLATE'));
+      value = { organization: initialOrganization, modification: `Change the agent instructions (${proposals}).`, composition: initialLibraryComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
     } else {
       agents++;
       const candidate = input.messages[0].content.includes('NATIVE-CANDIDATE-MARKER');
@@ -146,12 +148,15 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(bundle.strategy.id, 's1');
     assert.deepEqual(bundle.pool, initialOrganization.initialAgents);
     assert.deepEqual(bundle.strategy.organization, initialOrganization);
+    const library = JSON.parse(await readFile(join(options.out, 'agent-library.json'), 'utf8'));
+    assert.deepEqual(library.templates, bundle.strategy.organization.agentTemplates);
+    assert.equal(library.selectedRound, 1);
     const child = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/strategy.json'), 'utf8'));
     assert.deepEqual(child.organization, initialOrganization);
-    assert.equal(child.composition, initialComposition);
+    assert.equal(child.composition, initialLibraryComposition);
     const parentContext = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/parent_context.json'), 'utf8'));
     assert.deepEqual(parentContext.strategy.organization, initialOrganization);
-    assert.equal(parentContext.strategy.composition, initialComposition);
+    assert.equal(parentContext.strategy.composition, initialLibraryComposition);
     assert.equal(parentContext.execution.length, 2);
     assert.equal(parentContext.execution[0].evaluated, 4);
     assert.equal(bundle.config.prefixCache, false);

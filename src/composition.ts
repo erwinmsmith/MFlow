@@ -8,7 +8,7 @@ import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, 
 import { PolicyContractError } from './strategy-program.js';
 
 /** The seed is itself a searched artifact, not a hidden fixed agent executor. */
-export const initialComposition = `
+const initialTurn = `
 function* turn(ctx, id, evidence = [], prompt = 'agent') {
   const messages = ctx.messages(id, evidence, prompt);
   for (;;) {
@@ -40,18 +40,54 @@ function* turn(ctx, id, evidence = [], prompt = 'agent') {
     }
   }
 }
+`.trim();
+export const initialComposition = initialTurn + `
 return loop({ id: 'mas', plan: function* (ctx) {
   const answer = yield* turn(ctx, 'root');
   return answer.candidate_answer;
-} });
-`.trim();
+} });`;
+
+export const initialAgentComposition = initialTurn + `
+return loop({ id: 'solver', plan: function* (ctx) {
+  return yield* turn(ctx, ctx.self, ctx.evidence, ctx.prompt);
+} });`;
+
+export const initialVerifierComposition = `return loop({ id: 'verifier', plan: function* (ctx) {
+  const id = ctx.self, node = id + '/verify';
+  const plan = graph(id + '/verify').node(node, 'INFER.REASONING.REFLECT', [], () => ({
+    ...ctx.request(id, [{ role: 'user', content: JSON.stringify({
+      task: ctx.task, profile: ctx.profile(id), evidence: ctx.evidence
+    }) }], false),
+    mode: 'verify', target: { artifact: ctx.evidence }
+  }));
+  const result = yield* graphStep(plan, null);
+  const review = ctx.unwrap(result[node]);
+  return ctx.publish(id, { candidate_answer: '', claims: [], open_deficits: [], resolved_deficits: [],
+    artifacts: [{id: id + '/review', type: 'verification', content: JSON.stringify(review), deficit_refs: []}] });
+} });`;
+
+/** Both this outer policy and every template below are editable search artifacts. */
+export const initialLibraryComposition = `return loop({ id: 'mas', plan: function* (ctx) {
+  const first = yield* ctx.runAgent('root');
+  if (!first.open_deficits.length) return first.candidate_answer;
+  const evidence = [];
+  for (const deficit of first.open_deficits) {
+    const id = 'verifier-' + evidence.length;
+    ctx.spawnTemplate('verifier', id, 'root');
+    const result = yield* ctx.runAgent(id, { candidate: first, deficit });
+    evidence.push({ deficit, result });
+    ctx.dormant(id);
+  }
+  const final = yield* ctx.runAgent('root', { candidate: first, evidence }, 'integrate');
+  return final.candidate_answer;
+} });`;
+
 
 // These are the Worker capabilities configured by this application. No private
 // Ditto entrypoints or application implementations of Worker nodes are involved.
 const nodes = new Set<NodeType>(compositionNodes);
 
-function compile(source: string) {
-  const context = createContext({ graph, loop, graphStep }, { codeGeneration: { strings: false, wasm: false } });
+function compile(source: string, context = createContext({ graph, loop, graphStep }, { codeGeneration: { strings: false, wasm: false } })) {
   // VM deadlines guard synchronous candidate code only; model execution is owned
   // by Ditto and has its separately configured deadline. This is not an OS sandbox.
   const evaluate = (code: string) => new Script(code).runInContext(context, { timeout: 250 });
@@ -68,12 +104,15 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   if (!strategy.composition || !strategy.organization || !strategy.prompts)
     throw new PolicyContractError('Native composition requires complete code, population and prompts');
   const machine = compile(strategy.composition);
-  const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number }>();
+  const templates = new Map((strategy.organization.agentTemplates ?? []).map(t => [t.id, t]));
+  const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
+  const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
   const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
   let peakActive = 0, toolCalls = 0;
   const event = (action: string, agentId: string, parentId?: string) => {
     orchestration.lifecycle.push({ action, agentId, ...(parentId ? { parentId } : {}), afterGraph: orchestration.graphs.length,
+      ...(population.get(agentId)?.templateId ? { templateId: population.get(agentId)!.templateId } : {}),
       ...(['INITIAL', 'SPAWN', 'RECONFIGURE'].includes(action) ? { profile: structuredClone(population.get(agentId)!.profile) } : {}) });
     peakActive = Math.max(peakActive, [...population.values()].filter(a => a.status === 'ACTIVE').length);
   };
@@ -82,26 +121,51 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     if (!agent) throw new PolicyContractError(`Unknown agent ${id}`);
     return agent;
   };
-  const add = (profile: AgentProfile, parentId?: string) => {
+  const add = (profile: AgentProfile, parentId?: string, templateId?: string) => {
+    if (templateId && !templates.has(templateId)) throw new PolicyContractError(`Unknown template ${templateId}`);
     const parsed = profileSchema.parse(profile); agents.validateProfile(parsed);
     if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
     if (parsed.id.includes('/') || population.has(parsed.id)) throw new PolicyContractError('Agent IDs must be unique and cannot contain /');
     const depth = parentId ? member(parentId).depth + 1 : 0;
     if (depth > limits.maxDepth || population.size >= limits.maxPoolAgents)
       throw new EpisodeExhausted('Population/depth limit reached');
-    population.set(parsed.id, { profile: parsed, status: 'DORMANT', depth });
+    population.set(parsed.id, { profile: parsed, status: 'DORMANT', depth, ...(templateId ? { templateId } : {}) });
     event(parentId ? 'SPAWN' : 'INITIAL', parsed.id, parentId);
     return structuredClone(parsed);
   };
-  for (const profile of strategy.organization.initialAgents) add(profile);
+  for (const profile of strategy.organization.initialAgents) add(profile, undefined, strategy.organization.initialBindings?.[profile.id]);
   const schema = JSON.stringify(z.toJSONSchema(agentOutputSchema));
   const api = {
     task: { id: task.id, prompt: task.prompt }, // Deliberately strip all labels/references.
+    get templates() { return structuredClone([...templates.values()]); },
     get agents() { return structuredClone([...population.values()]); },
     get outputs() { return structuredClone(outputs); },
     get graphs() { return structuredClone(orchestration.graphs); },
     profile: (id: string) => structuredClone(member(id).profile),
     spawn: (profile: AgentProfile, parentId = 'root') => add(profile, parentId),
+    spawnTemplate: (templateId: string, id: string, parentId = 'root') => {
+      const template = templates.get(templateId);
+      if (!template) throw new PolicyContractError(`Unknown template ${templateId}`);
+      return add({ ...template.profile, id }, parentId, templateId);
+    },
+    bindTemplate: (id: string, templateId: string) => {
+      const template = templates.get(templateId);
+      if (!template) throw new PolicyContractError(`Unknown template ${templateId}`);
+      const profile = profileSchema.parse({ ...template.profile, id });
+      agents.validateProfile(profile);
+      if (!profile.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
+      Object.assign(member(id), { templateId, profile }); event('RECONFIGURE', id);
+    },
+    runAgent: function* (id: string, evidence: unknown = [], prompt = 'agent'): Generator<GraphInvocation, z.infer<typeof agentOutputSchema>, any> {
+      const templateId = member(id).templateId;
+      const definition = templateId && definitions.get(templateId);
+      if (!definition) throw new PolicyContractError(`Agent ${id} has no bound template`);
+      event('RUN_TEMPLATE', id);
+      const local = Object.assign(Object.create(api), { self: id, evidence, prompt });
+      // Delegation yields native graphStep invocations to the same Ditto loop.
+      // The outer VM deadline also covers nested generator execution/bindings.
+      return agentOutputSchema.parse(yield* definition.plan(local));
+    },
     reconfigure: (id: string, profile: AgentProfile) => {
       const parsed = profileSchema.parse(profile); agents.validateProfile(parsed);
       if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');

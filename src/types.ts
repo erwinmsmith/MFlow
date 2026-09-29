@@ -56,12 +56,26 @@ export const profileSchema = z
   })
   .strict();
 export type AgentProfile = z.infer<typeof profileSchema>;
+export const agentTemplateSchema = z.object({
+  id: z.string().min(1),
+  description: z.string().min(1),
+  profile: profileSchema.omit({ id: true }),
+  composition: z.string().min(1),
+}).strict();
 export const organizationSchema = z.object({
   initialAgents: z.array(profileSchema).min(1),
-}).strict().superRefine(({ initialAgents }, ctx) => {
+  agentTemplates: z.array(agentTemplateSchema).optional(),
+  initialBindings: z.record(z.string(), z.string()).optional(),
+}).strict().superRefine(({ initialAgents, agentTemplates = [], initialBindings = {} }, ctx) => {
   if (initialAgents.filter(p => p.id === "root").length !== 1 ||
       new Set(initialAgents.map(p => p.id)).size !== initialAgents.length)
     ctx.addIssue({ code: "custom", message: "Organization needs exactly one root and unique agent IDs" });
+  const ids = new Set(agentTemplates.map(t => t.id));
+  if (ids.size !== agentTemplates.length)
+    ctx.addIssue({ code: 'custom', message: 'Agent template IDs must be unique' });
+  for (const [agent, template] of Object.entries(initialBindings))
+    if (!initialAgents.some(p => p.id === agent) || !ids.has(template))
+      ctx.addIssue({ code: 'custom', message: `Invalid initial template binding ${agent}: ${template}` });
 });
 export const capabilitySchema = profileSchema.omit({ id: true });
 export const strategySchema = z
@@ -203,7 +217,7 @@ export interface Execution {
   /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
   orchestration?: {
     graphs: { id: string; nodes: { id: string; type: string; dependencies: string[] }[]; inputs: Record<string, unknown>; outputs: unknown }[];
-    lifecycle: { action: string; agentId: string; parentId?: string; afterGraph: number; profile?: AgentProfile }[];
+    lifecycle: { action: string; agentId: string; parentId?: string; afterGraph: number; profile?: AgentProfile; templateId?: string }[];
   };
   taskId: string;
   strategyId: string;
