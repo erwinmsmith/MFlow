@@ -35,7 +35,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-aflow-program-v7/mas-population/capability-evolution/arithmetic-python-v1", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-composition-v1/ditto-graph-loop", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -120,7 +120,6 @@ export class MeteredProvider implements ModelProvider {
     options.signal.throwIfAborted();
     this.denial = undefined;
     this.lastFinishReason = undefined;
-    this.lastFailure = undefined;
     const reservation = this.estimate(input);
     if (reservation > this.budget.remaining) {
       this.denial = "search";
@@ -279,7 +278,7 @@ export class DittoAgents {
   get resourceVersion() {
     return executionVersion;
   }
-  private runtime(tools: string[], timeoutMs: number) {
+  runtime(tools: string[], timeoutMs: number) {
     const chosen = this.tools.filter((t) => tools.includes(t.name));
     if (chosen.length !== new Set(tools).size)
       throw new Error("Agent requested an unregistered tool");

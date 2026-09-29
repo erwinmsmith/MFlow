@@ -1,0 +1,142 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DittoAgents, MeteredProvider } from '../src/ditto.js';
+import { OrganizationRuntime } from '../src/runtime.js';
+import { initialComposition, validateComposition } from '../src/composition.js';
+import { organizationEvidence, summarizeOrganizations } from '../src/organization.js';
+import { initialStrategy, limitsSchema, rootProfile, type AgentProfile, type Strategy } from '../src/types.js';
+import { programPrompts } from '../src/aflow-search.js';
+import { ScriptedProvider, output } from './fixtures.js';
+import type { ModelProvider } from '@codesoul-co/ditto/worker/infer';
+
+const model = { model: 'fixture', baseUrl: 'https://invalid.example', temperature: 0, seed: 42 };
+const profile: AgentProfile = { ...rootProfile, tools: ['arithmetic'], nodes: ['CONTEXT.LOAD', 'INFER.REASONING.SAMPLE', 'INTERACTION.ACT.TOOL', 'INTERACTION.OBSERVE'] };
+const strategy = (composition = initialComposition, profiles = [profile]): Strategy => ({ ...initialStrategy,
+  composition, organization: { initialAgents: profiles }, prompts: programPrompts });
+const run = (provider: ModelProvider, candidate = strategy(), prompt = 'Synthetic fixture') =>
+  new OrganizationRuntime(new DittoAgents(new MeteredProvider(provider), model), limitsSchema.parse({maxSteps: 20, maxTokens: 100000}))
+    .run(candidate, { id: 'fixture', prompt });
+
+test('native seed executes declared context, inference and interaction nodes through Ditto', async () => {
+  let calls = 0;
+  const provider: ModelProvider = { async invoke(input) {
+    if (++calls === 1) return { message: { role: 'assistant', content: '' }, finishReason: 'action_request',
+      actionRequests: [{ id: 'sum', name: 'arithmetic', arguments: {operation: 'add', values: [2, 3]} }], usage: {totalTokens: 20} };
+    assert.ok(JSON.stringify(input.messages).includes('5'));
+    assert.equal(input.messages.at(-1)?.metadata?.actionRequestId, 'sum');
+    return {message:{role:'assistant',content:JSON.stringify(output('5'))},finishReason:'stop',usage:{totalTokens:20}};
+  } };
+  const result = await run(provider);
+  assert.equal(result.answer, '5'); assert.equal(calls, 2);
+  assert.equal(result.orchestration?.graphs.length, 3);
+  assert.equal(result.toolEvents.length, 1);
+  assert.equal(organizationEvidence(result).nodeCalls?.['INTERACTION.ACT.TOOL'], 1);
+});
+
+const heterogeneous = `return loop({id:'heterogeneous', plan:function*(ctx) {
+  const derived = ctx.spawn({...ctx.profile('root'), id:'checker', tools:[], nodes:['INFER.REASONING.REFLECT'], capability:'Verification only'});
+  const plan = graph('woven')
+    .node('root/solve','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',ctx.messages('root')))
+    .node('checker/verify','INFER.REASONING.REFLECT',['root/solve'],(_,out)=>({
+      model:{model:'fixture'},mode:'verify',target:{result:ctx.unwrap(out['root/solve']).message}}));
+  const result = yield* graphStep(plan,null);
+  const initial = ctx.decode(ctx.unwrap(result['root/solve']).message.content);
+  ctx.publish('root',initial);
+  ctx.dormant('checker');
+  if (!ctx.unwrap(result['checker/verify']).assessment.passed) {
+    const revise = graph('revise').node('root/revise','INFER.REASONING.SAMPLE',[],
+      ()=>ctx.request('root',ctx.messages('root',ctx.unwrap(result['checker/verify']),'integrate')));
+    const revised = yield* graphStep(revise,null);
+    return ctx.publish('root',ctx.decode(ctx.unwrap(revised['root/revise']).message.content)).candidate_answer;
+  }
+  return initial.candidate_answer;
+}});`;
+
+test('different agent node capabilities weave into one graph, then dynamically route critique back', async () => {
+  let samples=0;
+  const fake = new ScriptedProvider(input => {
+    if (input.messages[0].content.toString().includes('Assess the supplied target'))
+      return {assessment:{passed:false,summary:'WRONG-RECOMPUTE'},issues:[{severity:'error',description:'Synthetic discrepancy'}]};
+    if (++samples===1) return output('wrong');
+    assert.ok(JSON.stringify(input.messages).includes('WRONG-RECOMPUTE'));
+    return output('fixed');
+  });
+  const result = await run(fake,strategy(heterogeneous));
+  assert.equal(result.answer,'fixed'); assert.equal(fake.inputs.length,3);
+  const evidence = organizationEvidence(result);
+  assert.deepEqual(evidence.executedAgents,['root','checker']);
+  assert.equal(evidence.nodeCalls?.['INFER.REASONING.REFLECT'],1);
+  assert.deepEqual(evidence.graphs?.[0].nodes[1].dependencies,['root/solve']);
+  assert.equal(evidence.actions.SPAWN,1); assert.equal(evidence.actions.DORMANT,1);
+  assert.deepEqual(result.agents[1].nodes,['INFER.REASONING.REFLECT']);
+  assert.equal(summarizeOrganizations([{taskId:'fixture',score:1,organization:evidence}]).spawnedTasks,1);
+  // Persisted code + profiles can be reloaded for frozen inference; no prior task state.
+  const second = await run(new ScriptedProvider(i => i.messages[0].content.toString().includes('Assess the supplied target')
+    ? {assessment:{passed:true,summary:'pass'},issues:[]} : output('fresh')), JSON.parse(JSON.stringify(strategy(heterogeneous))));
+  assert.equal(second.answer,'fresh'); assert.equal(second.agents.length,2);
+});
+
+test('nested agent generators interleave graph steps with independent loop state', async () => {
+  const code = `function* agent(ctx,id) {
+    let last;
+    for(let i=0;i<2;i++) {
+      const g=graph(id+'/turn').node(id+'/sample','INFER.REASONING.SAMPLE',[],()=>ctx.request(id,ctx.messages(id,{iteration:i})));
+      const result=yield* graphStep(g,null);
+      last=ctx.publish(id,ctx.decode(ctx.unwrap(result[id+'/sample']).message.content));
+    }
+    return last;
+  }
+  return loop({id:'interleaved',plan:function*(ctx){
+    ctx.spawn({...ctx.profile('root'),id:'child'});
+    const a=agent(ctx,'root'),b=agent(ctx,'child');
+    let na=a.next(),nb=b.next();
+    while(!na.done || !nb.done) {
+      if(!na.done) na=a.next(yield na.value);
+      if(!nb.done) nb=b.next(yield nb.value);
+    }
+    return na.value.candidate_answer;
+  }});`;
+  const result=await run(new ScriptedProvider(()=>output('ok')),strategy(code));
+  assert.deepEqual(result.orchestration?.graphs.map(g=>g.id),['root/turn','child/turn','root/turn','child/turn']);
+  assert.equal(result.answer,'ok');
+});
+
+test('native composition rejects unauthorized nodes/tools and invalid loops before model work',async()=>{
+  const fake=new ScriptedProvider(()=>output('x'));
+  const bad=`return loop({id:'bad',plan:function*(ctx){
+    const g=graph('bad').node('root/review','INFER.REASONING.REFLECT',[],()=>({}));
+    yield* graphStep(g,null);return 'bad';}});`;
+  await assert.rejects(run(fake,strategy(bad)),/cannot execute node/); assert.equal(fake.inputs.length,0);
+  const tool=`return loop({id:'bad',plan:function*(){
+    yield* graphStep(graph('bad').node('root/tool','INTERACTION.ACT.TOOL',[],()=>({call:{id:'x',name:'python',arguments:{}}})),null);return 'bad';}});`;
+  await assert.rejects(run(fake,strategy(tool)),/cannot use tool/);
+  assert.throws(()=>validateComposition('return process.env'),/process is not defined/);
+  await assert.rejects(run(fake,strategy("return loop({id:'bad',plan:function*(){while(true){} return 'bad';}});")),/timed out/);
+});
+
+test('final task labels cannot enter native composition', async()=>{
+  const fake=new ScriptedProvider(i=>{assert.ok(!JSON.stringify(i).includes('SECRET-LABEL'));return output('ok');});
+  const runtime=new OrganizationRuntime(new DittoAgents(new MeteredProvider(fake),model),limitsSchema.parse({}));
+  await runtime.run(strategy(),{id:'fixture',prompt:'fixture',answer:'SECRET-LABEL'} as any);
+});
+
+test('Ditto schedules independent heterogeneous nodes concurrently and records bindings', async()=>{
+  let active=0,peak=0;
+  const provider:ModelProvider={async invoke(){
+    peak=Math.max(peak,++active);await new Promise(r=>setTimeout(r,15));active--;
+    return {message:{role:'assistant',content:JSON.stringify(output('ok'))},finishReason:'stop',usage:{totalTokens:20}};
+  }};
+  const code=`return loop({id:'parallel',plan:function*(ctx){
+    ctx.spawn({...ctx.profile('root'),id:'other',nodes:['INFER.REASONING.TRAJECTORY'],tools:[],reasoning:'cot'});
+    const g=graph('parallel')
+      .node('root/sample','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',ctx.messages('root')))
+      .node('other/trajectory','INFER.REASONING.TRAJECTORY',[],()=>({messages:ctx.messages('other'),model:{model:'fixture'},strategy:{name:'cot',options:{rounds:1}}}));
+    const out=yield* graphStep(g,null,{concurrency:2});
+    ctx.publish('other',ctx.decode(ctx.unwrap(out['other/trajectory']).result.content));
+    return ctx.publish('root',ctx.decode(ctx.unwrap(out['root/sample']).message.content)).candidate_answer;
+  }});`;
+  const result=await run(provider,strategy(code));
+  assert.equal(peak,2);assert.equal(result.calls,2);assert.equal(result.tokens,40);
+  assert.equal(result.orchestration?.graphs[0].inputs['other/trajectory'] !== undefined,true);
+  assert.equal(result.outputs.length,2);
+});

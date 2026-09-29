@@ -9,8 +9,19 @@ export function organizationEvidence(execution: Execution) {
     actions[step.decision.action] = (actions[step.decision.action] ?? 0) + 1;
     if (step.event.includes(':')) noops[step.event] = (noops[step.event] ?? 0) + 1;
   }
+  const native = execution.orchestration;
+  for (const change of native?.lifecycle ?? [])
+    actions[change.action] = (actions[change.action] ?? 0) + 1;
+  const graphs = native?.graphs.map(({ id, nodes }) => ({ id, nodes }));
+  const nodeCalls: Record<string, number> = {};
+  for (const graph of graphs ?? []) for (const node of graph.nodes)
+    nodeCalls[node.type] = (nodeCalls[node.type] ?? 0) + 1;
   return {
     agents: execution.agents, actions, noops,
+    ...(native ? { graphs, nodeCalls, lifecycle: native.lifecycle,
+      executedAgents: [...new Set(native.graphs.flatMap(g => g.nodes.map(n => n.id.split('/')[0])))],
+      publishedAnswers: execution.outputs.map(o => ({ agentId: o.agentId, answer: o.output.candidate_answer })),
+    } : {}),
     edges: execution.edges.map(({ source, target, deficitId }) => ({ source, target, deficitId })),
     transitions: execution.trace.map(({ state, decision, event }) => ({
       action: decision.action, agentId: decision.agentId, deficitId: decision.deficitId, event,
@@ -35,9 +46,9 @@ export function summarizeOrganizations(rows: { taskId: string; score: number; or
     if (!org) continue;
     for (const [k, n] of Object.entries(org.actions)) actions[k] = (actions[k] ?? 0) + n;
     for (const [k, n] of Object.entries(org.noops)) noops[k] = (noops[k] ?? 0) + n;
-    if (org.actions.DERIVE || org.actions.CHALLENGE) spawnedTasks++;
+    if (org.actions.DERIVE || org.actions.CHALLENGE || org.actions.SPAWN) spawnedTasks++;
     if (org.deficits.some(d => d.artifacts > d.delivered && d.status !== 'RESOLVED')) unroutedTasks++;
-    const pattern = JSON.stringify([row.score, org.transitions.map(t => t.action), org.edges]);
+    const pattern = JSON.stringify([row.score, org.transitions.map(t => t.action), org.edges, org.graphs, org.lifecycle]);
     if (!patterns.has(pattern) && examples.length < 6) { patterns.add(pattern); examples.push(row); }
   }
   return { evaluated: rows.length, correct: rows.reduce((n, r) => n + r.score, 0),

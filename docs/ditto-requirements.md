@@ -88,3 +88,23 @@ v5 的可复用 profiles、运行图、父节点上下文、成员能力重配�
 DITTO-004 尚缺的通用能力缩小为：工具参数/隐藏推理/keep-alive 的分型进度、供应商请求 ID、异常或取消时已知 usage，以及解析失败的具体字段路径。当前工具参数增量不会产生公共 text_delta，不能仅凭没有文本事件判定传输已卡死，也不应用文本空闲计时器终止有效工具生成。
 
 补充复现：供应商返回 `tool_calls[].function.arguments = "null"`，公共 provider 抛出 `INVALID_MODEL_OUTPUT: value must be an object`。即使供应商帧里有 usage，解析失败后公共错误未携带它；应用必须记 unknown，不能以预留值冒充实耗。验收应覆盖上述错误的字段路径和已知 usage 保存。MFlow 未复制解析器或修改 node_modules。
+
+## DITTO-005：声明式的隔离代码工具创建与任务局部注册（待支持）
+
+核查版本：registry `@codesoul-co/ditto@0.1.1`，2026-09-29。
+
+已有公共能力：`ToolRegistry.register(RegisteredTool)` 可由宿主注册带 `validate/execute` 函数的工具；`INTERACTION.ACT.TOOL` 执行已注册工具；`SandboxExecutor` 执行隔离命令；Graph/Loop/graphStep 已满足原生异构 MAS 编排。此需求不是要求为 spawn 新增专用 API。
+
+缺口：若模型或工作流输出 JSON 形式的代码工具工件（工具名、schema、代码、语言、能力声明），目前没有一个公开、声明式的工件到隔离 RegisteredTool 的构造接口及任务局部注册流程。现有 register 要求宿主可执行 JS handler，不能直接把不受信任工件注册为安全工具。
+
+复现：用公开 `createDitto`、`createInteractionWorker` 和 `ToolRegistry` 建一个任务，在 INFER 节点生成上述工件，随后尝试通过公共节点安全创建该工具，再由下游 ACT.TOOL 调用。当前可执行预装 Python 工具，但无法在不编写额外工具生命周期/工件执行基础设施的条件下完成声明式新工具注册。
+
+期望的通用能力与验收标准：
+
+1. 接受可 JSON 序列化且版本化的代码工具定义，通过指定 SandboxExecutor 执行；不 eval 宿主代码。
+2. 创建/注册/撤销可从公开 Graph/Loop 使用，节点名称由 Ditto 设计，不在 MFlow 中虚构。
+3. 明确运行范围、命名冲突、权限继承、schema 验证、超时/取消、错误和 usage/event 归属；新工具不能自行提升能力。
+4. 不同任务的动态工具隔离，关闭运行后清理；工件可保存与重载，恢复时验证版本。
+5. 用一个“生成纯计算工具 -> 调用 -> 观察 -> 撤销”的普通 workflow 验证；无须任何 MAS/spawn 特有概念。
+
+MFlow v6 继续使用已有 arithmetic/Python 工具和原生节点。该扩展不阻塞 Graph/Loop 搜索；真正搜索新工具创建流程需 Ditto 按 dev -> main 更新、发布 registry 包后再接入。

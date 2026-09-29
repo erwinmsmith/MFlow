@@ -72,7 +72,7 @@ def main():
         (path / 'strategy.json').write_text(json.dumps({'id': f's{number}', **json.loads(response['graph']), 'prompts': json.loads(response['prompt'])}, indent=2) + '\n')
 
     if not (workflows / 'round_1/strategy.json').exists():
-        write_graph(workflows / 'round_1', {'graph': json.dumps({'program': init['program'], 'organization': init['organization']}), 'prompt': json.dumps(init['prompts'])}, 1, 'MATH')
+        write_graph(workflows / 'round_1', {'graph': json.dumps({'composition': init['composition'], 'organization': init['organization']}), 'prompt': json.dumps(init['prompts'])}, 1, 'MATH')
 
     def execution_context(number, path):
         directory = Path(path) / f'round_{number}'
@@ -80,7 +80,7 @@ def main():
 
     def read_graph(number, path):
         strategy = json.loads((Path(path) / f'round_{number}/strategy.json').read_text())
-        return json.dumps(strategy['prompts']), json.dumps({'program': strategy['program'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)})
+        return json.dumps(strategy['prompts']), json.dumps({'composition': strategy['composition'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)})
 
     optimizer.graph_utils.write_graph_files = write_graph
     optimizer.graph_utils.read_graph_files = read_graph
@@ -90,12 +90,12 @@ def main():
 
     def prompt(experience, score, graph, prompts, operator_description, type, log_data):
         # Keep AFlow's single-change, complete artifact, feedback and experience instructions.
-        # Language/import instructions are replaced because the search object is a pure JS policy.
+        # Language/import instructions are replaced because the search object is a native Ditto Graph/Loop composition.
         user = WORKFLOW_INPUT.format(experience=experience, score=score, graph=graph, prompt=prompts,
                                     operator_description=operator_description, type=type, log=log_data)
         start = user.index('When introducing new functionalities')
         end = user.index('**Under no circumstances', start)
-        user = user[:start] + 'Generate a complete JavaScript policy function BODY and a complete JSON prompt map. No imports.\n' + user[end:]
+        user = user[:start] + 'Generate complete JavaScript composition code returning a native Ditto loop plan, plus a complete JSON prompt map. No imports.\n' + user[end:]
         user = user.replace('You do not need to manually import prompt_custom or operator to use them; they are already included in the execution environment.', '')
         system = WORKFLOW_OPTIMIZE_PROMPT.format(type=type)
         system = system.replace("Python's", "JavaScript's")
@@ -103,13 +103,13 @@ def main():
         begin = system.index('The prompt you need to generate')
         end = system.index('Considering information loss', begin)
         system = system[:begin] + 'Generate the complete JSON map of agent, factory, review, integrate and retrieve prompts. All five fields are editable.\n' + system[end:]
-        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members and routing from this parent, and make one focused change. Do not copy task answers or episodic memory into reusable profiles. Return program and organization only as executable fields; parent_execution is evidence.\n' + user + '\n' + init['interface'] + '\nReturn modification, organization, program and prompts according to the response schema. The strategy dynamically organizes agents; do not generate a fixed task-specific graph or benchmark answers.'
+        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members and routing from this parent, and make one focused change. Do not copy task answers or episodic memory into reusable profiles. Return composition and organization only as executable fields; parent_execution is evidence.\n' + user + '\n' + init['interface'] + '\nReturn modification, organization, composition and prompts according to the response schema. The strategy dynamically composes heterogeneous agents using native graphs and loops. Preserve and evolve their different internal node structures and cross-agent bindings; do not embed benchmark answers.'
 
     optimizer.graph_utils.create_graph_optimize_prompt = prompt
 
     async def propose(self, prompt, formatter):
         result = await asyncio.to_thread(rpc, 'propose', {'round': optimizer.round + 1, 'prompt': prompt})
-        return {'modification': result['modification'], 'graph': json.dumps({'program': result['program'], 'organization': result['organization']}), 'prompt': json.dumps(result['prompts'])}
+        return {'modification': result['modification'], 'graph': json.dumps({'composition': result['composition'], 'organization': result['organization']}), 'prompt': json.dumps(result['prompts'])}
     AsyncLLM.call_with_format = propose
     # Prevent the native formatting fallback from bypassing Ditto.
     async def raw(self, prompt):

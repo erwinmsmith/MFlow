@@ -16,6 +16,7 @@ import {
   rootProfile,
 } from "./types.js";
 import { digest } from "./util.js";
+import { runComposition } from "./composition.js";
 
 /** Portable explicit episode state, checkpointed only between fully settled Ditto calls. */
 export class OrganizationRuntime {
@@ -36,6 +37,11 @@ export class OrganizationRuntime {
     task: TaskInput,
     reuse?: { checkpoint: EpisodeCheckpoint; prefix: EpisodeCheckpoint[] },
   ): Promise<Execution> {
+    if (strategy.composition) {
+      if (reuse || this.captureCheckpoints)
+        throw new Error("Native compositions resume completed tasks, not legacy action checkpoints");
+      return runComposition(this.agents, this.limits, strategy, task);
+    }
     this.agents.prompts = strategy.prompts;
     const pool = strategy.organization?.initialAgents ?? this.pool;
     for (const profile of pool) this.agents.validateProfile(profile);

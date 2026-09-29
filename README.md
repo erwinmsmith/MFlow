@@ -1,3 +1,5 @@
+> 当前正式搜索采用 [v6 原生 Ditto Graph/Loop 编排](docs/search-v6.md)：异构 agent 内部图、跨 agent 节点依赖与动态派生策略共同作为候选继承和优化。v5 及更早实验分数不与 v6 混用。
+
 # MFlow — 搜索 agent 派生与组织策略
 
 搜索一个可复用的组织策略 `π`；推理时，`π` 根据任务中的信息缺口动态组织不同能力的 agent。每个搜索节点是一套完整策略，每条搜索边是一处局部策略修改。
@@ -8,19 +10,19 @@
 
 ## 当前实现范围
 
-- 搜索完整 JavaScript 策略程序及 agent、factory、review、integrate、retrieve 提示词。程序读取任务运行状态，动态决定派生、复用、传递、整合和停止，不生成固定 agent graph。
+- 搜索完整 Ditto Graph/Loop 编排源码、异构初始 agent 配置及提示词。各 agent 可以有不同 node 权限、graph 拓扑、推理策略与 loop；执行中动态派生、重新配置并交织多个 agent 的节点。每个 child 继承完整父编排及实际执行反馈。
 - 官方 AFlow 的父节点采样、经验去重、失败样例、优化循环和收敛检测直接从固定源码导入；完整候选由 Ditto 中的优化模型生成，不从枚举 edit 列表挑选。
 - 每个候选、每次重复都从头运行完整 validate。没有 MIA acquisition、affected-set 继承、前缀/agent 缓存、逐批淘汰或廉价候选替换规则。
 - 默认不设优化轮数上限，按官方 top-3 均分连续五轮稳定判定收敛；每候选 5 次完整验证重复、50 题并发。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
-- Ditto Factory 开放生成不同 capability、objective、context、reasoning 和 tool manifest。可使用 arithmetic 和隔离 Python 工具，均通过发布包的 Interaction 执行。
+- 候选可通过 Ditto INFER 图生成新成员配置，再构造其图；SAMPLE、TRAJECTORY、REFLECT、DELIBERATE、Context 与 Interaction 节点按成员权限组合。arithmetic 和隔离 Python 工具由发布包执行。
 - 标准协议每题重置状态；test 在选择冻结后才打开，答案只交给评分器。不同轮次/重复不共享模型执行结果。
 - 每次请求保存 Ditto 用量账本；逐题结果和控制器状态可恢复。只有同一候选同一次重复的已完成题目可以在中断恢复时跳过。
 
-实现与复现见 [官方 AFlow 搜索控制 v4](docs/search-v4.md)。旧的规则/MIA 实现仅保留在显式 `legacy-search` 入口供历史复现，旧结果不覆盖。历史协议见 [v2](docs/search-v2.md)、[v3](docs/search-v3.md)。
+当前实现见 [v6 原生编排](docs/search-v6.md)，官方优化控制来源见 [v4](docs/search-v4.md)。旧的规则/MIA 实现仅保留在显式 `legacy-search` 入口供历史复现，旧结果不覆盖。历史协议见 [v2](docs/search-v2.md)、[v3](docs/search-v3.md)。
 
-原有 standard/continual、BranchStore 和 checkpoint 能力保留；程序策略默认使用 standard，Python 工具不参与跨任务事务或前缀恢复。发布包边界与尚未满足的通用需求见 [Ditto 需求](docs/ditto-requirements.md)。
+原有 standard/continual、BranchStore 和 checkpoint 能力保留；原生编排使用 standard 逐题重置，不使用旧动作 checkpoint 或跨任务记忆。发布包边界与尚未满足的通用需求见 [Ditto 需求](docs/ditto-requirements.md)。
 
-官方基线的独立运行协议见 [baseline 完整重跑协议](docs/baseline-rerun.md)。v4 默认验证重复次数为 5，当前旧 AFlow baseline 为 1，比较时必须报告这一计算量差异。
+官方基线的独立运行协议见 [baseline 完整重跑协议](docs/baseline-rerun.md)。MFlow 默认验证重复次数为 5，当前旧 AFlow baseline 为 1，比较时必须报告这一计算量差异。
 
 ## 安装和验证
 

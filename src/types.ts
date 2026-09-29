@@ -36,6 +36,12 @@ export const ruleSchema = z
     action: z.enum(actions),
   })
   .strict();
+export const compositionNodes = [
+  'CONTEXT.LOAD', 'CONTEXT.SELECT', 'CONTEXT.UPDATE', 'CONTEXT.COMPRESS',
+  'INFER.REASONING.SAMPLE', 'INFER.REASONING.TRAJECTORY',
+  'INFER.REASONING.REFLECT', 'INFER.REASONING.DELIBERATE',
+  'INTERACTION.ACT.TOOL', 'INTERACTION.OBSERVE',
+] as const;
 export const profileSchema = z
   .object({
     id: z.string().min(1),
@@ -43,7 +49,8 @@ export const profileSchema = z
     capability: z.string().min(1),
     private_context: z.string(),
     tools: z.array(z.string()),
-    reasoning: z.enum(["cot", "long-cot", "react"]),
+    nodes: z.array(z.enum(compositionNodes)).min(1).optional(),
+    reasoning: z.enum(["cot", "long-cot", "react", "tot", "got", "self-consistency"]),
     expected_output: z.string().min(1),
     stop_condition: z.string().min(1),
   })
@@ -63,6 +70,7 @@ export const strategySchema = z
     rules: z.array(ruleSchema).min(1).max(24),
     fallback: z.enum(actions),
     program: z.string().min(1).optional(),
+    composition: z.string().min(1).optional(),
     organization: organizationSchema.optional(),
     prompts: z.object({
       agent: z.string().min(1), factory: z.string().min(1),
@@ -192,6 +200,11 @@ export interface EpisodeState {
 }
 export type EpisodeCheckpoint = StateCheckpoint<EpisodeState>;
 export interface Execution {
+  /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
+  orchestration?: {
+    graphs: { id: string; nodes: { id: string; type: string; dependencies: string[] }[]; inputs: Record<string, unknown>; outputs: unknown }[];
+    lifecycle: { action: string; agentId: string; parentId?: string; afterGraph: number; profile?: AgentProfile }[];
+  };
   taskId: string;
   strategyId: string;
   answer: string;
