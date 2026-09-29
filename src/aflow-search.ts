@@ -243,7 +243,9 @@ export async function runAFlowSearch(options: {
       } else throw new Error('Unknown route');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(result));
-    } catch (error) { res.statusCode = 500; res.end(JSON.stringify({ error: String(error), unavailable: error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error)) })); }
+    } catch (error) { res.statusCode = 500; res.end(JSON.stringify({ error: String(error),
+      fatal: req.url === '/propose' && !(error instanceof PolicyContractError),
+      unavailable: error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error)) })); }
   });
   server.requestTimeout = 0;
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));

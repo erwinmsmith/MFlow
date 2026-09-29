@@ -26,6 +26,9 @@ def main():
     class ProviderUnavailable(BaseException):
         """Abort the search without scoring an unavailable provider as policy failure."""
 
+    class ControllerFailure(BaseException):
+        """Do not advance search rounds after optimizer infrastructure failures."""
+
     def rpc(route, data=None):
         req = urllib.request.Request(endpoint + '/' + route, data=json.dumps(data or {}).encode(), headers={'Content-Type': 'application/json'})
         try:
@@ -35,6 +38,8 @@ def main():
             body = error.read().decode()
             if json.loads(body).get('unavailable'):
                 raise ProviderUnavailable(body) from None
+            if json.loads(body).get('fatal'):
+                raise ControllerFailure(body) from None
             raise RuntimeError(body) from None
 
     init = rpc('bootstrap')

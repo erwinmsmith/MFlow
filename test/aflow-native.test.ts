@@ -204,3 +204,27 @@ test('provider unavailability aborts native search without writing zero scores',
     if(oldKey===undefined)delete process.env.MFLOW_API_KEY;else process.env.MFLOW_API_KEY=oldKey;
   }
 });
+
+test('optimizer infrastructure/format failure stops without creating phantom rounds',async(t)=>{
+  const python=resolve('../MFlow-baselines/.venv-aflow/bin/python'),source=resolve('../MFlow-baselines/sources/AFlow');
+  try{await access(python);await access(source);await pythonImage();}
+  catch{t.skip('Native controller and Docker required');return;}
+  const dir=await mkdtemp(join(tmpdir(),'mflow-optimizer-fault-'));
+  const oldKey=process.env.MFLOW_API_KEY;process.env.MFLOW_API_KEY='fixture';let calls=0;
+  const server=createServer(async(req,res)=>{
+    let raw='';for await(const chunk of req)raw+=chunk;
+    const input=JSON.parse(raw);const payload=JSON.parse(input.messages[1].content);calls++;
+    const content=payload.kind==='agent'?JSON.stringify(output('42')):'invalid JSON';
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10,total_tokens:20}}));
+  });
+  await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));const address=server.address();assert.ok(address&&typeof address!=='string');
+  try{
+    const search=join(dir,'tasks.jsonl');await writeFile(search,JSON.stringify({id:'fixture',prompt:'fixture',answer:'42',metric:'exact'})+'\n');
+    const out=join(dir,'search');
+    await assert.rejects(runAFlowSearch({out,search,source,python,config:{maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${address.port}`,temperature:0,seed:42}}),/controller exited/);
+    const checkpoint=JSON.parse(await readFile(join(out,'controller.json'),'utf8'));
+    assert.equal(checkpoint.round,1);assert.equal(checkpoint.phase,'generating');
+    assert.equal(calls,3); // Initial execution, optimizer, one syntax-only repair.
+    await assert.rejects(access(join(out,'MATH/workflows/round_2/strategy.json')));
+  }finally{server.close();await rm(dir,{recursive:true,force:true});if(oldKey===undefined)delete process.env.MFLOW_API_KEY;else process.env.MFLOW_API_KEY=oldKey;}
+});

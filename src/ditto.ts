@@ -374,16 +374,14 @@ export class DittoAgents {
         };
       }
       const plan = graph<typeof messages>(`mflow-${kind}`)
-        .node("context", "CONTEXT.LOAD", [], (input) => ({ sources: input }))
         .node(
           "reason",
           "INFER.REASONING.TRAJECTORY",
-          ["context"],
-          (_input, { context }) => ({
-            messages: context.items.map((item, i) => ({
-              role: messages[i]?.role ?? "user",
-              content: typeof item.content === "string" ? item.content : JSON.stringify(item.content) ?? "",
-            })),
+          [],
+          (input) => ({
+            // These are already complete messages, including full optimizer
+            // history. A Context inline item adds no data transformation here.
+            messages: input,
             model,
             generation,
             strategy: {

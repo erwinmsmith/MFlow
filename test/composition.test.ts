@@ -140,3 +140,17 @@ test('Ditto schedules independent heterogeneous nodes concurrently and records b
   assert.equal(result.orchestration?.graphs[0].inputs['other/trajectory'] !== undefined,true);
   assert.equal(result.outputs.length,2);
 });
+
+test('optimizer context preserves full parent feedback above Ditto default 64 KiB', async()=>{
+  const instruction='parent-graph-and-execution-evidence\n'.repeat(3000);
+  const fake=new ScriptedProvider(input=>{
+    assert.ok(input.messages[0].content.toString().startsWith(instruction));
+    assert.ok(Buffer.byteLength(input.messages[0].content.toString())>65536);
+    return output('ok');
+  });
+  const {agentOutputSchema}=await import('../src/types.js');
+  const agents=new DittoAgents(new MeteredProvider(fake),model);
+  const result=await agents.structured('aflow-optimizer',instruction,{},agentOutputSchema,
+    limitsSchema.parse({maxTokens:1000000}));
+  assert.equal(result.value.candidate_answer,'ok');assert.equal(fake.inputs.length,1);
+});
