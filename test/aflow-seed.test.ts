@@ -90,3 +90,25 @@ test('concurrent successful sibling cannot clear a fatal provider failure',async
   await Promise.allSettled(['bad','ok'].map(nodeId=>meter.invoke({model:{model:'fixture'},messages:[{role:'user',content:'fixture'}],metadata:{nodeId}},{signal:AbortSignal.timeout(1000)})));
   assert.equal(meter.lastFailure?.code,'HTTP_402');
 });
+
+test('Python stderr reaches the tool observation without violating the interaction error contract',async(t)=>{
+  const {createPythonTool,pythonImage}=await import('../src/python-tool.js');
+  const {arithmeticTool}=await import('../src/ditto.js');
+  let image:string;
+  try{image=await pythonImage();}catch{t.skip('Docker Python image unavailable');return;}
+  let calls=0;
+  const provider:ModelProvider={async invoke(input){
+    calls++;
+    if(calls===1)return response('4');
+    if(calls===2)return response('5');
+    if(calls===3)return {message:{role:'assistant',content:''},finishReason:'action_request',actionRequests:[{id:'py-failed',name:'python',arguments:{code:"raise ValueError('fixture calculation error')"}}],usage:{totalTokens:10}};
+    assert.ok(JSON.stringify(input.messages).includes('ValueError'));
+    assert.ok(JSON.stringify(input.messages).includes('PYTHON_EXECUTION'));
+    assert.equal(input.messages.at(-1)?.metadata?.actionRequestId,'py-failed');
+    return response('5');
+  }};
+  const runtime=new OrganizationRuntime(new DittoAgents(new MeteredProvider(provider),{model:'fixture',baseUrl:'https://invalid.example',temperature:0,seed:42},[arithmeticTool,createPythonTool(image)]),limitsSchema.parse({maxSteps:40,maxTokens:100000}));
+  const result=await runtime.run({...initialStrategy,composition:aflowInspiredComposition,organization:textOrganization,prompts:textPrompts},{id:'fixture',prompt:'Calculate 2 plus 3.'});
+  assert.equal(calls,4);assert.equal(result.answer,String.raw`\boxed{5}`);
+  assert.equal(result.toolEvents.length,1);
+});

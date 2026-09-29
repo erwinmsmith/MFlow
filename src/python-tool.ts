@@ -31,7 +31,7 @@ export function createPythonTool(image: string): RegisteredTool {
         image, 'timeout', '-s', 'KILL', '30', 'python', '-B', '-I', '-c', code,
       ] }, context.signal);
       return result.exitCode === 0 ? { status: 'success', content: result.stdout } :
-        { status: 'failed', error: { code: 'PYTHON_EXECUTION', message: result.stderr || `Python exited ${result.exitCode}` } };
+        { status: 'failed', content: result.stderr, error: { code: 'PYTHON_EXECUTION', message: `Python exited ${result.exitCode}` } };
     },
   };
 }
