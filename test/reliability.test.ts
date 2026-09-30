@@ -7,6 +7,7 @@ import { createPythonTool } from '../src/python-tool.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { aflowInspiredComposition, textOrganization, textPrompts } from '../src/aflow-seed.js';
 import { initialStrategy, limitsSchema } from '../src/types.js';
+import type { WorkerContext } from '@codesoul-co/ditto/worker';
 
 const input: SampleInput = { model: { model: 'fixture' }, messages: [{ role: 'user', content: 'synthetic task' }], metadata: { nodeId: 'root/sample' } };
 const response = (answer: string) => ({ message: { role: 'assistant' as const, content: `Synthetic derivation. \\boxed{${answer}}` },
@@ -39,6 +40,17 @@ test('larger exact cycles are found even when an internal phrase is the nearest 
   assert.ok(cycle.length > 2048);
   assert.equal(repeatedOutput(cycle.repeat(10)), true);
   assert.equal(repeatedOutput(Array.from({length:6000},(_,i)=>`Distinct synthetic row ${i}: ${i*37}\n`).join('')), false);
+});
+
+test('sandbox command deadlines become failed observations but caller cancellation propagates', async () => {
+  const tool = createPythonTool('fixture-image');
+  const controller = new AbortController();
+  const timeout = Object.assign(new Error('Command timed out'), { name: 'TimeoutError' });
+  const context = { signal: controller.signal, services: { sandbox: { run: async () => { throw timeout; } } } } as unknown as WorkerContext<unknown, unknown>;
+  const outcome = await tool.execute({ code: 'print(1)' }, context);
+  assert.equal(outcome.status, 'failed'); assert.equal(outcome.error?.code, 'PYTHON_TIMEOUT');
+  controller.abort();
+  await assert.rejects(tool.execute({ code: 'print(1)' }, context), /Command timed out/);
 });
 
 test('partial socket failure retries the identical request with separate unknown and known cost', async () => {

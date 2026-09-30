@@ -34,7 +34,15 @@ export function createPythonTool(image: string): RegisteredTool {
         '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '256m',
         '--cpus', '1', '--user', '65534:65534', '--tmpfs', '/tmp:rw,nosuid,size=16m',
         image, 'timeout', '-s', 'KILL', '30', 'python', '-B', '-I', '-c', code,
-      ] }, context.signal);
+      ] }, context.signal).catch(error => {
+        // Preserve user/runtime cancellation. A local command deadline is a
+        // tool failure the agent can observe and correct, not a lost episode.
+        if (context.signal?.aborted) throw error;
+        if (error instanceof Error && error.name === 'TimeoutError') return undefined;
+        throw error;
+      });
+      if (!result) return { status: 'failed', content: 'Python sandbox command timed out. Simplify the computation before calling the tool again.',
+        error: { code: 'PYTHON_TIMEOUT', message: 'Python execution timed out' } };
       return result.exitCode === 0 ? { status: 'success', content: result.stdout } :
         { status: 'failed', content: result.stderr, error: { code: 'PYTHON_EXECUTION', message: `Python exited ${result.exitCode}` } };
     },

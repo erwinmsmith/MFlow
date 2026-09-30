@@ -63,13 +63,13 @@ node --env-file=.env scripts/evaluate_concurrent.mjs \
 
 ## 2026-09-30：工具输入、重复响应与连接恢复
 
-Python 的声明式输入 schema 保持严格。工具 handler 在执行入口校验 `code`，非法参数返回 `PYTHON_ARGUMENTS` 的失败 observation，不启动容器。Ditto 0.1.1 的 `RegisteredTool.validate` 抛错会直接中断节点，因此适配器把可由模型纠正的参数错误放入公开 `execute` 的失败结果，仍由 Ditto 执行工具并传递观察。
+Python 的声明式输入 schema 保持严格。工具 handler 在执行入口校验 `code`，非法参数返回 `PYTHON_ARGUMENTS` 的失败 observation，不启动容器。Ditto 0.1.1 的 `RegisteredTool.validate` 抛错会直接中断节点，因此适配器把可由模型纠正的参数错误放入公开 `execute` 的失败结果，仍由 Ditto 执行工具并传递观察。v3.3.1 同时把 Sandbox 的命令超时转为 `PYTHON_TIMEOUT` observation；用户或 runtime 取消仍向上传播，30 秒代码执行与 40 秒命令保护不变。
 
 精确重复检测会检查多个匹配位置，支持最多 8192 字符的周期，要求连续至少八次相同周期，覆盖至少 8192 字符；滚动检查窗口为 128 KiB。这个窗口只用于故障检测，不截断模型请求或答案。不使用数学答案、语义相似度或总响应长度作为终止条件。此前只检查最近匹配位置，短语在长周期内部重复时会漏检。
 
 连接重置、断管、连接超时或异常 `terminated` 最多重试两次，等待分别为 1 和 2 秒。每次重试使用原始请求，单独进行 Ditto TokenBudget 预留、结算和记录；部分文本不拼接到成功结果，未知 usage 不被抹除。鉴权、用户取消、模型格式错误、精确重复故障不自动重试；最终基础设施失败仍保留为未完成。模型、提示词、派生策略、工具权限和代码执行保护保持原配置。
 
-执行版本更新为 `mflow-native-library-v3.3/tool-input-observations-transport-recovery`。固定此前选中的 Round 2 策略，使用新运行时完整重测 486 道 test；旧版 474 道完成记录单独保留，不与新成绩混合。不用 test 的正确答案修改推理提示词、候选结构或重新选择 round。原验证成绩来自旧运行时，报告时应披露这一差异。
+执行版本更新为 `mflow-native-library-v3.3.1/tool-input-observations-transport-recovery`。固定此前选中的 Round 2 策略，使用新运行时完整重测 486 道 test；旧版完成记录单独保留，不与新成绩混合。不用 test 的正确答案修改推理提示词、候选结构或重新选择 round。原验证成绩来自旧运行时，报告时应披露这一差异。
 
 ## 搜索与 test 隔离审计
 
