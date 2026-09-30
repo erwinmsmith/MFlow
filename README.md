@@ -2,7 +2,7 @@
 
 搜索一个可复用的组织策略 `π`；推理时，`π` 根据任务中的信息缺口动态组织不同能力的 agent。每个搜索节点是一套完整策略，每条搜索边是一处局部策略修改。
 
-项目使用 npm 发布的 **`@codesoul-co/ditto@0.1.1`**。agent 的 Context、推理、工具调用由 Ditto Worker/Graph/Runtime 执行。没有本地 Ditto 源码依赖、私有路径导入、vendoring、Ditto monkey patch 或直接调用模型 SDK。
+项目使用 npm 发布的 **`@codesoul-co/ditto@0.1.1`**。agent 的 Context、推理、工具调用由 Ditto Worker/Graph/Runtime 执行。没有本地 Ditto 源码依赖、私有路径导入、vendoring、Ditto monkey patch 或直接调用模型的SDK。
 
 默认搜索直接调用外部固定版本 [FoundationAgents/AFlow 的 `3f45721`](https://github.com/FoundationAgents/AFlow/commit/3f45721) 优化器；模型和 agent 执行仍由发布的 Ditto 包负责。研究方案原文保存在 [docs/research-proposal.md](docs/research-proposal.md)，其中 MIA、部分评测和缓存方案已退出默认搜索。
 
