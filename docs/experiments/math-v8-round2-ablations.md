@@ -19,11 +19,11 @@ fixed-uniform 保留各角色目标、能力描述、private_context 和五段�
 
 independent 始终只读取原题和原独立求解指令，未接收其他成员推导。reviewer 读取 root 完整推导；checker 读取前三者的完整有效推导；最终 root 读取四者的完整有效推导，使用原 integrate 提示词。保留原候选的整合空答案回退顺序。
 
-动态结果已完成：469/486。新两组从空目录重新测试全部题目，不复用旧模型答案。路由程序在调用新 test 前冻结。此 MATH test 已被历史实验使用，这份报告属于既有 benchmark 的消融对比，不能作为全新独立 holdout 的泛化证据。
+动态结果已完成：469/486。新增三组从空目录重新测试全部题目，不复用旧模型答案。路由程序在调用新 test 前冻结。此 MATH test 已被历史实验使用，这份报告属于既有 benchmark 的消融对比，不能作为全新独立 holdout 的泛化证据。
 
 ## 代码与复现
 
-- 路由变换：`src/ablations.ts`。只替换 composition 与标识，保留完整 profile/template/prompts。
+- 路由变换：`src/ablations.ts`。single/fixed-full 只替换 composition 与标识，保留 profile/template/prompts；fixed-uniform 另外统一内部程序与执行能力。
 - bundle 准备：`scripts/prepare_ablations.mjs`。不读取 test 数据，不调用模型，记录原 bundle 与新 bundle 哈希。
 - 执行：现有 `scripts/evaluate_concurrent.mjs`，使用源实验的冻结运行时，而不是新生成的执行引擎。
 - 回归：`test/ablations.test.ts` 用脚本 provider 验证 single 只有 root、fixed 在一致答案时仍执行所有成员、独立输入与证据整合正确、标准答案未进入请求。它不提供真实模型质量证据。
