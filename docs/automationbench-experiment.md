@@ -41,6 +41,7 @@ ssh hb 'cd /home/b/project/MFlow; python3 scripts/automation_experiment.py --sta
 ssh hb 'systemctl --user status mflow-deepseek-automation-20260930-v2 --no-pager'
 ssh hb 'systemctl --user status mflow-deepseek-autoagents-20260930-v3 --no-pager'
 ssh hb 'systemctl --user status mflow-deepseek-aflow-20260930-v3 --no-pager'
+ssh hb 'systemctl --user show mflow-deepseek-shared-bridge-20260930-v3 --property=ActiveState --property=SubState'
 ```
 
 The runner starts all five methods, then automatically advances each from search/development to the full test set. Initial concurrency is 24 MFlow episodes, 12 AFlow episodes and one worker process for each of the other methods, leaving more RAM for the retained Qwen service. Official worlds are multiplexed in one Python bridge per Node process to avoid repeating imports for every episode. LLM requests remain concurrent; benchmark API requests are short, serialized local operations.
@@ -58,6 +59,10 @@ Only AutoAgents restarts, from `/home/b/project/experiments/deepseek-autoagents-
 The v2 output's `method-outputs.json` points the current status command to the replacement. It retains the stopped original job and all original cost, and reports replacement cost separately. AutoAgents v2 quality rows are excluded from v3 accuracy. Resume v3 by starting its own user service after fixing infrastructure; it preserves completed rows and advances development to test only on success. The shared bridge must remain active until v3 finishes; check both services before a resume.
 
 AFlow also resumes with the repaired client in this snapshot: malformed/degenerate model output is an episode execution failure, graded against the resulting world, rather than an HTTP infrastructure outage. Its unchanged workflows, prompts, native search controller and 199 completed evaluations are copied with an explicit `recovery.json` provenance receipt; the original manifest is retained separately and the new manifest hashes the actual client and unchanged shared server. The failed remaining world's state is checkpointed and graded without replaying successful writes. Future model-output failures use the same path, while provider HTTP/network errors still stop the run. Test remains untouched.
+
+The bridge's AFlow output points to the repaired client's output so native workflow freezing sees the new candidates and writes selection metadata where the controller reads it. The original directory is archived as `AFlow-v2-before-client-recovery`; all existing world checkpoints are preserved. The original immutable source is unchanged.
+
+The shared-bridge standby service waits while the original five-method runner is active. It starts no additional Node/benchmark process during this wait. If that runner finishes before the repaired pipelines, standby stops those clients, launches the exact same immutable bridge/configuration/ledger, then resumes the two clients once. Completed evaluations remain fixed; interrupted tasks with no committed world checkpoint restart from a fresh official world, and their original request costs remain in the ledger. This is infrastructure recovery, not selection by test outcomes. Stop the standby service before intentionally stopping the entire comparison.
 
 ## Initial startup attempts
 
