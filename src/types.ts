@@ -214,10 +214,12 @@ export interface EpisodeState {
 }
 export type EpisodeCheckpoint = StateCheckpoint<EpisodeState>;
 export interface Execution {
+  executionError?: string;
   /** Grader-only world checkpoint; never included in agent inputs. */
   environment?: { contract: string; world: unknown };
   /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
   orchestration?: {
+    programs?: { agentId: string; composition: string; origin: 'template' | 'generated'; templateId?: string }[];
     graphs: { id: string; nodes: { id: string; type: string; dependencies: string[] }[]; inputs: Record<string, unknown>; outputs: unknown }[];
     lifecycle: { action: string; agentId: string; parentId?: string; afterGraph: number; profile?: AgentProfile; templateId?: string }[];
   };

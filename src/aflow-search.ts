@@ -22,7 +22,7 @@ import { checkpointExecution } from "./evaluation.js";
 import { automationTools, executeBenchmark } from './benchmark-environment.js';
 import type { Bundle } from "./search.js";
 
-import { benchmarkSeed, textOrganization, textPrompts } from './aflow-seed.js';
+import { benchmarkSeeds, textOrganization, textPrompts } from './aflow-seed.js';
 
 class GenerationExhausted extends Error {}
 
@@ -31,6 +31,7 @@ export const aflowConfigSchema = z.object({
   validationRounds: z.number().int().positive().default(5),
   concurrency: z.number().int().positive().default(50),
   maxOutputTokens: z.number().int().positive().default(393216),
+  initializations: z.array(z.string().min(1)).min(1).optional(),
 }).strict();
 
 const solverProfile = { ...rootProfile, tools: ['arithmetic', 'python'], reasoning: 'react' as const,
@@ -61,7 +62,7 @@ const proposalSchema = z.object({
   modification: z.string().min(1), composition: z.string().min(1),
   prompts: strategySchema.shape.prompts.unwrap(),
   organization: organizationSchema.safeExtend({
-    agentTemplates: organizationSchema.shape.agentTemplates.unwrap().min(1),
+    agentTemplates: organizationSchema.shape.agentTemplates.unwrap(),
     initialBindings: organizationSchema.shape.initialBindings.unwrap(),
   }),
 }).strict();
@@ -70,9 +71,9 @@ export const policyInterface = `SEARCH OBJECT: a complete dynamic MAS built with
 Every profile has id, objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. nodes is the agent's permitted Ditto leaf capabilities; different agents SHOULD have different internal graph topology, node types, bindings, inference strategies and loop conditions when justified by feedback. Graph builders/functions in composition define those structures explicitly, rather than a universal template selected only by role prompts. Each node ID is agentId/localName. Cross-agent dependencies are allowed within one graph. Agent IDs are unique, cannot contain '/', and root must exist. tools must be drawn from arithmetic and python. reasoning is a profile description (cot/long-cot/react/tot/got/self-consistency); the actual searched nodes and bindings determine inference.
 JOINT SEARCH: optimize (1) individual agent graphs/loops and capabilities, (2) a reusable task-family template library, and (3) dynamic MAS topology, selection, spawning, evidence routing and stopping. The library supplements the full MAS program; never replace the MAS with a fixed list of independent agents. organization.agentTemplates is an array of {id,description,profile,composition}. profile has all profile fields EXCEPT id; composition is complete source returning loop({id,plan:function*(ctx){...}}) whose generator returns an AgentOutput OBJECT. Each template can have its own nodes, graph topology, inference method, prompts in profile.private_context, and nested loop. Template code has ctx.self (instance ID), ctx.evidence, ctx.prompt, plus the entire public ctx API. It may spawn/delegate recursively or yield cross-agent graphs. Use ctx.self in node IDs so multiple instances remain independent. Templates are inherited and frozen with the selected candidate, never reconstructed from test responses or collected indiscriminately from losing candidates.
 organization.initialBindings maps initial agent IDs to template IDs for their internal programs; initialAgents remains their authoritative initial profile. ctx.templates returns the current candidate library. ctx.spawnTemplate(templateId,newId,parentId='root') instantiates its profile and binds its program; it performs no model call. yield* ctx.runAgent(id,evidence=[],prompt='agent') delegates to that agent's template generator and returns its AgentOutput. Templates should ctx.publish their results. ctx.bindTemplate(id,templateId) replaces future profile AND program; ctx.reconfigure changes only the profile. Generator instances can be interleaved, and outer composition can still build arbitrary cross-agent graphs directly. A template is a reusable program, not an already-running agent or episode memory.
-Agent roles are open-ended: use alternative mathematical methods, decomposition, independent derivations, counterexample search, code-assisted enumeration or reusable tool use when supported. A verifier is only one possible program. Prefer full text for mathematical solutions; use native structured schemas only where the node requires them. Review and integrate complete derivations, not just final answers or self-reported deficits. Use observed failures to decide whether to improve a root/subagent graph, add a distinct specialist, or change the MAS routing/derivation policy. If parent execution has no spawning, consider a concrete unresolved deficit and a complementary specialist instead of repeatedly adding root samples. Do not force spawning on every task or claim template benefit from mere usage. Fully validate the resulting MAS with its library as one candidate; evaluate accuracy and actual node/lifecycle cost. Keep one focused AFlow modification (including the template and routing needed for that single modification). No test-based library selection or cross-task mutable state.
+Agent roles are open-ended: use task decomposition, API discovery, entity resolution, dependency scheduling, effect verification, recovery, alternative reasoning methods or tool use when supported. Optimize the current task family, not a remembered mathematical task. A verifier is only one possible program. Prefer full text for mathematical solutions; use native structured schemas only where the node requires them. Review and integrate complete derivations, not just final answers or self-reported deficits. Use observed failures to decide whether to improve a root/subagent graph, add a distinct specialist, or change the MAS routing/derivation policy. If parent execution has no spawning, consider a concrete unresolved deficit and a complementary specialist instead of repeatedly adding root samples. Do not force spawning on every task or claim template benefit from mere usage. Fully validate the resulting MAS with its library as one candidate; evaluate accuracy and actual node/lifecycle cost. Keep one focused AFlow modification (including the template and routing needed for that single modification). No test-based library selection or cross-task mutable state.
 Public bindings: graph(id).node(id, nodeType, dependencyIds, (input, outputs) => nodeInput); graphStep(graph, input, {concurrency?}); loop({id, plan: function*(ctx){...}}). Dependencies must refer to already added nodes. Independent nodes can run concurrently under Ditto. Loop generators may inspect every completed graph, spawn/reconfigure profiles, build new graphs and route outputs before yielding the next graph. This supports dynamic topology, internal agent loops and node-level cross-agent weaving. No fixed population, derivation depth, sampling count or experiment token budget.
-ctx.task is {id,prompt}, without reference answers. ctx.agents returns [{profile,status,depth}] where status is exactly ACTIVE or DORMANT. ctx.profile(id) returns a profile. ctx.spawn(completeProfile,parentId='root') adds a task-local profile and returns it; this does not call a model. A factory can first yield a Ditto inference graph to generate a profile. ctx.reconfigure(id,completeProfile) changes future capabilities while preserving identity. ctx.dormant(id) releases activity. Executing a graph node activates its owning agent. Each task starts with fresh profiles; no episode memory enters the next task.
+ctx.task is {id,prompt}, without reference answers. ctx.agents returns [{profile,status,depth}] where status is exactly ACTIVE or DORMANT. ctx.profile(id) returns a profile. ctx.spawn(completeProfile,parentId='root',composition?) adds a task-local profile; optional composition is a NEW internal graph/loop program checked in the same guarded VM. yield* ctx.runAgent executes it without any template binding. A factory can first yield a native Ditto SAMPLE graph to generate {profile,composition} at inference time. The frozen derivation rule, factory prompt and allowed capabilities govern generation; the new program is saved in execution.orchestration.programs, never added to a cross-task template library. No hidden rubric, test labels or cached episode state is available. Prefer a new program when existing templates cannot address an API dependency, uncertainty or missing capability; reuse a suitable template otherwise. This does not call a model by itself. ctx.reconfigure(id,completeProfile) changes future capabilities while preserving identity. ctx.dormant(id) releases activity. Executing a graph node activates its owning agent. Each task starts with fresh profiles; no episode memory enters the next task.
 For REFLECT/DELIBERATE nodes with native output schemas, pass task/profile/evidence as data messages and let Ditto supply the node's schema; do not combine conflicting AgentOutput instructions with native reflection/deliberation contracts.
 ctx.messages(id,evidence=[],prompt='agent') builds JSON-output messages from the profile, original task and explicitly routed evidence. prompt selects agent/factory/review/integrate/retrieve. ctx.textMessages(id,evidence='',prompt='agent') builds full-text messages; ctx.request(id,messages,useTools=true,format='json'|'text') serializes structured tool-message content as JSON text and creates a SAMPLE input using the experiment model, generation settings and allowed action descriptors. ctx.formatMessages(content) requests syntax-only JSON repair. ctx.unwrap(nodeResult) checks success and returns output. ctx.decode(content) parses the fixed AgentOutput schema; ctx.publish(id,output) records and returns it. ctx.publishText(id,text,format='boxed'|'raw') records the full output as a solution artifact; boxed mode extracts the last balanced boxed answer, while raw mode preserves complete code or QA text; ctx.answerKey(text) compares boxed strings for routing only, not grading. ctx.failedAgent(id,error) records an unresolved execution error with no invented answer. Failed, truncated or repeating inference results have status:'error' and an error code; inspect them to recover locally or delegate, never treat partial text as a completed solution. Provider/auth/network failures still stop the experiment. ctx.outputs contains published outputs; ctx.graphs contains completed graph topology/results. These helpers do not execute models, tools or choose a workflow. Explicitly pass prior outputs as evidence to downstream nodes/agents. A dynamic plan may use its own local state, functions, conditions and generators.
 Configured native nodes (declare only needed capabilities on each profile):
@@ -118,16 +119,17 @@ export async function runAFlowSearch(options: {
   const config = aflowConfigSchema.parse(options.config ?? {}), out = resolve(options.out);
   const tasks = await readTasks(options.search);
   assertDatasetRole(tasks, 'search');
-  const seed = benchmarkSeed(tasks);
-  const allowedTools = ['arithmetic', 'python', ...(tasks[0].metric === 'automationbench' ? automationTools : [])];
+  const seeds = benchmarkSeeds(tasks, config.initializations), seed = seeds[0];
+  const workflow = tasks[0].metric === 'automationbench';
+  const allowedTools = workflow ? automationTools : ['arithmetic', 'python'];
   const taskInterface = policyInterface.replace('tools must be drawn from arithmetic and python', `tools must be drawn from ${allowedTools.join(', ')}`);
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
-  const image = await pythonImage();
+  const image = workflow ? undefined : await pythonImage();
   const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>, context: Record<string, unknown> = {}) =>
     new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? '', {
       onProgress: progress => save(join(out, 'requests', `${progress.id}.json`), { ...context, ...progress }),
-    }), undefined, observe), options.model, [arithmeticTool, createPythonTool(image)]);
+    }), undefined, observe), options.model, image ? [arithmeticTool, createPythonTool(image)] : []);
   // Check configuration before starting the Python optimizer or creating paid requests.
   makeAgents();
   const source = resolve(options.source);
@@ -163,7 +165,7 @@ export async function runAFlowSearch(options: {
     if (!parsed.composition || !parsed.prompts) throw new Error('Complete Ditto composition and prompts required');
     if (!parsed.organization) throw new Error('Complete organization required');
     validateComposition(parsed.composition);
-    if (!parsed.organization.agentTemplates?.length || !parsed.organization.initialBindings)
+    if (!parsed.organization.agentTemplates || !parsed.organization.initialBindings)
       throw new PolicyContractError('Complete reusable agentTemplates and initialBindings required');
     for (const template of parsed.organization.agentTemplates) validateComposition(template.composition);
     const profiles = [...parsed.organization.initialAgents, ...parsed.organization.agentTemplates.map(t => ({ ...t.profile, id: t.id }))];
@@ -173,7 +175,7 @@ export async function runAFlowSearch(options: {
     }
     return parsed;
   };
-  type Row = { taskId: string; score: number; f1?: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; error?: string; organization?: ReturnType<typeof organizationEvidence> };
+  type Row = { taskId: string; score: number; f1?: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; toolEvidence?: unknown[]; error?: string; organization?: ReturnType<typeof organizationEvidence> };
   async function evaluation(number: number, repeat: number, strategy: Strategy) {
     const dir = join(out, `round-${number}`, `pass-${repeat}`);
     await mkdir(dir, { recursive: true });
@@ -221,6 +223,7 @@ export async function runAFlowSearch(options: {
       try {
         if (execution) row = { taskId: task.id, ...await grade(task, execution.answer, execution, agents), answer: execution.answer,
           tokens: agents.provider.tokens, actualTokens: execution.actualTokens, organization: organizationEvidence(execution),
+          error: execution.executionError, toolEvidence: execution.toolEvents,
           solutionEvidence: execution.outputs.map(({ agentId, output }) => ({ agentId, artifacts: output.artifacts })) };
       } catch (error) {
         await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', phase: 'grading', error: String(error), at: new Date().toISOString() });
@@ -236,7 +239,7 @@ export async function runAFlowSearch(options: {
     return { organizationSummary: summarizeOrganizations(organizations), score: mean(rows.map((r) => r.f1 ?? r.score)), meanTokens: mean(rows.map((r) => r.tokens)),
       tokens: rows.reduce((n, r) => n + r.tokens, 0),
       failures: rows.flatMap((r, i) => r.score ? [] : [{ taskId: r.taskId, question: tasks[i].prompt,
-        expected_output: tasks[i].answer, prediction: r.answer, solutionEvidence: r.solutionEvidence, error: r.error, organization: r.organization }]) };
+        expected_output: tasks[i].answer, prediction: r.answer, solutionEvidence: r.solutionEvidence, toolEvidence:r.toolEvidence, error: r.error, organization: r.organization }]) };
   }
   const server = createServer(async (req, res) => {
     try {
@@ -245,7 +248,7 @@ export async function runAFlowSearch(options: {
       const input = JSON.parse(body || '{}');
       let result: unknown;
       if (req.url === '/bootstrap') result = { config, dataset: seed.dataset, questionType: seed.kind,
-        composition: seed.composition, prompts: seed.prompts, organization: seed.organization,
+        composition: seed.composition, prompts: seed.prompts, organization: seed.organization, seeds,
         interface: taskInterface + `\nCURRENT TASK FAMILY: ${seed.kind}. Follow the dataset-specific output contract in the inherited prompts. Do not impose mathematical boxed answers on other tasks. Workflow tools share one fresh official world per task; use inspection or repair, never duplicate a write merely to compare wording.` };
       else if (req.url === '/propose') {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);

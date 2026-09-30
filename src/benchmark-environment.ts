@@ -2,6 +2,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { RegisteredTool } from '@codesoul-co/ditto';
 import { z } from 'zod';
@@ -26,15 +27,15 @@ export function checkAutomation() { return ready ??= (async () => {
   return lock;
 })(); }
 
-// Reuse only Python imports/task builders, never task worlds, model output or grading results.
-const idle: ReturnType<typeof bridge>[] = [];
+// Multiplex distinct official worlds; only imports/builders are shared. Model calls stay concurrent.
+let shared: ReturnType<typeof bridge> | undefined, users = 0;
 function bridge() {
   const python = automationPython();
   const child = spawn(python, ['benchmark-hub/automation_bridge.py'], { stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, AUTOMATIONBENCH_STRICT_ASSERTIONS: '1' } });
   let stderr = '';
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
-  const failed = new Promise<never>((_, reject) => { child.once('error', reject); });
+  const failed = new Promise<never>((_, reject) => { child.once('error', reject); child.stdin.once('error', reject); });
   failed.catch(() => {});
   const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
   let queue: Promise<unknown> = Promise.resolve();
@@ -59,16 +60,16 @@ function bridge() {
 
 export async function openAutomation(task: Task) {
   await checkAutomation();
-  const process = idle.pop() ?? bridge();
-  const { request } = process;
+  if (!shared?.alive()) shared = bridge();
+  const process = shared, session = randomUUID(); users++;
+  const request = <T>(input: object) => process.request<T>({ ...input, session });
   let released = false;
   const close = () => {
     if (released) return;
     released = true;
-    if (!process.alive()) return;
-    idle.push(process);
-    // Retire imports after the next task/regrade had an opportunity to reuse them.
-    setTimeout(() => { const index = idle.indexOf(process); if (index >= 0) { idle.splice(index, 1); process.kill(); } }, 1000).unref();
+    if (process.alive()) void request({ op:'close' }).catch(() => {});
+    users--;
+    setTimeout(() => { if (users === 0 && shared === process) { shared = undefined; process.kill(); } }, 1000).unref();
   };
   try {
     const start = await request<{ tools: { function: { name: string; description: string; parameters: Record<string, unknown> } }[] }>(
@@ -86,7 +87,7 @@ export async function openAutomation(task: Task) {
       },
     }));
     return { tools, request, close };
-  } catch (error) { process.kill(); throw error; }
+  } catch (error) { close(); throw error; }
 }
 
 /** Every attempt has a fresh official world, shared by all agents within that MAS. */

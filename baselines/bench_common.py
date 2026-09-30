@@ -1,19 +1,29 @@
 """Dataset/scoring adapter and metered transport; official methods own their control flow."""
-import contextvars, hashlib, importlib.metadata, json, subprocess, urllib.request, urllib.error
+import contextvars, hashlib, importlib.metadata, json, os, subprocess, urllib.request, urllib.error
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 SOURCES=ROOT.parent/'MFlow-baselines/sources'
-PROTOCOL=json.loads((ROOT/'baselines/protocol.json').read_text())
+PROTOCOL_PATH=ROOT/os.environ.get('MFLOW_BASELINE_PROTOCOL','baselines/protocol.json')
+PROTOCOL=json.loads(PROTOCOL_PATH.read_text())
 RUNS=ROOT/PROTOCOL['runDirectory']
 SCOPE=contextvars.ContextVar('scope')
 class BudgetStop(BaseException):
     def __init__(self,reason):self.reason=reason
 class TransportFailure(RuntimeError):pass
 
-def call(messages):
+def endpoint():return os.environ.get('MFLOW_BASELINE_ENDPOINT',f"http://127.0.0.1:{os.environ.get('MFLOW_BASELINE_PORT','8197')}")
+
+def execute_python(code):
     method,phase,task_id=SCOPE.get()
-    body=json.dumps(dict(method=method,phase=phase,taskId=task_id,messages=messages)).encode()
-    req=urllib.request.Request('http://127.0.0.1:8197/sample',data=body,headers={'Content-Type':'application/json'})
+    req=urllib.request.Request(endpoint()+'/python',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'code':code}).encode(),headers={'Content-Type':'application/json'})
+    try:
+        with urllib.request.urlopen(req,timeout=None) as response:return json.load(response)
+    except urllib.error.HTTPError as e:raise TransportFailure(e.read().decode()) from None
+
+def call(messages,tools=True):
+    method,phase,task_id=SCOPE.get()
+    body=json.dumps(dict(method=method,phase=phase,taskId=task_id,messages=messages,tools=tools)).encode()
+    req=urllib.request.Request(endpoint()+'/sample',data=body,headers={'Content-Type':'application/json'})
     try:
         with urllib.request.urlopen(req,timeout=None) as response:result=json.load(response)
     except urllib.error.HTTPError as e:
@@ -28,10 +38,18 @@ def search_web(query):
     if len(query)>600 or len(query.split())>75:
         query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}]).strip()
     method,phase,task_id=SCOPE.get()
-    req=urllib.request.Request('http://127.0.0.1:8197/search',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'query':query}).encode(),headers={'Content-Type':'application/json'})
+    req=urllib.request.Request(endpoint()+'/search',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'query':query}).encode(),headers={'Content-Type':'application/json'})
     with urllib.request.urlopen(req,timeout=None) as response:return json.dumps(json.load(response)['results'])
 
 def tasks(split):
+    if PROTOCOL.get('benchmark')=='automationbench':
+        home=Path(os.environ.get('BENCHMARK_HOME',ROOT.parent/'Benchmarks'))
+        path=home/f'views/automationbench-public-simple-v1/{split}.jsonl'
+        entry=json.loads((ROOT/'data/extended-benchmarks.lock.json').read_text())['automationbench']['splits'][split]
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=entry['sha256']:raise ValueError('Pinned AutomationBench split hash mismatch')
+        rows=[json.loads(s) for s in path.read_text().splitlines()]
+        if len(rows)!=entry['count']:raise ValueError('Pinned AutomationBench split count mismatch')
+        return rows
     path=ROOT/f'data/benchmarks/math/{split}.jsonl'
     lock=json.loads((ROOT/'data/aflow.lock.json').read_text())
     entry=lock["files"][f"math_{'validate' if split=='search' else 'test'}.jsonl"]
@@ -41,6 +59,7 @@ def tasks(split):
     return rows
 
 def grade(task,answer):
+    if task.get('metric')=='automationbench':return benchmark_rpc('finish',task)['score']
     p=subprocess.run([str(ROOT/'.benchmark-venv/bin/python'),str(ROOT/'scripts/grade_math.py'),json.dumps({'gold':task['answer'],'answer':answer})],capture_output=True,text=True,timeout=10,check=True)
     return int(p.stdout.strip()=='1')
 
@@ -51,12 +70,23 @@ def usage(method,phase,task_id):
 
 def save_row(out,row):
     out.parent.mkdir(parents=True,exist_ok=True)
-    with out.open('a') as f:f.write(json.dumps(row)+'\n')
+    import fcntl
+    with out.open('a') as f:
+        fcntl.flock(f,fcntl.LOCK_EX);f.write(json.dumps(row)+'\n');f.flush()
+
+def benchmark_rpc(route,task):
+    method,phase,task_id=SCOPE.get()
+    req=urllib.request.Request(endpoint()+'/'+route,data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'benchmarkTaskId':task['id']}).encode(),headers={'Content-Type':'application/json'})
+    try:
+        with urllib.request.urlopen(req,timeout=None) as response:return json.load(response)
+    except urllib.error.HTTPError as e:raise TransportFailure(e.read().decode()) from None
 
 def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""
-    files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',ROOT/'baselines/protocol.json',ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
-    manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':486,'validationCount':119,'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
+    files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',PROTOCOL_PATH,ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
+    if PROTOCOL.get('benchmark')!='automationbench':files += [ROOT/'dist/src/python-tool.js',ROOT/'scripts/resume_aflow_test.py']
+    if PROTOCOL.get('benchmark')=='automationbench':files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
+    manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':len(tasks('test')),'validationCount':len(tasks('search')),'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
     manifest['pythonPackages']=sorted(f"{p.metadata['Name']}=={p.version}" for p in importlib.metadata.distributions())
     source=json.loads((ROOT/'baselines/sources.lock.json').read_text())[method]
     for name,digest in source['files'].items():

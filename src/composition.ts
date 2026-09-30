@@ -6,6 +6,7 @@ import { EpisodeExhausted, type DittoAgents } from './ditto.js';
 import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, type Execution, type Limits,
   type Strategy, type TaskInput } from './types.js';
 import { PolicyContractError } from './strategy-program.js';
+class GeneratedProgramError extends PolicyContractError {}
 
 /** The seed is itself a searched artifact, not a hidden fixed agent executor. */
 const initialTurn = `
@@ -135,8 +136,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   const machine = compile(strategy.composition);
   const templates = new Map((strategy.organization.agentTemplates ?? []).map(t => [t.id, t]));
   const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
+  const programs = new Map<string, LoopPlanDefinition<unknown, unknown>>();
   const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
-  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [] };
+  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
   let peakActive = 0, toolCalls = 0;
   const event = (action: string, agentId: string, parentId?: string) => {
@@ -171,7 +173,16 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get outputs() { return structuredClone(outputs); },
     get graphs() { return structuredClone(orchestration.graphs); },
     profile: (id: string) => structuredClone(member(id).profile),
-    spawn: (profile: AgentProfile, parentId = 'root') => add(profile, parentId),
+    spawn: (profile: AgentProfile, parentId = 'root', composition?: string) => {
+      const definition = composition === undefined ? undefined : compile(composition, machine.context).definition;
+      const result = add(profile, parentId);
+      if (definition) {
+        programs.set(result.id, definition);
+        orchestration.programs!.push({ agentId: result.id, composition: composition!, origin: 'generated' });
+        event('BIND_PROGRAM', result.id);
+      }
+      return result;
+    },
     spawnTemplate: (templateId: string, id: string, parentId = 'root') => {
       const template = templates.get(templateId);
       if (!template) throw new PolicyContractError(`Unknown template ${templateId}`);
@@ -183,17 +194,19 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       const profile = profileSchema.parse({ ...template.profile, id });
       agents.validateProfile(profile);
       if (!profile.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
+      programs.delete(id);
       Object.assign(member(id), { templateId, profile }); event('RECONFIGURE', id);
     },
     runAgent: function* (id: string, evidence: unknown = [], prompt = 'agent'): Generator<GraphInvocation, z.infer<typeof agentOutputSchema>, any> {
       const templateId = member(id).templateId;
-      const definition = templateId && definitions.get(templateId);
-      if (!definition) throw new PolicyContractError(`Agent ${id} has no bound template`);
-      event('RUN_TEMPLATE', id);
+      const definition = programs.get(id) ?? (templateId && definitions.get(templateId));
+      if (!definition) throw new PolicyContractError(`Agent ${id} has no bound program`);
+      event(programs.has(id) ? 'RUN_PROGRAM' : 'RUN_TEMPLATE', id);
       const local = Object.assign(Object.create(api), { self: id, evidence, prompt });
       // Delegation yields native graphStep invocations to the same Ditto loop.
       // The outer VM deadline also covers nested generator execution/bindings.
-      return agentOutputSchema.parse(yield* definition.plan(local));
+      try { return agentOutputSchema.parse(yield* definition.plan(local)); }
+      catch(error) { if(programs.has(id))throw new GeneratedProgramError(`Generated agent ${id}: ${String(error)}`);throw error; }
     },
     reconfigure: (id: string, profile: AgentProfile) => {
       const parsed = profileSchema.parse(profile); agents.validateProfile(parsed);
@@ -302,6 +315,12 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   agents.provider.beginEpisode(limits.maxTokens, { runId: task.id, branchId: strategy.id });
   const runtime = agents.runtime(agents.tools.map(t => t.name), limits.timeoutMs);
   const signal = AbortSignal.timeout(limits.timeoutMs);
+  const finish = (answer:string,executionError?:string): Execution => ({ taskId: task.id, strategyId: strategy.id, answer, orchestration,
+    ...(executionError?{executionError}:{}),trace: [], agents: [...population.values()].map(a => a.profile), outputs,
+    artifacts: [], edges: [], toolEvents, tokens: agents.provider.tokens - before,
+    calls: agents.provider.calls - callsBefore, actualTokens: agents.provider.records.slice(recordsBefore).some(r => r.status !== 'known') ? null : agents.provider.tokens - before,
+    actualCalls: agents.provider.calls - callsBefore, reusedPrefixSteps: 0, checkpoints: [],
+    peakActive, depth: Math.max(...[...population.values()].map(a => a.depth)), stopReason:'strategy' });
   try {
     const native = loop({ id: machine.definition.id, maxIterations: Math.min(limits.maxSteps, machine.definition.maxIterations ?? limits.maxSteps), plan: function* (): GraphPlan<string> {
       let next = advance();
@@ -317,7 +336,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           if (!node.id.includes('/')) throw new PolicyContractError('Node IDs must be agentId/localName');
           const owner = member(node.id.split('/')[0]);
           if (!owner.profile.nodes!.includes(node.node as typeof compositionNodes[number]))
-            throw new PolicyContractError(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
+            throw new (programs.has(owner.profile.id)?GeneratedProgramError:PolicyContractError)(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
           checked = checked.node(node.id, node.node, node.dependencies, (input, output) => {
             const value = bind(node, input, output);
             bindings[node.id] = structuredClone(value);
@@ -353,12 +372,10 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       return next.value;
     } });
     const answer = await runtime.loop(native, undefined, { signal });
-    return { taskId: task.id, strategyId: strategy.id, answer, orchestration,
-      trace: [], agents: [...population.values()].map(a => a.profile), outputs,
-      artifacts: [], edges: [], toolEvents, tokens: agents.provider.tokens - before,
-      calls: agents.provider.calls - callsBefore, actualTokens: agents.provider.records.slice(recordsBefore).some(r => r.status !== 'known') ? null : agents.provider.tokens - before,
-      actualCalls: agents.provider.calls - callsBefore, reusedPrefixSteps: 0, checkpoints: [],
-      peakActive, depth: Math.max(...[...population.values()].map(a => a.depth)), stopReason: 'strategy' };
-  } catch (error) { throw agents.provider.lastFailure ?? error; }
+    return finish(answer);
+  } catch (error) {
+    if(!agents.provider.lastFailure && programs.size>0 && error instanceof PolicyContractError)return finish('',String(error));
+    throw agents.provider.lastFailure ?? error;
+  }
   finally { agents.provider.endEpisode(); await runtime.close(); }
 }

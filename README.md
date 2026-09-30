@@ -63,9 +63,12 @@ npm run mflow -- prepare --input data/example.jsonl --out data/prepared --seed 4
 
 ### 本地统一 benchmark 管理
 
-九个 benchmark 的已有资产集中在独立目录 `../Benchmarks`，通过 `BENCHMARK_HOME` 配置。
+十一个 benchmark 的已有资产集中在独立目录 `../Benchmarks`，通过 `BENCHMARK_HOME` 配置。
 管理器代码见 [benchmark-hub](benchmark-hub/README.md)，协议、路径、版本与接入状态见
 [共享 benchmark 使用说明](docs/shared-benchmarks.md)。原数据位置保留链接，旧实验文件不改写。
+
+AutomationBench 的五框架比较、多初始 MAS 搜索、推理时生成新 subagent 与远程进度查询见
+[实验协议](docs/automationbench-experiment.md)。
 
 ```sh
 npm run mflow -- benchmarks list
@@ -73,11 +76,11 @@ npm run mflow -- benchmarks --verify
 npm run mflow -- benchmarks path --name HumanEval+ --split test
 ```
 
-本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH 和 HumanEval+；GAIA、BFCL、τ³
+本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 文本子集和 AutomationBench；GAIA、BFCL、τ³
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
 六个 benchmark 的默认搜索分别选择数学、阅读理解或 Python 代码提示词和输出契约；
-DROP 按平均 F1 优化。新执行标识 v3.4.0，旧运行需使用其保存的 runtime 与原评分环境。
+DROP 按平均 F1 优化。新执行标识 v3.5.0，旧运行需使用其保存的 runtime 与原评分环境。
 
 配置 `MFLOW_BENCH_PYTHON=../Benchmarks/environments/text/bin/python`；HumanEval+ 另需
 `MFLOW_EVALPLUS_IMAGE=mflow-evalplus:0.1.10`，镜像准备见共享说明。外部工具统一通过

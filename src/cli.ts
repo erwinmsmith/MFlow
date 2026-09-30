@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
-import { readFile, mkdir, access } from "node:fs/promises";
+import { z } from "zod";
+import { readFile, mkdir, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createDitto,
@@ -31,7 +32,7 @@ import {
 import { OrganizationRuntime } from "./runtime.js";
 import { CanonicalPool } from "./canonical.js";
 import { Search, type Bundle } from "./search.js";
-import { evaluateFrozen, checkpointExecution } from "./evaluation.js";
+import { evaluateFrozen, evaluateConcurrent, checkpointExecution } from "./evaluation.js";
 import { save, append, digest, mean } from "./util.js";
 
 const { positionals, values } = parseArgs({
@@ -57,6 +58,8 @@ const { positionals, values } = parseArgs({
     resume: { type: "boolean" },
     source: { type: "string" },
     python: { type: "string" },
+    concurrency: { type: 'string' },
+    initialization: { type: 'string' },
   },
 });
 const required = (key: keyof typeof values) => {
@@ -74,6 +77,8 @@ function model(seed: number) {
     baseUrl: process.env.MFLOW_BASE_URL ?? "https://api.deepseek.com",
     temperature: 0,
     seed,
+    ...(process.env.MFLOW_PROVIDER_OPTIONS ? { providerOptions:
+      z.record(z.string(), z.unknown()).parse(JSON.parse(process.env.MFLOW_PROVIDER_OPTIONS)) } : {}),
   };
 }
 async function outputDirectory(path: string) {
@@ -113,9 +118,10 @@ async function run() {
   if (command === 'seed') {
     const name = benchmarkName(required('benchmark'));
     if (name !== 'hle' && name !== 'automationbench') throw new Error('seed supports hle and automationbench');
-    const { benchmarkSeed } = await import('./aflow-seed.js');
+    const { benchmarkSeed, benchmarkSeeds } = await import('./aflow-seed.js');
     const { unrestrictedConfig, aflowConfigSchema } = await import('./aflow-search.js');
-    const seed = benchmarkSeed([{ benchmark: name, metric: name }]);
+    const input: Parameters<typeof benchmarkSeed>[0] = [{ benchmark: name, metric: name }];
+    const seed = values.initialization ? benchmarkSeeds(input, [values.initialization])[0] : benchmarkSeed(input);
     const config = unrestrictedConfig(aflowConfigSchema.parse({}).maxOutputTokens);
     const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1',
       model: model(42), config, strategy: { ...initialStrategy, id: `${name}-unsearched-seed`,
@@ -320,13 +326,37 @@ async function run() {
         pythonEnvironment: (await promisify(execFile)(process.env.MFLOW_BENCH_PYTHON ?? "python3", ["-c",
           "import sys,json,importlib.metadata as m; print(json.dumps([sys.version, sorted((p.metadata['Name'],p.version) for p in m.distributions())]))"])).stdout.trim(),
       };
-      const result = await evaluateFrozen({ out, resume: !!values.resume, manifest, tasks, provider,
+      const concurrency = z.coerce.number().int().positive().parse(values.concurrency ?? 1);
+      const serial = () => evaluateFrozen({ out, resume: !!values.resume, manifest, tasks, provider,
         evaluate: async (task) => {
           const execution = await checkpointExecution(join(out, 'executions', `${digest(task.id)}.json`), task.id,
             () => executeBenchmark(task, agents, bundle.strategy, bundle.config.episode, bundle.pool));
           return { taskId: task.id, ...await grade(task, execution.answer, execution, agents), execution };
         },
       });
+      const concurrent = async () => {
+        if (values.resume) {
+          if (digest(await json(join(out, 'manifest.json'))) !== digest(manifest)) throw new Error('Evaluation resume manifest mismatch');
+        } else { await mkdir(out, {recursive:false}); await save(join(out,'manifest.json'), manifest); }
+        const dir = join(out, 'task-usage'); await mkdir(dir, {recursive:true});
+        const result = await evaluateConcurrent({out,tasks,concurrency,evaluate:async task => {
+          const usagePath = join(dir,`${digest(task.id)}.json`);
+          const previous = await json(usagePath).catch((e: NodeJS.ErrnoException) => {if(e.code!=='ENOENT')throw e;return [];}) as typeof provider.records;
+          const meter = new MeteredProvider(httpProvider(bundle.model,process.env.MFLOW_API_KEY??'',{
+            onProgress:p=>save(join(out,'requests',`${p.id}.json`),{taskId:task.id,...p}),
+          }),undefined,records=>save(usagePath,[...previous,...records]));
+          const local = new DittoAgents(meter,bundle.model,bundle.pythonImage?[arithmeticTool,createPythonTool(bundle.pythonImage)]:[]);
+          const execution = await checkpointExecution(join(out,'executions',`${digest(task.id)}.json`),task.id,
+            ()=>executeBenchmark(task,local,bundle.strategy,bundle.config.episode,bundle.pool));
+          return {taskId:task.id,...await grade(task,execution.answer,execution,local),execution};
+        }});
+        const records = (await Promise.all((await readdir(dir)).filter(n=>n.endsWith('.json')).map(n=>json(join(dir,n))))).flat() as typeof provider.records;
+        const unknownCalls=records.filter(r=>r.status!=='known').length,knownTokens=records.filter(r=>r.status==='known').reduce((n,r)=>n+r.charged,0);
+        await save(join(out,'usage.json'),records);
+        if (result.errors.length) throw new Error(`${result.errors.length} test tasks failed; saved results can be resumed`);
+        return {...result,usage:records,actualTokens:unknownCalls?null:knownTokens,accounting:{knownTokens,unknownCalls,chargedTokens:records.reduce((n,r)=>n+r.charged,0)}};
+      };
+      const result = await (concurrency > 1 ? concurrent() : serial());
       await save(join(out, "summary.json"), {
         strategy: bundle.strategy.id, count: result.rows.length,
         accuracy: mean(result.rows.map((r) => r.score)),

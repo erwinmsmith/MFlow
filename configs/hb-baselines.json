@@ -1,0 +1,15 @@
+{
+  "runDirectory": "runs/hb-qwen-math-20260930",
+  "model": "qwen3.5-9b",
+  "aflowPythonImage": "sha256:2fc2c915ed384368f492e415d42f7491defbaaa29436b3013e84627fe85b57a6",
+  "temperature": 0,
+  "maxOutputTokens": 65536,
+  "providerTimeoutMs": 2147483647,
+  "providerOptions": {"chat_template_kwargs": {"enable_thinking": false}},
+  "outputLimitSource": "hb llm-server parallel profile: 4 slots, 65536 context tokens per slot; prompt and completion share context",
+  "episodeTokenLimit": null,
+  "overallTokenCeiling": null,
+  "aflow": {"maxRounds": 20, "validationRounds": 1, "checkConvergence": true, "operators": ["Custom", "ScEnsemble", "Programmer"]},
+  "webSearch": {"runtime": "Ditto INTERACTION.ACT.TOOL", "tool": "createWebSearchTool", "provider": "DuckDuckGo via injected ddgs adapter", "autoagentsInterface": "CUSTOM_ENGINE"},
+  "seed": 42
+}

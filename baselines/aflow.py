@@ -2,16 +2,19 @@
 import argparse, asyncio, hashlib, json, os, random, sys, time
 from pathlib import Path
 from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, BudgetStop, call, tasks, grade, save_row, usage, freeze_run
-from repairs import validate_workflow
+from repairs import validate_workflow, install_aflow_python
 p=argparse.ArgumentParser();p.add_argument('--phase',choices=['pilot','search-test'],required=True);args=p.parse_args()
 source=SOURCES/'AFlow';sys.path.insert(0,str(source));os.chdir(source)
 from scripts.async_llm import AsyncLLM, LLMConfig
 from scripts.optimizer import Optimizer
 from benchmarks.math import MATHBenchmark
 from benchmarks.benchmark import BaseBenchmark
+import workspace.MATH.workflows.template.operator as math_operator
+import scripts.operators as original_operator
+install_aflow_python(math_operator,original_operator)
 import numpy as np
 random.seed(42);np.random.seed(42)
-config=LLMConfig({'model':'deepseek-flash','temperature':0,'key':'local-ditto-bridge','base_url':'http://127.0.0.1:8197/v1'})
+config=LLMConfig({'model':PROTOCOL['model'],'temperature':PROTOCOL['temperature'],'key':'local-ditto-bridge','base_url':'http://127.0.0.1:8197/v1'})
 async def invoke(self,prompt):
     messages=([{'role':'system','content':self.sys_msg}] if self.sys_msg else [])+[{'role':'user','content':prompt}]
     try:SCOPE.get();return call(messages)
@@ -101,7 +104,7 @@ async def main():
     if not complete:raise RuntimeError('No fully evaluated AFlow candidate')
     best=max(complete,key=lambda r:(r['score'],-r['round']));number=best['round']
     files={n:hashlib.sha256(Path(workflows,f'round_{number}',n).read_bytes()).hexdigest() for n in ['graph.py','prompt.py']}
-    (out/'frozen.json').write_text(json.dumps({'round':number,'validationScore':best['score'],'stop':stop,'files':files,'model':'deepseek-flash','operators':native['operators'],'frozenBeforeTest':True},indent=2)+'\n')
+    (out/'frozen.json').write_text(json.dumps({'round':number,'validationScore':best['score'],'stop':stop,'files':files,'model':PROTOCOL['model'],'operators':native['operators'],'frozenBeforeTest':True},indent=2)+'\n')
     await test(number,out,workflows)
 async def test(number,out,workflows):
     global phase
@@ -114,4 +117,8 @@ async def test(number,out,workflows):
     rows=[json.loads(s) for s in (out/'test/results.jsonl').read_text().splitlines()]
     assert len(rows)==486 and len({r['taskId'] for r in rows})==486
     (out/'test/summary.json').write_text(json.dumps({'method':'AFlow','count':486,'correct':sum(r['score'] for r in rows),'tokens':sum(r['tokens'] for r in rows),'selectedRound':number},indent=2)+'\n')
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+    import runpy
+    from bench_common import TransportFailure
+    call=runpy.run_path(str(ROOT/'scripts/resume_aflow_test.py'))['guard_transport'](call,TransportFailure)
+    asyncio.run(main())

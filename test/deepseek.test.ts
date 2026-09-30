@@ -3,6 +3,24 @@ import assert from "node:assert/strict";
 import { ProviderFailure, observableProvider, type ProviderProgress } from "../src/provider-progress.js";
 import { httpProvider } from "../src/ditto.js";
 
+test('local provider options reach the published Ditto transport', async () => {
+  const previous = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(String(options?.body));
+      assert.equal(body.model, 'qwen3.5-9b');
+      assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false });
+      assert.equal(body.thinking, undefined);
+      return Response.json({ choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] });
+    };
+    const provider = httpProvider({ model: 'qwen3.5-9b', baseUrl: 'http://127.0.0.1:11434/v1', temperature: 0,
+      seed: 42, providerOptions: { chat_template_kwargs: { enable_thinking: false } } }, 'local');
+    assert.equal((await provider.invoke({ model: { model: 'qwen3.5-9b' },
+      messages: [{ role: 'user', content: 'fixture' }], generation: { maxTokens: 16 } },
+    { signal: AbortSignal.timeout(1000) })).message.content, 'OK');
+  } finally { globalThis.fetch = previous; }
+});
+
 test("DeepSeek requests use the published Ditto provider with supported fields", async () => {
   const previous = globalThis.fetch;
   let body: Record<string, unknown> = {};

@@ -1,7 +1,21 @@
-"""Syntax/serialization repairs only; no benchmark answers or scoring feedback."""
+"""Syntax/serialization and isolated tool adapters; no scoring feedback."""
 import ast
 import json
 import re
+
+def install_aflow_python(*modules):
+    """Keep official run_code semantics; Ditto executes it inside isolated Python."""
+    import asyncio
+    import inspect
+    from bench_common import execute_python
+    for module in modules:
+        native='import json,sys,traceback,logging\nlogger=logging.getLogger("aflow")\n'+inspect.getsource(module.run_code)
+        async def execute(self,code,timeout=30,*,_native=native):
+            result=await asyncio.to_thread(execute_python,_native+'\nprint(json.dumps(run_code('+repr(code)+')))')
+            if result['status']!='success':return 'Error',result['content']
+            status,output=json.loads(result['content'].strip().splitlines()[-1])
+            return status,output
+        module.Programmer.exec_code=execute
 
 
 def unfence(text):

@@ -28,18 +28,24 @@ def tasks(domains=None):
 
 
 async def serve():
-    state = env = None
+    sessions = {}
     for line in sys.stdin:
         try:
             request = json.loads(line)
             with contextlib.redirect_stdout(sys.stderr):
                 op = request['op']
+                session = request['session']
+                state, env = sessions.get(session, (None, None))
                 if op == 'start':
                     domain = request['taskId'].split('.')[0]
                     row = next(r for r in tasks([domain]) if r['info']['task_name'] == request['taskId'])
                     env = AutomationBenchEnv(dataset=dataset(domain), rubric=create_rubric(), toolset='api')
                     state = await env.setup_state(row)
+                    sessions[session] = (state, env)
                     result = {'tools': env._all_oai_tools, 'contract': state['_task_contract_sha256']}
+                elif op == 'close':
+                    sessions.pop(session, None)
+                    result = None
                 elif state is None:
                     raise ValueError('Start a task before using its environment')
                 elif op == 'call':

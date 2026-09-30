@@ -55,6 +55,12 @@ export const textReviewer = `return loop({id:'revise',plan:function*(ctx){
 const profile = { ...rootProfile, tools: [], nodes: ['CONTEXT.LOAD', 'INFER.REASONING.SAMPLE'], reasoning: 'cot',
   expected_output: 'Complete mathematical solution ending in a boxed final answer.', stop_condition: 'A complete solution or a concrete unresolved obstacle is stated.' };
 const { id: _id, ...capability } = profile;
+export const automationInstruction = `Complete the requested business workflow in the official simulated APIs.
+Discover precise endpoints with api_search; read each endpoint's method, parameter names and response schema before api_fetch.
+Resolve names to real record IDs; follow pagination and cross-application identifiers. Keep filters, exact values, recipients, formatting, dates and conditions from the user's task.
+Inspect current state before writes; every agent shares this task's world. Reuse completed work, never recreate records or repeat successful sends.
+After each consequential write, inspect the resulting state and verify every requested postcondition. Repair concrete missing effects; do not replace tool execution with prose.
+Only API observations and the user's request are evidence. Grading references and hidden world snapshots are unavailable. Summarize completed effects, identifiers and any specific blocker concisely.`;
 export const textOrganization = organizationSchema.parse({
   initialAgents: [profile], initialBindings: { root: 'solver' },
   agentTemplates: [
@@ -107,7 +113,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   const academic = benchmark === 'hle';
   const contract = code
     ? 'Return the complete executable Python solution with the requested function signature and any needed imports. No Markdown fences, explanations or boxed answers. Only public examples from the problem may be used as checks; hidden evaluation tests are not available.'
-    : workflow ? 'Complete the requested workflow in the shared simulated environment using api_search, api_fetch and base64_encode. Discover endpoint documentation before calls. Verify consequential writes. Summarize only actions actually completed; textual claims do not change the environment.'
+    : workflow ? automationInstruction
     : academic ? 'Solve the academic question and preserve the required Explanation, Answer and Confidence format. Do not invent missing evidence.'
     : 'Answer the question using only the supplied passage and question. Return only the concise final answer; multiple answer spans may be separated with |. Do not include a derivation, Markdown or a boxed answer.';
   const prompts = {
@@ -128,13 +134,13 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   }
   if (workflow) for (const template of organization.agentTemplates!) {
     // All agents use the same task world. Review may inspect or repair concrete effects.
-    template.composition = textSolver.replace(/ctx\.publishText\(id,([^\n;]+)\)/g, "ctx.publishText(id,$1,'raw')");
+    template.composition = textSolver;
     template.description = `${template.id}: workflow execution and state verification`;
   }
   for (const template of organization.agentTemplates!) {
     // Code and QA answers are raw output, even if their content contains a literal boxed expression.
     template.composition = template.composition.replace(/ctx\.publishText\(id,([^\n;]+)\)/g, "ctx.publishText(id,$1,'raw')");
-    template.description = `${template.id}: ${code ? 'Python implementation and review' : 'Reading comprehension and evidence checking'}`;
+    template.description = `${template.id}: ${code ? 'Python implementation and review' : workflow ? 'API workflow execution and state repair' : 'Reading comprehension and evidence checking'}`;
     if (template.id === 'reviewer') template.profile.objective = 'Find and correct specific errors in the supplied candidate.';
     if (template.id === 'independent') template.profile.objective = 'Solve independently using a complementary method and the original specification.';
   }
@@ -147,6 +153,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
 }});` : `function solution(output){
   return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');
 }
+
 return loop({id:'adaptive-mas',plan:function*(ctx){
   const first=yield* ctx.runAgent('root','','agent');
   ctx.spawnTemplate('reviewer','reviewer','root');
@@ -164,4 +171,60 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 }});`;
   return { dataset, kind: code ? 'code generation' : workflow ? 'workflow automation' : academic ? 'academic reasoning' : 'reading comprehension', composition, organization, prompts,
     provenance: 'Dataset-specific editable MFlow seed; official AFlow optimization controller; no MATH round-12 initialization or test data' };
+}
+
+/** Multiple measured roots; selection and all descendants use search data only. */
+export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], names?: string[]) {
+  const seed = benchmarkSeed(tasks);
+  if (tasks[0].metric !== 'automationbench') return [{ name: 'default', ...seed }];
+  const single = `return loop({id:'single',plan:function*(ctx){return (yield* ctx.runAgent('root')).candidate_answer;}});`;
+  const planned = structuredClone(seed.organization);
+  const planner = { ...planned.agentTemplates![0], id: 'planner', description: 'Plan exact dependencies and postconditions without making writes.',
+    profile: { ...planned.agentTemplates![0].profile, tools: [], nodes: ['INFER.REASONING.SAMPLE'] as ['INFER.REASONING.SAMPLE'],
+      objective: 'Produce an executable dependency plan, entity lookup requirements and postcondition checklist. Do not claim execution.', capability: 'Workflow decomposition and API dependency planning', expected_output: 'Dependency plan and exact verification checklist, without claims of execution.', stop_condition: 'The plan and unresolved lookup requirements are clearly stated.' },
+    composition: textReviewer.replace('ctx.publishText(id,ctx.unwrap(out[node]).message.content)', "ctx.publishText(id,ctx.unwrap(out[node]).message.content,'raw')") };
+  planned.agentTemplates!.push(planner);
+  planned.initialAgents.push({ id: 'planner', ...planner.profile });
+  planned.initialBindings!.planner = 'planner';
+  const planExecute = `return loop({id:'plan-execute',plan:function*(ctx){
+    const plan=yield* ctx.runAgent('planner','Produce a dependency plan and verification checklist.'); ctx.dormant('planner');
+    return (yield* ctx.runAgent('root',{plan,instruction:'Execute the plan against the actual APIs and verify requested effects.'})).candidate_answer;
+  }});`;
+  const parallel = structuredClone(planned);
+  parallel.initialAgents.push({...parallel.initialAgents[1],id:'auditor',objective:'Identify exact postconditions, duplicate-effect risks and verification queries.',capability:'Independent effect and consistency planning'});
+  parallel.initialBindings!.auditor='planner';
+  const parallelPlan = `return loop({id:'parallel-plan',plan:function*(ctx){
+    const g=graph('parallel-planning').node('planner/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner','Plan entity resolution and API dependency ordering.'),false,'text'))
+      .node('auditor/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor','Plan exact postcondition checks and protection against duplicate effects.'),false,'text'));
+    const out=yield* graphStep(g,null,{concurrency:2});
+    const plans=['planner','auditor'].map(id=>ctx.publishText(id,ctx.unwrap(out[id+'/plan']).message.content,'raw'));
+    ctx.dormant('planner');ctx.dormant('auditor');
+    return (yield* ctx.runAgent('root',{plans,instruction:'Integrate these complementary plans, execute the workflow and verify actual effects.'})).candidate_answer;
+  }});`;
+  const adaptive = structuredClone(seed);
+  adaptive.prompts.factory = `Design a task-local subagent for this workflow. Return JSON {profile,composition} only.
+profile has id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. Available tools: api_search, api_fetch, base64_encode. Available nodes: ${compositionNodes.join(', ')}.
+composition is JavaScript source returning a public Ditto loop({id,plan:function*(ctx){...}}); the generator returns an AgentOutput object, never a string. Use ctx.self for node IDs; ctx.task contains only id/prompt, ctx.evidence the assignment.
+Build graph/loop structure and reasoning appropriate to this task's concrete API dependencies. It may delegate recursively with ctx.spawn(profile,parentId,composition) and yield* ctx.runAgent. Tools execute only through native INTERACTION.ACT.TOOL and INTERACTION.OBSERVE; no imports/process/network/eval.
+For SAMPLE use ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),true,'text'); ctx.unwrap checks node success. Preserve assistant actionRequests metadata and tool actionRequestId. ctx.publishText(id,text,'raw') returns AgentOutput.
+This complete tool-using program illustrates the public contract; adapt its structure and profile when the task calls for a specialist: ${seed.organization.agentTemplates![0].composition}
+${automationInstruction}`;
+  adaptive.composition = `return loop({id:'adaptive-factory',plan:function*(ctx){
+    const node='root/factory';
+    let messages=ctx.textMessages('root','Design a distinct subagent to execute this task; choose its actual internal graph and capability.','factory'),design;
+    for(let attempt=0;attempt<3;attempt++){
+      const g=graph('factory').node(node,'INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
+      const result=yield* graphStep(g,null),response=ctx.unwrap(result[node]);
+      try{design=JSON.parse(response.message.content);ctx.spawn(design.profile,'root',design.composition);break;}
+      catch(error){if(attempt===2){ctx.failedAgent('root',String(error));return '';}messages.push(response.message,{role:'user',content:'Repair the JSON/profile/program interface only; preserve the intended specialist and method. Error: '+String(error)});}
+    }
+    const executed=yield* ctx.runAgent(design.profile.id,'Execute the original task and verify its exact postconditions.');
+    ctx.dormant(design.profile.id);
+    return executed.candidate_answer;
+  }});`;
+  const all = [{name:'single',...seed,composition:single}, {name:'review',...seed},
+    {name:'plan-execute',...seed,organization:planned,composition:planExecute},
+    {name:'parallel-plan',...seed,organization:parallel,composition:parallelPlan}, {name:'adaptive',...adaptive}];
+  if (names?.some(name => !all.some(s => s.name === name)) || names?.length === 0) throw new Error('Unknown or empty MAS initialization');
+  return names ? names.map(name => all.find(s => s.name === name)!) : all;
 }

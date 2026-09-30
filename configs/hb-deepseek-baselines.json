@@ -1,0 +1,15 @@
+{
+  "runDirectory": "runs/hb-deepseek-flash-baselines-math",
+  "model": "deepseek-flash",
+  "aflowPythonImage": "sha256:2fc2c915ed384368f492e415d42f7491defbaaa29436b3013e84627fe85b57a6",
+  "temperature": 0,
+  "maxOutputTokens": 393216,
+  "providerTimeoutMs": 2147483647,
+  "providerOptions": {"thinking": {"type": "disabled"}},
+  "outputLimitSource": "https://api-docs.deepseek.com/api/create-chat-completion/",
+  "episodeTokenLimit": null,
+  "overallTokenCeiling": null,
+  "aflow": {"maxRounds": 20, "validationRounds": 1, "checkConvergence": true, "operators": ["Custom", "ScEnsemble", "Programmer"]},
+  "webSearch": {"runtime": "Ditto INTERACTION.ACT.TOOL", "tool": "createWebSearchTool", "provider": "DuckDuckGo via injected ddgs adapter", "autoagentsInterface": "CUSTOM_ENGINE"},
+  "seed": 42
+}

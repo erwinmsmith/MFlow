@@ -2,13 +2,40 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readTasks, assertDisjoint, assertDatasetRole } from '../src/data.js';
 import { taskSchema, initialStrategy, limitsSchema } from '../src/types.js';
-import { benchmarkSeed } from '../src/aflow-seed.js';
+import { benchmarkSeed, benchmarkSeeds } from '../src/aflow-seed.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
-import { executeBenchmark, openAutomation } from '../src/benchmark-environment.js';
+import { executeBenchmark, openAutomation, automationTools } from '../src/benchmark-environment.js';
 import { grade } from '../src/grading.js';
 import { benchmarkPath } from '../src/benchmark-hub.js';
+import { OrganizationRuntime } from '../src/runtime.js';
+import { validateComposition } from '../src/composition.js';
 
 const model = { model: 'fixture', baseUrl: 'https://invalid.example', temperature: 0, seed: 42 };
+
+test('multiple MAS roots preserve distinct graphs; a factory creates an executable agent outside the library', async () => {
+  const seeds = benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}]);
+  assert.deepEqual(seeds.map(s=>s.name),['single','review','plan-execute','parallel-plan','adaptive']);
+  for(const seed of seeds)validateComposition(seed.composition);
+  assert.equal(seeds[2].organization.initialAgents.length,2);
+  const seed=seeds[4],template=seed.organization.agentTemplates![0];
+  const profile={id:'new-api-specialist',...template.profile,private_context:'NEW-CAPABILITY-MARKER'};
+  const program=template.composition.replace("id+'/sample'", "id+'/new-specialist-node'");
+  let n=0;
+  const agents=new DittoAgents(new MeteredProvider({async invoke(input){
+    n++;const factory=input.metadata?.nodeId==='root/factory';
+    if(!factory)assert.ok(JSON.stringify(input.messages).includes('NEW-CAPABILITY-MARKER'));
+    return {message:{role:'assistant',content:factory?JSON.stringify({profile,composition:program}):'Task completed by new program'},finishReason:'stop',usage:{totalTokens:10}};
+  }}),model,automationTools.map(name=>({name,description:'Offline fixture',inputSchema:{type:'object',properties:{}},effects:['read'] as ['read'],validate:()=>{},execute:async()=>({status:'success' as const,content:''})})));
+  const before=JSON.stringify(seed.organization);
+  const runtime=new OrganizationRuntime(agents,limitsSchema.parse({maxTokens:100000}));
+  const result=await runtime.run({...initialStrategy,...seed},{id:'isolated-task',prompt:'A public workflow request'});
+  assert.equal(result.answer,'Task completed by new program');assert.equal(n,2);
+  assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='RUN_PROGRAM'&&e.agentId===profile.id));
+  assert.ok(result.orchestration!.graphs.some(g=>g.nodes.some(node=>node.id===profile.id+'/new-specialist-node')));
+  assert.equal(result.orchestration!.programs![0].composition,program);
+  assert.equal(JSON.stringify(seed.organization),before);
+  await assert.rejects(runtime.run({...initialStrategy,...seed,composition:`return loop({id:'unsafe',plan:function*(ctx){ctx.spawn(${JSON.stringify(profile)},'root','return process.env;');return '';}});`},{id:'invalid',prompt:'Public request'}),/process is not defined/);
+});
 
 test('HLE remains test-only and grading references enter only the Ditto judge', async () => {
   const task = taskSchema.parse({ id: 'hle:fixture', prompt: 'An academic question', answer: 'GRADER_ONLY_REFERENCE',
@@ -75,4 +102,11 @@ test('Ditto registered API tools mutate one official world, whose saved checkpoi
     const untouched = await fresh.request<{score: number}>({op: 'grade', ...snapshot});
     assert.equal(untouched.score, 0);
   } finally { fresh.close(); }
+  const [one,two]=await Promise.all([openAutomation(task),openAutomation(task)]);
+  try {
+    await one.tools.find(t=>t.name==='api_fetch')!.execute({method:'PATCH',url:'https://yourinstance.salesforce.com/services/data/v61.0/sobjects/Contact/003001',params:null,body:JSON.stringify({Phone:'+1-555-0101'})},{} as never);
+    const [a,b]=await Promise.all([one.request<{contract:string;world:unknown}>({op:'snapshot'}),two.request<{contract:string;world:unknown}>({op:'snapshot'})]);
+    assert.equal((await one.request<{score:number}>({op:'grade',...a})).score,1);
+    assert.equal((await two.request<{score:number}>({op:'grade',...b})).score,0);
+  } finally {one.close();two.close();}
 });

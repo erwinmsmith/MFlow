@@ -1,7 +1,7 @@
 """Official Manager/observers/Group/CustomAction with Ditto model and search transport."""
 import asyncio, importlib, os, re, sys, types
 from pathlib import Path
-from bench_common import ROOT, SOURCES, RUNS, SCOPE, call, save_row, search_web
+from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, call, save_row, search_web
 from repairs import install_autoagents_repairs
 class AutoAgents:
     def __init__(self):
@@ -11,7 +11,8 @@ class AutoAgents:
         class LLM:
             def __init__(self,*args,**kwargs):pass
             async def aask(self,prompt,system_msgs=None):
-                content=call([{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]+[{'role':'user','content':prompt}])
+                design=PROTOCOL.get('benchmark')=='automationbench' and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
+                content=call([{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]+[{'role':'user','content':prompt}],tools=not design)
                 owner.remember_roles(content)
                 return content
         transport=types.ModuleType('autoagents.system.provider.llm_api');transport.LLMAPI=LLM

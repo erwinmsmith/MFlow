@@ -1,5 +1,7 @@
 """Offline checks. Run with the legacy environment; no model calls are made."""
 import contextlib
+import os
+import subprocess
 import io
 import json
 import tempfile
@@ -13,10 +15,52 @@ from unittest.mock import patch
 import bench_common as common
 from dylan import DyLAN
 from evoagent import EvoAgent
-from repairs import parse_roles, validate_workflow, validate_role_plan
+from repairs import parse_roles, validate_workflow, validate_role_plan, install_aflow_python
 
 
 class AdapterTests(unittest.TestCase):
+    def test_native_programmer_uses_scoped_ditto_python_without_host_execution(self):
+        import asyncio
+        import ast
+        source=common.SOURCES/'AFlow/workspace/MATH/workflows/template/operator.py'
+        function=next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.FunctionDef) and n.name=='run_code')
+        namespace={}
+        exec(compile(ast.Module(body=[function],type_ignores=[]),str(source),'exec'),namespace)
+        class Programmer:
+            def __init__(self,*args):pass
+            async def exec_code(self,*args):raise AssertionError('host execution')
+        operator=types.SimpleNamespace(Programmer=Programmer,run_code=namespace['run_code'])
+        original=operator.Programmer.exec_code
+        token=common.SCOPE.set(('AFlow','pilot','fixture'))
+        try:
+            install_aflow_python(operator)
+            with patch.object(operator,'run_code',side_effect=AssertionError('host execution')),patch.dict(os.environ,{'MFLOW_BASELINE_PORT':'8198'}),patch.object(common.urllib.request,'urlopen') as send:
+                send.return_value.__enter__.return_value=io.StringIO('{"status":"success","content":"debug\\n[\\"Success\\",\\"1/2\\"]\\n"}')
+                self.assertEqual(asyncio.run(operator.Programmer(None).exec_code('def solve(): return 0.5')),('Success','1/2'))
+                request=send.call_args.args[0]
+                self.assertEqual(request.full_url,'http://127.0.0.1:8198/python')
+                body=json.loads(request.data)
+                self.assertEqual((body['method'],body['phase'],body['taskId']),('AFlow','pilot','fixture'))
+                self.assertIn('def run_code(',body['code'])
+        finally:
+            common.SCOPE.reset(token)
+            operator.Programmer.exec_code=original
+
+    def test_web_search_uses_selected_bridge_endpoint(self):
+        token=common.SCOPE.set(('AutoAgents','pilot','fixture'))
+        try:
+            with patch.dict(os.environ,{'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:8198'}),patch.object(common.urllib.request,'urlopen') as send:
+                send.return_value.__enter__.return_value=io.StringIO('{"results":[]}')
+                self.assertEqual(common.search_web('fixture'), '[]')
+                self.assertEqual(send.call_args.args[0].full_url,'http://127.0.0.1:8198/search')
+        finally:common.SCOPE.reset(token)
+
+    def test_local_protocol_override_selects_qwen_and_separate_results(self):
+        result=subprocess.run([sys.executable,'-c',
+            'import bench_common as c; assert c.PROTOCOL["model"]=="qwen3.5-9b"; assert "hb-qwen" in str(c.RUNS); assert c.PROTOCOL_PATH.name=="hb-baselines.json"'],
+            cwd=common.ROOT/'baselines',env={**os.environ,'MFLOW_BASELINE_PROTOCOL':'configs/hb-baselines.json'},capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
     def test_provider_output_limit_records_failed_task_and_continues(self):
         class Method:
             def solve(self,prompt):

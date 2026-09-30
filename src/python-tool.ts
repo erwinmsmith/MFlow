@@ -9,9 +9,9 @@ export function pythonExecutor() {
     env.DOCKER_HOST = `unix:///Users/${process.env.USER}/.docker/run/docker.sock`;
   return createLocalSandboxExecutor({ commands: [dockerCommand], env, timeoutMs: 40_000, maxOutputBytes: 1_048_576 });
 }
-export async function pythonImage() {
+export async function pythonImage(image = process.env.MFLOW_PYTHON_IMAGE ?? 'python:3.12-alpine') {
   const sandbox = new Sandbox(process.cwd(), { execute: true }, pythonExecutor());
-  const result = await sandbox.run({ command: dockerCommand, args: ['image', 'inspect', process.env.MFLOW_PYTHON_IMAGE ?? 'python:3.12-alpine', '--format', '{{.Id}}'] });
+  const result = await sandbox.run({ command: dockerCommand, args: ['image', 'inspect', image, '--format', '{{.Id}}'] });
   if (result.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(result.stdout.trim()))
     throw new Error('Python tool requires a running Docker daemon and local MFLOW_PYTHON_IMAGE (default python:3.12-alpine)');
   return result.stdout.trim();

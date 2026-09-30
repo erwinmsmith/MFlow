@@ -1,0 +1,7 @@
+{
+  "seed": 42,
+  "maxRounds": null,
+  "validationRounds": 5,
+  "concurrency": 50,
+  "maxOutputTokens": 393216
+}

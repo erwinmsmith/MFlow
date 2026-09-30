@@ -36,13 +36,14 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.4.0/benchmark-aware-output-contracts", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.5.0/task-local-generated-programs", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
   baseUrl: string;
   temperature: number;
   seed: number;
+  providerOptions?: Record<string, unknown>;
 }
 export class BudgetExhausted extends Error {}
 export class EpisodeExhausted extends Error {
@@ -215,6 +216,7 @@ export function httpProvider(
       maxTokensField: "max_tokens" as const,
       providerOptions: { thinking: { type: "disabled" }, response_format: { type: "json_object" } },
     } : {}),
+    ...(settings.providerOptions ? { providerOptions: settings.providerOptions } : {}),
     sandbox: new Sandbox(process.cwd(), {
       network: [new URL(settings.baseUrl).origin],
     }),
