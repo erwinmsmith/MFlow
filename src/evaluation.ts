@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { MeteredProvider } from "./ditto.js";
 import type { Evaluated, Task, Execution } from "./types.js";
@@ -63,4 +63,79 @@ export async function evaluateFrozen(options: {
   const chargedTokens = records.reduce((sum, r) => sum + r.charged, 0);
   return { rows, usage: records, actualTokens: unknownCalls ? null : knownTokens,
     accounting: { knownTokens, unknownCalls, chargedTokens } };
+}
+
+/** Independent episodes; out-of-order completion and failures never block other tasks. */
+export async function evaluateConcurrent(options: {
+  out: string; tasks: Task[]; concurrency: number;
+  evaluate: (task: Task) => Promise<Evaluated>;
+}) {
+  const { out, tasks, concurrency, evaluate } = options;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('Invalid concurrency');
+  const rowDir = join(out, 'rows');
+  await mkdir(rowDir, { recursive: true });
+  const valid = new Set(tasks.map(t => t.id)), rows = new Map<string, Evaluated>();
+  if (valid.size !== tasks.length) throw new Error('Duplicate test task');
+  const accept = (row: Evaluated) => {
+    if (!valid.has(row.taskId) || row.execution.taskId !== row.taskId) throw new Error('Unexpected test result');
+    const previous = rows.get(row.taskId);
+    if (previous && digest(previous) !== digest(row)) throw new Error('Conflicting test result');
+    rows.set(row.taskId, row);
+  };
+  const previous = await readFile(join(out, 'test.jsonl'), 'utf8').catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+    return '';
+  });
+  for (const line of previous.split('\n').filter(Boolean)) {
+    const row = JSON.parse(line) as Evaluated;
+    if (rows.has(row.taskId)) throw new Error('Duplicate completed test result');
+    accept(row);
+  }
+  // Recover a row saved just before a process interruption, without rerunning the model.
+  for (const name of await readdir(rowDir)) {
+    if (!name.endsWith('.json')) continue;
+    const row = JSON.parse(await readFile(join(rowDir, name), 'utf8')) as Evaluated;
+    const logged = rows.has(row.taskId);
+    accept(row);
+    if (!logged) await append(join(out, 'test.jsonl'), row);
+  }
+  const remaining = tasks.filter(t => !rows.has(t.id));
+  let next = 0, active = 0, writes = Promise.resolve();
+  const errors: { taskId: string; error: string }[] = [];
+  const persist = (operation: () => Promise<void>) => {
+    const result = writes.then(operation);
+    writes = result.catch(() => {});
+    return result;
+  };
+  const status = (state: string) => save(join(out, 'status.json'), {
+    status: state, completed: rows.size, planned: tasks.length, active,
+    concurrency, failed: errors.length, updatedAt: new Date().toISOString(),
+  });
+  await status('running');
+  await Promise.all(Array.from({ length: Math.min(concurrency, remaining.length) }, async () => {
+    while (next < remaining.length) {
+      const task = remaining[next++];
+      active++;
+      await persist(() => append(join(out, 'attempts.jsonl'), { taskId: task.id, event: 'started', at: new Date().toISOString() }));
+      try {
+        const row = await evaluate(task);
+        if (row.taskId !== task.id) throw new Error('Task result mismatch');
+        await save(join(rowDir, `${digest(task.id)}.json`), row);
+        await persist(async () => {
+          accept(row);
+          await append(join(out, 'test.jsonl'), row);
+          await append(join(out, 'attempts.jsonl'), { taskId: task.id, event: 'completed', at: new Date().toISOString() });
+        });
+      } catch (error) {
+        const failure = { taskId: task.id, error: String(error) };
+        errors.push(failure);
+        await persist(() => append(join(out, 'errors.jsonl'), { ...failure, at: new Date().toISOString() }));
+      } finally {
+        active--;
+        await persist(() => status('running'));
+      }
+    }
+  }));
+  await status(rows.size === tasks.length ? 'completed' : 'incomplete');
+  return { rows: tasks.flatMap(t => rows.has(t.id) ? [rows.get(t.id)!] : []), errors };
 }

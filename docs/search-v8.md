@@ -43,3 +43,20 @@ Python 执行失败时，简短退出码放在 Ditto 的 error.message，完整�
 ## 修复回归
 
 2026-09-29：86 项工程测试通过，0 失败、0 跳过。两道实际触发 HTTP 422 的验证题单独重跑，均完成并评分正确，分别执行 3 次和 2 次工具调用；这些诊断分数不进入新搜索。正式运行仍从空的候选评估目录开始。
+
+## 冻结策略的并发 test
+
+`scripts/evaluate_concurrent.mjs` 只调度独立的标准 test 题目，每题创建独立的 Ditto runtime、provider 和用量账本。`--runtime` 指向选中实验的冻结应用代码目录，保留原 bundle、模型、提示词、MAS 和工具执行方法。调度器不向执行器传入标准答案；答案仅交给冻结的评分器。并发度是运行调度参数，不改变候选策略。
+
+```sh
+node --env-file=.env scripts/evaluate_concurrent.mjs \
+  --runtime runs/EXPERIMENT/frozen-dist/src \
+  --bundle runs/EXPERIMENT/frozen-current-best/best.json \
+  --test data/benchmarks/math/test.jsonl \
+  --out runs/EXPERIMENT/frozen-current-best/test \
+  --concurrency 50 --resume
+```
+
+续跑按 task ID 识别已完成结果，保留错误答案，不重复生成；结果可乱序完成，单题基础设施失败记录为未完成，其他题继续，不写成零分。模型执行先保存到 `executions/`，评分结果独立保存到 `rows/`，账本保存到 `task-usage/`，流式进度保存到 `requests/`。`status.json` 给出进度；全量完成才生成 `summary.json`，否则生成 `partial-summary.json`。中断后应使用同一并发入口续跑，旧串行入口要求结果是有序前缀，不能用于并发日志。
+
+从旧串行进程迁移时先停止旧进程，以免重复做题，保存 `serial-usage.json` 和 `serial-interruption.json`。如果旧请求中断前没有可用的 usage，实际总 token 保持未知，不能把已记录用量当成完整实耗。test 结果与派生日志用于报告，不反馈给这一标准实验的搜索。
