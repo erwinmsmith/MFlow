@@ -1,13 +1,23 @@
 import { strategySchema, type Strategy } from './types.js';
 
 /** Frozen routing ablations; profiles, agent programs and prompts stay inherited. */
-export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full'): Strategy {
+export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform'): Strategy {
   const templates = source.organization?.agentTemplates ?? [];
   const required = variant === 'single' ? ['solver'] : ['solver', 'reviewer', 'independent', 'checker'];
   if (source.organization?.initialBindings?.root !== 'solver' ||
       source.organization.initialAgents.length !== 1 || !source.prompts ||
       required.some(id => !templates.some(template => template.id === id)))
     throw new Error('Ablation requires the frozen solver-bound root and requested templates');
+  const candidate = structuredClone(source);
+  if (variant === 'fixed-uniform') {
+    const shared = templates.find(template => template.id === 'independent')!;
+    for (const template of candidate.organization!.agentTemplates!) {
+      template.composition = shared.composition;
+      Object.assign(template.profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
+    }
+    for (const profile of candidate.organization!.initialAgents)
+      Object.assign(profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
+  }
   const composition = variant === 'single' ? String.raw`return loop({id:'single',plan:function*(ctx){
     const result=yield* ctx.runAgent('root','','agent');
     return result.candidate_answer;
@@ -30,5 +40,6 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
     const final=yield* ctx.runAgent('root',evidence.map((x,i)=>'Derivation '+(i+1)+':\n'+solution(x)).join('\n\n'),'integrate');
     return final.candidate_answer || check.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;
   }});`;
-  return strategySchema.parse({ ...structuredClone(source), id: `${source.id}-${variant}`, composition });
+  return strategySchema.parse({ ...candidate, id: `${source.id}-${variant}`,
+    composition: variant === 'fixed-uniform' ? composition.replace("id:'fixed-full'", "id:'fixed-uniform'") : composition });
 }

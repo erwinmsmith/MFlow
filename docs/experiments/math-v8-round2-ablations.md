@@ -9,10 +9,13 @@
 | dynamic（已有结果） | root → reviewer；分歧时 independent；仍有分歧时 checker；必要时 root 整合 |
 | single（新完整测试） | 仅 root/solver 完整求解 |
 | fixed-full（新完整测试） | root → reviewer → independent → checker → root 整合；答案一致也不提前退出 |
+| fixed-uniform（新增完整测试） | 同 fixed-full 路由；所有成员共享 independent 的内部图、节点权限、react 模式和 arithmetic/Python 权限 |
 
 fixed-full 使用四个不同能力成员，执行五次成员程序；工具循环可以增加模型调用次数。它是原候选的固定路由消融，不是另外搜索出的最优静态 MAS。single 是相同 root 的消融；root 原有 profile 不允许工具，不能解释为有工具的单 agent 最优系统。
 
-不变项：deepseek-flash、temperature=0、同一 global prompts、profile、内部 agent graph/loop、arithmetic/Python 工具权限、Ditto 0.1.1、v3.3.1 执行运行时、486 道固定 MATH test、原 grader 和 Python 镜像、执行保护。模型没有访问 test 标准答案，每题状态隔离。
+fixed-uniform 保留各角色目标、能力描述、private_context 和五段全局提示词，但统一内部执行程序。它同时给原无工具的 root/reviewer 增加工具权限，所以是同构执行能力的对照，不是只改 graph 源码的单变量实验。该结构由用户追加请求，未针对已观察 test 错题选择或修改任何提示词。
+
+所有组不变项：deepseek-flash、temperature=0、同一 global prompts、角色目标和私有方法指令、Ditto 0.1.1、v3.3.1 执行运行时、486 道固定 MATH test、原 grader 和 Python 镜像、执行保护。single/fixed-full 还保留原 profile 的图与工具权限；fixed-uniform 按上文统一这些能力。模型没有访问 test 标准答案，每题状态隔离。
 
 independent 始终只读取原题和原独立求解指令，未接收其他成员推导。reviewer 读取 root 完整推导；checker 读取前三者的完整有效推导；最终 root 读取四者的完整有效推导，使用原 integrate 提示词。保留原候选的整合空答案回退顺序。
 
@@ -40,5 +43,7 @@ node --env-file=.env scripts/evaluate_concurrent.mjs \
 ```
 
 fixed-full 使用相同命令，将路径的 single 改为 fixed-full。两组各并发 25，总共并发 50；并发度只控制题目调度，不改变每题 MAS。中断后用相同命令添加 `--resume`，已完成的错误答案也保留，评分失败复用已保存的模型执行。
+
+新增组准备时使用 `--variant fixed-uniform --out runs/math-v8-round2-uniform-20260930-01`，执行对应 `fixed-uniform/best.json`，输出到 `fixed-uniform/test`，使用 `--concurrency 50`；前两组继续执行，不取消未完成模型请求。
 
 最终报告按同一 task ID 比较准确率、配对的纠正/退步题数、已知 token 和未知 usage 请求。基础设施失败只记未完成，不改写成错误答案。未知 usage 的预算预留数不视为供应商实耗。
