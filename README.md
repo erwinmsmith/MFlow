@@ -80,7 +80,7 @@ npm run mflow -- benchmarks path --name HumanEval+ --split test
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
 六个 benchmark 的默认搜索分别选择数学、阅读理解或 Python 代码提示词和输出契约；
-DROP 按平均 F1 优化。新执行标识 v3.5.0，旧运行需使用其保存的 runtime 与原评分环境。
+DROP 按平均 F1 优化。新执行标识 v3.5.1，旧运行需使用其保存的 runtime 与原评分环境。
 
 配置 `MFLOW_BENCH_PYTHON=../Benchmarks/environments/text/bin/python`；HumanEval+ 另需
 `MFLOW_EVALPLUS_IMAGE=mflow-evalplus:0.1.10`，镜像准备见共享说明。外部工具统一通过

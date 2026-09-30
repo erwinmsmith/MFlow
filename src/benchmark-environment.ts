@@ -77,13 +77,15 @@ export async function openAutomation(task: Task) {
     const tools: RegisteredTool[] = start.tools.map(({ function: t }) => ({
       name: t.name, description: t.description, inputSchema: z.record(z.string(), z.json()).parse(t.parameters),
       effects: t.name === 'api_fetch' ? ['read', 'write'] : ['read'],
-      validate: args => { const schema = argumentsSchemas[t.name as keyof typeof argumentsSchemas];
-        if (!schema) throw new Error('Unknown official API tool'); schema.parse(args); },
+      validate: args => { z.record(z.string(), z.json()).parse(args); },
       async execute(args) {
         try {
+          // Domain argument errors are tool observations; validation callbacks abort the native loop.
+          const schema = argumentsSchemas[t.name as keyof typeof argumentsSchemas];
+          if (!schema) throw new Error('Unknown official API tool'); schema.parse(args);
           const result = await request<{content: string}>({ op: 'call', name: t.name, arguments: args });
           return { status: 'success', content: result.content };
-        } catch (e) { return { status: 'failed', error: { code: 'BENCHMARK_TOOL', message: String(e) } }; }
+        } catch (e) { return { status: 'failed', content: String(e), error: { code: 'BENCHMARK_TOOL', message: 'Official API call failed' } }; }
       },
     }));
     return { tools, request, close };

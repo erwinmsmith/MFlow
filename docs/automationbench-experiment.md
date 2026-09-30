@@ -34,15 +34,21 @@ python3 scripts/automation_experiment.py --status
 bash scripts/hb-model.sh deepseek python3 scripts/automation_experiment.py --resume
 ```
 
-The 2026-09-30 snapshot is `/home/b/project/experiments/deepseek-automation-20260930/MFlow`. Query it directly from a local terminal:
+The 2026-09-30 snapshot is `/home/b/project/experiments/deepseek-automation-20260930-v2/MFlow`. Query it directly from a local terminal:
 
 ```bash
-ssh hb 'cd /home/b/project/experiments/deepseek-automation-20260930/MFlow; python3 scripts/automation_experiment.py --status'
-ssh hb 'systemctl --user status mflow-deepseek-automation-20260930 --no-pager'
+ssh hb 'cd /home/b/project/experiments/deepseek-automation-20260930-v2/MFlow; python3 scripts/automation_experiment.py --status'
+ssh hb 'systemctl --user status mflow-deepseek-automation-20260930-v2 --no-pager'
 ```
 
-The runner starts all five methods, then automatically advances each from search/development to the full test set. Initial concurrency is 24 MFlow episodes, 12 AFlow episodes and two worker processes for each of the other methods. Official worlds are multiplexed in one Python bridge per Node process to avoid repeating imports for every episode. LLM requests remain concurrent; benchmark API requests are short, serialized local operations.
+The runner starts all five methods, then automatically advances each from search/development to the full test set. Initial concurrency is 24 MFlow episodes, 12 AFlow episodes and one worker process for each of the other methods, leaving more RAM for the retained Qwen service. Official worlds are multiplexed in one Python bridge per Node process to avoid repeating imports for every episode. LLM requests remain concurrent; benchmark API requests are short, serialized local operations.
 
-Outputs live in `runs/automationbench-deepseek-flash-20260930/`: `jobs.json`, one log per method, `bridge.log`, `usage.jsonl`, request progress, per-task world checkpoints and results. `--status` reports phases, current round/pass, completed counts, correct counts, token accounting and transport activity. Completed rows are preserved. If only scoring fails, the saved world is regraded without new model calls. Provider/infrastructure failures stop the affected stage and remain visible; they are not recorded as ordinary wrong answers.
+Outputs live in `runs/automationbench-deepseek-flash-20260930-v2/`: `jobs.json`, one log per method, `bridge.log`, `usage.jsonl`, request progress, per-task world checkpoints and results. `--status` reports phases, current round/pass, completed counts, correct counts, token accounting and transport activity. Completed rows are preserved. If only scoring fails, the saved world is regraded without new model calls. Provider/infrastructure failures stop the affected stage and remain visible; they are not recorded as ordinary wrong answers.
 
 Resume requires the same immutable snapshot and configuration. It reuses completed tasks, partial validation passes and frozen selection; it does not reinterpret partial roots as converged search. A code repair requires an explicitly recorded new snapshot/run. Scripted providers in local checks only verify contracts and isolation; they are not benchmark performance evidence.
+
+## Initial startup attempts
+
+The first `a447e90` snapshot is retained separately as a preflight attempt, not combined with formal accuracy results. Real calls exposed a missing output parent directory and argument validation escaping the native tool observation path. The repaired adapter keeps the official schema, returns a public failed ExternalResult with detailed content and a safe error message, and lets native Ditto observe and repair the call. Prompts explicitly require JSON strings/null for API params/body. An integration check executes invalid arguments, model repair and successful official grading. Formal v2 starts all five methods from scratch after this change; held-out tasks have not been evaluated or used for repair.
+
+Preflight usage, interrupted request records and checkpoints remain under the original snapshot. Known usage and requests interrupted before usage was returned must be reported separately; their exact token charge is unavailable. Resume v2 from its own immutable snapshot, rather than importing preflight quality rows.

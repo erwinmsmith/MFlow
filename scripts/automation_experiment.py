@@ -29,6 +29,8 @@ def status(out):
     jobs=read(out/'jobs.json',{})
     planned=119 if read(out/'experiment-manifest.json',{}).get('benchmark')=='math' else 200
     report={'run':str(out),'jobs':jobs.get('jobs',{}),'methods':{}}
+    recovery=read(out/'recovery.json')
+    if recovery:report['recovery']=recovery
     for method in ('MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'):
         folder=out/method;entry={}
         controller=read(folder/('search/controller.json' if method=='MFlow' else 'controller.json'),{})
@@ -102,7 +104,7 @@ def main():
       'MFlow':[(node+['search','--benchmark','automationbench','--config','configs/automationbench-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
                (node+['evaluate','--benchmark','automationbench','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency','24']+(['--resume'] if (test/'manifest.json').exists() else []))],
       'AFlow':[[aflow,'baselines/automation_aflow.py']],
-      **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','2'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
+      **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','1'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }
     if math:
         commands={
@@ -115,6 +117,7 @@ def main():
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)
     def launch(name,index):
+        (out/name).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
         child=subprocess.Popen(commands[name][index],cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()

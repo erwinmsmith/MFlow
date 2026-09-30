@@ -8,6 +8,30 @@ import { resolve, join } from 'node:path';
 import { readTasks } from '../src/data.js';
 import { benchmarkSeeds } from '../src/aflow-seed.js';
 
+test('complete experiment launcher creates method directories before starting nested search outputs',async()=>{
+  await promisify(execFile)('python3',['-c',`
+import io,json,os,sys,tempfile
+from pathlib import Path
+from unittest.mock import patch
+from scripts.automation_experiment import main
+with tempfile.TemporaryDirectory() as root:
+ calls=[]
+ class Child:
+  pid=123
+  def __init__(self,args,**kwargs):
+   self.bridge=args==['node','baselines/bridge.mjs'];calls.append(args)
+   if '--out' in args:assert Path(args[args.index('--out')+1]).parent.exists()
+  def poll(self):return None if self.bridge else 0
+  def terminate(self):pass
+  def wait(self,**kwargs):return 0
+ with patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':root}),patch.object(sys,'argv',['runner','--run',root]),patch('scripts.automation_experiment.subprocess.Popen',Child),patch('scripts.automation_experiment.urllib.request.urlopen',return_value=io.StringIO(json.dumps({'runDirectory':root}))),patch('scripts.automation_experiment.time.sleep'):
+  main()
+ jobs=json.loads((Path(root)/'jobs.json').read_text())['jobs']
+ assert len(jobs)==5 and all(r['status']=='completed' for r in jobs.values())
+ assert len(calls)==10
+`]);
+});
+
 test('remote progress separates known usage and methods while the journal is being appended',async()=>{
   await promisify(execFile)('python3',['-c',`
 import contextlib,io,json,tempfile
@@ -50,10 +74,11 @@ test('official baseline API worlds are isolated and resumed grading buys no mode
     if(providerMode==='unavailable'){res.statusCode=503;res.end(JSON.stringify({error:'Offline fixture provider unavailable'}));return;}
     assert.ok(!text.includes('initial_state')&&!text.includes('_assertion_results'));
     const hasObservation=input.messages.some((m:{role:string})=>m.role==='tool');
+    const repair=providerMode==='badargs'&&(!hasObservation||input.messages.at(-1)?.content.includes('expected string'));
     if(input.messages.some((m:{role:string;content:unknown})=>m.role==='tool'&&typeof m.content!=='string')){res.statusCode=400;res.end(JSON.stringify({error:'tool.content must be string'}));return;}
-    const message=providerMode==='invalid'?{role:'assistant',content:'Invalid fixture JSON'}:hasObservation?{role:'assistant',content:'<response>Updated the contact.</response>'}:{role:'assistant',content:'',tool_calls:[{id:'update',type:'function',function:{name:'api_fetch',arguments:JSON.stringify({method:'PATCH',url:'https://yourinstance.salesforce.com/services/data/v61.0/sobjects/Contact/003001',params:null,body:JSON.stringify({Phone:'+1-555-0101'})})}}]};
+    const message=providerMode==='invalid'?{role:'assistant',content:'Invalid fixture JSON'}:hasObservation&&!repair?{role:'assistant',content:'<response>Updated the contact.</response>'}:{role:'assistant',content:'',tool_calls:[{id:hasObservation?'repair':'update',type:'function',function:{name:'api_fetch',arguments:JSON.stringify({method:'PATCH',url:'https://yourinstance.salesforce.com/services/data/v61.0/sobjects/Contact/003001',params:providerMode==='badargs'&&!hasObservation?{}:null,body:JSON.stringify({Phone:'+1-555-0101'})})}}]};
     const usage={prompt_tokens:10,completion_tokens:10,total_tokens:20};
-    const finishReason=providerMode==='invalid'||hasObservation?'stop':'tool_calls';
+    const finishReason='tool_calls' in message?'tool_calls':'stop';
     if(input.stream){
       res.setHeader('Content-Type','text/event-stream');
       const delta={...message,...('tool_calls' in message?{tool_calls:message.tool_calls!.map((call,i)=>({index:i,...call}))}:{})};
@@ -76,6 +101,11 @@ test('official baseline API worlds are isolated and resumed grading buys no mode
     await rpc('sample',{...scope,messages:[{role:'user',content:task.prompt}]});
     assert.equal((await rpc('finish',scope)).score,1);assert.equal((await rpc('finish',other)).score,0);
     assert.equal((await rpc('start',scope)).checkpoint,true);assert.equal((await rpc('finish',scope)).score,1);assert.equal(calls,2);
+    const invalidArgs={...scope,method:'AutoAgents'};
+    providerMode='badargs';await rpc('start',invalidArgs);
+    await rpc('sample',{...invalidArgs,messages:[{role:'user',content:task.prompt}]});
+    assert.equal((await rpc('finish',invalidArgs)).score,1);assert.equal(calls,5);
+    providerMode='normal';
     const init=await rpc('bootstrap',{});
     const result=await promisify(execFile)(python,['-c',`
 import sys,asyncio,json
@@ -94,7 +124,7 @@ AsyncLLM.__call__=lambda self,prompt:a.sample(prompt,self.sys_msg)
 row=a.episode(1,0,'search',json.loads(sys.argv[3]));assert row['score']==1,row
 print('NATIVE_STATIC_OK')
 ` ,JSON.stringify(init.seeds[0]),join(dir,'AFlow'),JSON.stringify(task)],{env,maxBuffer:1024*1024,timeout:60000});
-    assert.ok(result.stdout.includes('NATIVE_STATIC_OK'));assert.equal(calls,4);
+    assert.ok(result.stdout.includes('NATIVE_STATIC_OK'));assert.equal(calls,7);
     for(const mode of ['unavailable','invalid']){
       providerMode=mode;
       const response=await fetch(endpoint+'/propose',{method:'POST',body:JSON.stringify({round:2,prompt:'Offline transport fixture only'})});

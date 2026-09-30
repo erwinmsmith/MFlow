@@ -57,6 +57,7 @@ const profile = { ...rootProfile, tools: [], nodes: ['CONTEXT.LOAD', 'INFER.REAS
 const { id: _id, ...capability } = profile;
 export const automationInstruction = `Complete the requested business workflow in the official simulated APIs.
 Discover precise endpoints with api_search; read each endpoint's method, parameter names and response schema before api_fetch.
+api_fetch params and body must be JSON-encoded strings or null, never JSON objects. api_search requires an integer top_k. When a tool reports invalid arguments, correct the request and retry its intended action; preserve already successful effects.
 Resolve names to real record IDs; follow pagination and cross-application identifiers. Keep filters, exact values, recipients, formatting, dates and conditions from the user's task.
 Inspect current state before writes; every agent shares this task's world. Reuse completed work, never recreate records or repeat successful sends.
 After each consequential write, inspect the resulting state and verify every requested postcondition. Repair concrete missing effects; do not replace tool execution with prose.

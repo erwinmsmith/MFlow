@@ -1,6 +1,6 @@
 {
   "benchmark": "automationbench",
-  "runDirectory": "runs/automationbench-deepseek-flash-20260930",
+  "runDirectory": "runs/automationbench-deepseek-flash-20260930-v2",
   "model": "deepseek-flash",
   "temperature": 0,
   "maxOutputTokens": 393216,
