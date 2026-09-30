@@ -144,7 +144,7 @@ MFlow 暂用全部 2158 道无图题；342 道有图题仍在原始文件，文�
 官方 strict pass 是主报告，partial credit 另列，未伪装成 F1。
 
 本次磁盘 `du`：HLE collection 约 272 MiB、文本 view 约 2.7 MiB；AutomationBench collection
-约 487 MiB（其中官方锁定 Python 环境约 447 MiB），view 约 1.1 MiB。均为本机实测，
+约 488 MiB（其中官方锁定 Python 环境约 447 MiB），view 约 1.1 MiB。均为本机实测，
 不包含全局 uv/Hugging Face 下载缓存、模型权重或未来实验日志。
 本轮未启动付费模型实验；离线 fixture 通过只证明接线、数据隔离与评分恢复，不代表模型效果。
 
@@ -181,11 +181,11 @@ numpy 1.26.4 / psutil 7.2.2。实验固定镜像 ID，不能只记录可变 tag�
 ## 存储与验收
 
 - 迁移前校验旧官方清单 1945 个条目（含归档条目），核对三个官方 checkout revision。
-- 当前共享清单校验 1716 个文件；五个 AFlow 的十个转换文件保持原 SHA-256。
-- 共享目录约 467 MiB：收藏/旧归档/Git 元数据 372 MiB，派生视图 212 KiB，Python 环境 95 MiB。
+- 当前共享清单校验 2313 个文件；五个 AFlow 的十个转换文件保持原 SHA-256。
+- 共享目录当前约 1.2 GiB；新增 HLE 与 AutomationBench 约 764 MiB。原迁移资产约 467 MiB。
   Docker 镜像另计，逻辑大小约 269 MiB，基础层共享。
 - 管理/转换测试、Ditto fixture 图执行、隔离评分正反例只验证工程接线，不代表模型成绩。
-- 本机 `npm test`：104/104 通过，零跳过；Python 管理/转换测试：6/6 通过。
+- 本机完整工作树 `npm test`：108/108 通过，零跳过；Python 管理/转换测试：6/6 通过。
   六组 search/test 均通过完整锁、用途及评分预检查；DROP 控制器 fixture 验证按 F1 晋升，
   HumanEval+ 的正确/错误代码通过真实隔离 checker，未调用收费模型。
 - 未启动新搜索、test 或模拟器付费调用。后续外部工具使用 Ditto 公开注册与 Interaction；
