@@ -47,7 +47,8 @@ def main():
     random.seed(config['seed'])
     np.random.seed(config['seed'])
     llm = LLMConfig({'model': 'ditto', 'key': 'local', 'base_url': endpoint})
-    optimizer = Optimizer(dataset='MATH', question_type='organization strategy', opt_llm_config=llm,
+    dataset = init.get('dataset', 'MATH')
+    optimizer = Optimizer(dataset=dataset, question_type='organization strategy for ' + init.get('questionType', 'mathematical reasoning'), opt_llm_config=llm,
                           exec_llm_config=llm, operators=[], sample=4, check_convergence=True,
                           optimized_path=str(out), initial_round=1, max_rounds=1,
                           validation_rounds=config['validationRounds'])
@@ -77,7 +78,7 @@ def main():
         (path / 'strategy.json').write_text(json.dumps({'id': f's{number}', **json.loads(response['graph']), 'prompts': json.loads(response['prompt'])}, indent=2) + '\n')
 
     if not (workflows / 'round_1/strategy.json').exists():
-        write_graph(workflows / 'round_1', {'graph': json.dumps({'composition': init['composition'], 'organization': init['organization']}), 'prompt': json.dumps(init['prompts'])}, 1, 'MATH')
+        write_graph(workflows / 'round_1', {'graph': json.dumps({'composition': init['composition'], 'organization': init['organization']}), 'prompt': json.dumps(init['prompts'])}, 1, dataset)
 
     def execution_context(number, path):
         directory = Path(path) / f'round_{number}'

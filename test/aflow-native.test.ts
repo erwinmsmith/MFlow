@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
 import { runAFlowSearch, initialOrganization, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
-import { aflowInspiredComposition } from '../src/aflow-seed.js';
+import { aflowInspiredComposition, benchmarkSeed } from '../src/aflow-seed.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { initialStrategy, limitsSchema, rootProfile } from '../src/types.js';
@@ -138,7 +138,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
   const address = server.address(); assert.ok(address && typeof address !== 'string');
   try {
     const search = join(dir, 'tasks.jsonl');
-    await writeFile(search, [0, 1, 2, 3].map((i) => JSON.stringify({ id: `train-${i}`, prompt: `fixture ${i}`, answer: String.raw`\boxed{42}`, metric: 'exact' })).join('\n') + '\n');
+    await writeFile(search, [0, 1, 2, 3].map((i) => JSON.stringify({ id: `train-${i}`, prompt: `fixture ${i}`, answer: String.raw`\boxed{42}`, metric: 'exact', benchmark: 'math' })).join('\n') + '\n');
     const options = { out: join(dir, 'search'), search, source, python,
       config: { maxRounds: 1, validationRounds: 2, concurrency: 2 },
       model: { model: 'fixture', baseUrl: `http://127.0.0.1:${address.port}`, temperature: 0, seed: 42 } };
@@ -187,6 +187,44 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(stopped.round, 8);
     assert.equal(proposals, 8);
     assert.equal(agents, 96);
+  } finally {
+    server.close(); await rm(dir, { recursive: true, force: true });
+    if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;
+  }
+});
+
+test('DROP controller ranks partial F1 and a corrected child using its own dataset directory', async t => {
+  const python = resolve('../MFlow-baselines/.venv-aflow/bin/python'), source = resolve('../MFlow-baselines/sources/AFlow');
+  try { await access(python); await access(source); await pythonImage(); }
+  catch { t.skip('Official controller and Docker required'); return; }
+  const dir = await mkdtemp(join(tmpdir(), 'mflow-drop-search-'));
+  const task = { id: 'drop-fixture', benchmark: 'drop' as const, prompt: 'Which two people?', answer: 'Alice Bob',
+    metric: 'drop' as const, reference: { answers: [['Alice Bob']] } };
+  const seed = benchmarkSeed([task]);
+  const oldKey = process.env.MFLOW_API_KEY; process.env.MFLOW_API_KEY = 'offline-fixture';
+  const server = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body), text = input.response_format?.type === 'text';
+    const full = JSON.stringify(input.messages).includes('FULL-ANSWER-MARKER') || JSON.stringify(input.messages).includes('Alice Bob');
+    const value = text ? (full ? 'Alice Bob' : 'Alice') :
+      { organization: seed.organization, composition: seed.composition, modification: 'Check both requested people.',
+        prompts: { ...seed.prompts, agent: seed.prompts.agent + ' FULL-ANSWER-MARKER' } };
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: text ? value : JSON.stringify(value) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }));
+  });
+  await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  try {
+    const search = join(dir, 'tasks.jsonl'), out = join(dir, 'search');
+    await writeFile(search, JSON.stringify(task) + '\n');
+    await runAFlowSearch({ search, out, source, python, config: { maxRounds: 1, validationRounds: 1, concurrency: 1 },
+      model: { model: 'fixture', baseUrl: `http://127.0.0.1:${address.port}`, temperature: 0, seed: 42 } });
+    const records = JSON.parse(await readFile(join(out, 'DROP/workflows/results.json'), 'utf8'));
+    assert.deepEqual(records.map((r: { score: number }) => r.score), [0.67, 1]);
+    const summary = JSON.parse(await readFile(join(out, 'summary.json'), 'utf8'));
+    assert.equal(summary.validationMeanF1, 1); assert.equal(summary.validationAccuracy, undefined);
+    assert.equal(summary.selectedRound, 2);
   } finally {
     server.close(); await rm(dir, { recursive: true, force: true });
     if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;

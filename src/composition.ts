@@ -217,9 +217,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
         `\n\nAssignment: ${p.objective}\nCapability: ${p.capability}\nReasoning approach: ${p.reasoning}\nExpected output: ${p.expected_output}\nStopping criterion: ${p.stop_condition}\n${p.private_context}` }];
     },
     answerKey: (text: string) => boxedAnswer(text)?.replace(/\s/g, '') ?? '',
-    publishText: (id: string, text: string) => api.publish(id, {
+    publishText: (id: string, text: string, format: 'boxed' | 'raw' = 'boxed') => api.publish(id, {
       claims: [], artifacts: [{ id: `${id}/solution-${outputs.length}`, type: 'solution', content: text, deficit_refs: [] }],
-      open_deficits: [], resolved_deficits: [], candidate_answer: boxedAnswer(text) ?? text,
+      open_deficits: [], resolved_deficits: [], candidate_answer: format === 'raw' ? text : boxedAnswer(text) ?? text,
     }),
     failedAgent: (id: string, error: unknown) => api.publish(id, {
       claims: [], artifacts: [{ id: `${id}/failure-${outputs.length}`, type: 'execution_error', content: JSON.stringify(error), deficit_refs: [] }],

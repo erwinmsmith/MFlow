@@ -245,15 +245,17 @@ export const taskSchema = z
     id: z.string().min(1),
     prompt: z.string().min(1),
     answer: z.string(),
-    metric: z.enum(["exact", "numeric", "drop", "math", "python"]).default("exact"),
-    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math"]).optional(),
+    metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus"]).default("exact"),
+    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus"]).optional(),
     aflowSplit: z.enum(["validate", "test"]).optional(),
+    dataset: z.object({ protocol: z.literal('humaneval-plus-aflow-v1'), split: z.enum(['search', 'test']) }).strict().optional(),
     reference: z.object({
       answers: z.array(z.array(z.string())).optional(),
       tests: z.array(z.string()).optional(),
       setup: z.string().optional(),
       prefix: z.string().optional(),
       entryPoint: z.string().optional(),
+      evalplusTaskId: z.string().optional(),
     }).strict().optional(),
     group: z.string().optional(),
   })
@@ -263,6 +265,11 @@ export const taskSchema = z
       ctx.addIssue({ code: "custom", message: "DROP needs reference.answers" });
     if (task.metric === "python" && !task.reference?.tests?.length)
       ctx.addIssue({ code: "custom", message: "Python needs reference.tests" });
+    if (task.metric === 'evalplus' && (task.benchmark !== 'humaneval_plus' || !task.dataset ||
+        !task.reference?.evalplusTaskId || !task.reference.entryPoint || !task.reference.prefix))
+      ctx.addIssue({ code: 'custom', message: 'HumanEval+ requires a locked dataset and EvalPlus task reference' });
+    if (task.dataset && (task.benchmark !== 'humaneval_plus' || task.metric !== 'evalplus' || task.aflowSplit))
+      ctx.addIssue({ code: 'custom', message: 'HumanEval+ derived protocol cannot be mixed with AFlow source metadata' });
   });
 export type Task = z.infer<typeof taskSchema>;
 export type TaskInput = Pick<Task, "id" | "prompt">;

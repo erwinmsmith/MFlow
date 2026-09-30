@@ -15,7 +15,7 @@ const out = resolve(required('out')), runtime = resolve(required('runtime'));
 const load = name => import(pathToFileURL(join(runtime, `${name}.js`)).href);
 const [{ readTasks, assertTestDisjoint }, { digest, save, mean },
   { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool },
-  { OrganizationRuntime }, { createPythonTool }, { grade, checkScoring },
+  { OrganizationRuntime }, { createPythonTool }, { grade, checkScoring, gradingIdentity },
   { strategySchema, searchConfigSchema, profileSchema }] = await Promise.all(
     ['data', 'util', 'ditto', 'runtime', 'python-tool', 'grading', 'types'].map(load));
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -31,6 +31,7 @@ const concurrency = Number(values.concurrency);
 if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('Invalid concurrency');
 const python = process.env.MFLOW_BENCH_PYTHON ?? 'python3';
 const manifest = { bundleHash: digest(bundle), testDataHash: digest(tasks), protocol: 'standard',
+  ...(gradingIdentity ? await gradingIdentity(tasks) : {}),
   gradingCode: digest(await readFile(join(runtime, 'grading.js'), 'utf8')),
   mathGrader: digest(await readFile('scripts/grade_math.py', 'utf8')),
   dependencies: digest(await readFile('package-lock.json', 'utf8')), benchmarkPython: python,

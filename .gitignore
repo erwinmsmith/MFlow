@@ -3,7 +3,7 @@ dist/
 .env
 runs/
 data/prepared/
-data/benchmarks/
+data/benchmarks
 .benchmark-venv/
 .benchmark-sandbox-*/
 *.log

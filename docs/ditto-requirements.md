@@ -1,5 +1,11 @@
 # Ditto 通用能力需求与发布后验收
 
+2026-09-30 共享 benchmark 接入复核：数据目录、固定划分、外部官方评分器和任务专用提示词
+属于应用层。本轮六个文本 benchmark 没有发现新的通用包缺口；评分容器继续由公开 Sandbox
+执行。后续 benchmark 工具通过公开 RegisteredTool / Interaction 注册。标准协议逐任务重置、
+关闭 prefix/cache 时不要求任意外部资源事务；DITTO-002 仍是分支回滚/提交时的要求，不能作为
+所有普通外部工具调用的前置阻塞。GAIA/BFCL/τ³ 交互 adapter 本轮尚未实现。
+
 更新日期：2026-09-26。原审计版本 `0.1.0`；当前安装 **`@codesoul-co/ditto@0.1.1`**。
 
 - npm tarball：`https://registry.npmjs.org/@codesoul-co/ditto/-/ditto-0.1.1.tgz`

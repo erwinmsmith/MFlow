@@ -59,20 +59,42 @@ npm run build
 npm run mflow -- prepare --input data/example.jsonl --out data/prepared --seed 42
 ```
 
-默认按 group 数量划为约 60% search、20% confirmation、20% test，实际样本量记录在 manifest。示例仅有 12 道手工算术题，用于格式检查，不是科研 benchmark。该 `prepare` 命令仅用于自定义数据。下面五个 benchmark 固定使用 AFlow 发布的划分，不经过此随机划分流程。
+默认按 group 数量划为约 60% search、20% confirmation、20% test，实际样本量记录在 manifest。示例仅有 12 道手工算术题，用于格式检查，不是科研 benchmark。该 `prepare` 命令仅用于自定义数据。下面五个 benchmark 固定使用 AFlow 发布的划分（HumanEval+ 继承 HumanEval 的 ID 归属），不经过此随机划分流程。
 
-### 公开 benchmark
+### 本地统一 benchmark 管理
 
-`benchmarks` 命令直接导入 **AFlow 发布的数据包**，保留 DROP、HumanEval、MBPP、GSM8K、MATH 的题目、顺序和 `validate/test` 归属。HotpotQA 不生成、不参与实验；上游压缩包内附带的 HotpotQA 文件不解压。转换仅用 Python 标准库，数学评分另需 `math-verify`：
+九个 benchmark 的已有资产集中在独立目录 `../Benchmarks`，通过 `BENCHMARK_HOME` 配置。
+管理器代码见 [benchmark-hub](benchmark-hub/README.md)，协议、路径、版本与接入状态见
+[共享 benchmark 使用说明](docs/shared-benchmarks.md)。原数据位置保留链接，旧实验文件不改写。
+
+```sh
+npm run mflow -- benchmarks list
+npm run mflow -- benchmarks --verify
+npm run mflow -- benchmarks path --name HumanEval+ --split test
+```
+
+本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH 和 HumanEval+；GAIA、BFCL、τ³
+先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
+EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
+六个 benchmark 的默认搜索分别选择数学、阅读理解或 Python 代码提示词和输出契约；
+DROP 按平均 F1 优化。新执行标识 v3.4.0，旧运行需使用其保存的 runtime 与原评分环境。
+
+配置 `MFLOW_BENCH_PYTHON=../Benchmarks/environments/text/bin/python`；HumanEval+ 另需
+`MFLOW_EVALPLUS_IMAGE=mflow-evalplus:0.1.10`，镜像准备见共享说明。外部工具统一通过
+Ditto 发布包的 RegisteredTool / Interaction 注册。
+
+### 五个 AFlow benchmark 的原导入器
+
+`benchmarks --out <目录>` 保留原导入入口，直接导入 **AFlow 发布的数据包**，保留 DROP、HumanEval、MBPP、GSM8K、MATH 的题目、顺序和 `validate/test` 归属。HotpotQA 不生成、不参与实验；上游压缩包内附带的 HotpotQA 文件不解压。转换仅用 Python 标准库，数学评分另需 `math-verify`：
 
 ```sh
 python3.12 -m venv .benchmark-venv
 .benchmark-venv/bin/python -m pip install -r requirements-benchmarks.txt
-MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- benchmarks --name all
+MFLOW_BENCH_PYTHON=.benchmark-venv/bin/python npm run mflow -- benchmarks --name all --out data/benchmarks
 npm run mflow -- benchmarks --name all --verify
 ```
 
-也可把 `all` 改为单个数据集名称。划分固定，不支持 `--search-size`、`--confirmation-size` 或 `--seed`；已有目标目录时拒绝覆盖。`data/aflow.lock.json` 固定上游 commit、压缩包及 10 个源文件/转换文件的 SHA-256；各数据集的 manifest 记录来源和数量。运行时拒绝被裁剪或修改的 AFlow 数据文件。新数据包与转换后的五个数据集共约 **6 MiB**，不含 Python 环境和旧数据备份。
+也可把 `all` 改为单个数据集名称。划分固定，不支持 `--search-size`、`--confirmation-size` 或 `--seed`；原导入器在已有目标目录时拒绝覆盖；共享管理器默认列目录并可离线验证。`data/aflow.lock.json` 固定上游 commit、压缩包及 10 个源文件/转换文件的 SHA-256；各数据集的 manifest 记录来源和数量。运行时拒绝被裁剪或修改的 AFlow 数据文件。新数据包与转换后的五个数据集共约 **6 MiB**，不含 Python 环境和旧数据备份。
 
 | 数据集 | 搜索：AFlow validate → search.jsonl | 最终评测：AFlow test → test.jsonl |
 | --- | ---: | ---: |

@@ -16,7 +16,7 @@
 
 这些是发布包的实际数量，不能用原始数据集的官方 train/test 数量或理想的 20%/80% 四舍五入重新生成。特别是 MBPP 的 427 题和 MATH 的 605 题子集必须原样保留。MFlow 不重排、不抽样、不去重、不补齐。
 
-- **搜索**：使用完整 `search.jsonl`，即 AFlow validate。初始策略完整评估；候选按 MFlow 的渐进评估及可复用轨迹规则运行，只有覆盖完整搜索集合的结果才能晋升。搜索算法与 AFlow 不同，数据池保持相同。
+- **搜索**：使用完整 `search.jsonl`，即 AFlow validate。当前默认调用固定官方 AFlow 控制器，每个候选每次重复完整评估，不复用前缀、不渐进淘汰；组织策略表示和 Ditto 执行由 MFlow 提供。旧渐进评估仅保留在显式 legacy-search。
 - **确认/选择**：AFlow 没有独立 confirmation。本协议不生成该文件，也禁止给 AFlow 搜索额外传 `--confirmation`。候选选择始终依据 validate。
 - **最终 inference/evaluation**：先冻结 `best.json`，再对整个 `test.jsonl` 使用 `evaluate`，每题重置组织状态，只把 `id/prompt` 发给 agent；答案与测试断言仅供评分器读取。测试分数不反馈搜索。
 - **单题推理**：`infer --question` 接收新问题，不读取 benchmark 答案。
@@ -57,15 +57,18 @@
 本次对齐保证题目、划分、输入字段与评测标签一致，不等于完全复刻 AFlow 的执行与评分环境：
 
 - GSM8K 按 AFlow 取输出最后一个数字，使用数值容差。
-- DROP 记录 AFlow 的最大 token F1（预测和参考均按 `|` 分割取最大值）。MFlow 三分类后验仍需要二元成功，`score=1` 仅当 F1=1；因此 MFlow 的二元搜索 utility 不能与 AFlow F1 搜索 utility 混称一致。最终结果同时报告 `accuracy` 和 `meanF1`。
+- DROP 记录 AFlow 的最大 token F1（预测和参考均按 `|` 分割取最大值）。当前默认搜索按平均 F1 选择；逐题二元 `score=1` 仅当 F1=1。旧 legacy-search 仍按二元 utility。最终结果同时报告 `accuracy` 和 `meanF1`。
 - HumanEval/MBPP 使用同一源文件的测试函数；MFlow 经 Ditto Sandbox 在隔离 Docker 容器中执行，代码处理和超时与 AFlow 本地线程评分器不同。
 - MATH 使用 `math-verify`；AFlow 使用自己的数学等价判断实现。因此数值结果不应宣称与 AFlow 评分器完全等价。
 
 ## 准备、验证和运行
 
+本机数据已集中到独立共享目录，原路径保持为链接。默认 `benchmarks` 列出共享目录，
+`--verify` 校验资产；下方 `--out` 是仍可使用的原五个数据集导入入口。见 [共享说明](shared-benchmarks.md)。
+
 ```sh
 npm run build
-npm run mflow -- benchmarks --name all
+npm run mflow -- benchmarks --name all --out data/benchmarks
 npm run mflow -- benchmarks --name all --verify
 npm run mflow -- search --search data/benchmarks/gsm8k/search.jsonl \
   --config configs/aflow-search.json --out runs/gsm8k-search

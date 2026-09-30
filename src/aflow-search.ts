@@ -13,7 +13,7 @@ import { OrganizationRuntime } from "./runtime.js";
 import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy } from "./types.js";
 import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
-import { checkScoring, grade, GradingFailure } from "./grading.js";
+import { checkScoring, grade, gradingIdentity, GradingFailure } from "./grading.js";
 import { append, save, digest, mean } from "./util.js";
 import { PolicyContractError } from "./strategy-program.js";
 import { organizationEvidence, summarizeOrganizations } from "./organization.js";
@@ -22,7 +22,7 @@ import { ProviderFailure } from "./provider-progress.js";
 import { checkpointExecution } from "./evaluation.js";
 import type { Bundle } from "./search.js";
 
-import { aflowInspiredComposition, textOrganization, textPrompts } from './aflow-seed.js';
+import { benchmarkSeed, textOrganization, textPrompts } from './aflow-seed.js';
 
 class GenerationExhausted extends Error {}
 
@@ -74,7 +74,7 @@ Agent roles are open-ended: use alternative mathematical methods, decomposition,
 Public bindings: graph(id).node(id, nodeType, dependencyIds, (input, outputs) => nodeInput); graphStep(graph, input, {concurrency?}); loop({id, plan: function*(ctx){...}}). Dependencies must refer to already added nodes. Independent nodes can run concurrently under Ditto. Loop generators may inspect every completed graph, spawn/reconfigure profiles, build new graphs and route outputs before yielding the next graph. This supports dynamic topology, internal agent loops and node-level cross-agent weaving. No fixed population, derivation depth, sampling count or experiment token budget.
 ctx.task is {id,prompt}, without reference answers. ctx.agents returns [{profile,status,depth}] where status is exactly ACTIVE or DORMANT. ctx.profile(id) returns a profile. ctx.spawn(completeProfile,parentId='root') adds a task-local profile and returns it; this does not call a model. A factory can first yield a Ditto inference graph to generate a profile. ctx.reconfigure(id,completeProfile) changes future capabilities while preserving identity. ctx.dormant(id) releases activity. Executing a graph node activates its owning agent. Each task starts with fresh profiles; no episode memory enters the next task.
 For REFLECT/DELIBERATE nodes with native output schemas, pass task/profile/evidence as data messages and let Ditto supply the node's schema; do not combine conflicting AgentOutput instructions with native reflection/deliberation contracts.
-ctx.messages(id,evidence=[],prompt='agent') builds JSON-output messages from the profile, original task and explicitly routed evidence. prompt selects agent/factory/review/integrate/retrieve. ctx.textMessages(id,evidence='',prompt='agent') builds full-text messages; ctx.request(id,messages,useTools=true,format='json'|'text') serializes structured tool-message content as JSON text and creates a SAMPLE input using the experiment model, generation settings and allowed action descriptors. ctx.formatMessages(content) requests syntax-only JSON repair. ctx.unwrap(nodeResult) checks success and returns output. ctx.decode(content) parses the fixed AgentOutput schema; ctx.publish(id,output) records and returns it. ctx.publishText(id,text) records the full proof as a solution artifact and extracts its last balanced boxed answer; ctx.answerKey(text) compares boxed strings for routing only, not grading. ctx.failedAgent(id,error) records an unresolved execution error with no invented answer. Failed, truncated or repeating inference results have status:'error' and an error code; inspect them to recover locally or delegate, never treat partial text as a completed solution. Provider/auth/network failures still stop the experiment. ctx.outputs contains published outputs; ctx.graphs contains completed graph topology/results. These helpers do not execute models, tools or choose a workflow. Explicitly pass prior outputs as evidence to downstream nodes/agents. A dynamic plan may use its own local state, functions, conditions and generators.
+ctx.messages(id,evidence=[],prompt='agent') builds JSON-output messages from the profile, original task and explicitly routed evidence. prompt selects agent/factory/review/integrate/retrieve. ctx.textMessages(id,evidence='',prompt='agent') builds full-text messages; ctx.request(id,messages,useTools=true,format='json'|'text') serializes structured tool-message content as JSON text and creates a SAMPLE input using the experiment model, generation settings and allowed action descriptors. ctx.formatMessages(content) requests syntax-only JSON repair. ctx.unwrap(nodeResult) checks success and returns output. ctx.decode(content) parses the fixed AgentOutput schema; ctx.publish(id,output) records and returns it. ctx.publishText(id,text,format='boxed'|'raw') records the full output as a solution artifact; boxed mode extracts the last balanced boxed answer, while raw mode preserves complete code or QA text; ctx.answerKey(text) compares boxed strings for routing only, not grading. ctx.failedAgent(id,error) records an unresolved execution error with no invented answer. Failed, truncated or repeating inference results have status:'error' and an error code; inspect them to recover locally or delegate, never treat partial text as a completed solution. Provider/auth/network failures still stop the experiment. ctx.outputs contains published outputs; ctx.graphs contains completed graph topology/results. These helpers do not execute models, tools or choose a workflow. Explicitly pass prior outputs as evidence to downstream nodes/agents. A dynamic plan may use its own local state, functions, conditions and generators.
 Configured native nodes (declare only needed capabilities on each profile):
 CONTEXT.LOAD: {sources: Message[]} -> {items}; CONTEXT.SELECT: {context,purpose:'infer'|'memory',query?,limit?,maxTokens?,strategy?:{kind:'default'}} -> {context,selectedItemIds}; CONTEXT.UPDATE: {context,add?:ContextItem[],removeIds?:string[]} -> Context; CONTEXT.COMPRESS: {context,maxTokens?,maxItems?} -> Context.
 INFER.REASONING.SAMPLE: {messages,model,generation?,actions?,metadata?} -> NodeResult {status,output:{message,actionRequests?,finishReason,usage}}.
@@ -118,6 +118,7 @@ export async function runAFlowSearch(options: {
   const config = aflowConfigSchema.parse(options.config ?? {}), out = resolve(options.out);
   const tasks = await readTasks(options.search);
   assertDatasetRole(tasks, 'search');
+  const seed = benchmarkSeed(tasks);
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
   const image = await pythonImage();
@@ -140,7 +141,8 @@ export async function runAFlowSearch(options: {
   const code: Record<string, string> = {};
   for (const name of await readdir(codeDir))
     if (name.endsWith('.js')) code[name] = digest(await readFile(join(codeDir, name), 'utf8'));
-  const manifest = { protocol: 'official-aflow-ditto-library-v2', transport: 'ditto-public-stream-v1', seedProvenance: 'AFlow MATH round-12 solve/revise prompts, with adaptive independent reasoning; validation-informed transfer, no test data', config, model: options.model,
+  const manifest = { protocol: 'official-aflow-ditto-library-v2', transport: 'ditto-public-stream-v1', seedProvenance: seed.provenance, config, model: options.model,
+    ...await gradingIdentity(tasks),
     dataHash: digest(tasks), source: lock, code, pythonImage: image,
     controller: digest(await readFile(controller, 'utf8')),
     pythonEnvironment: await pythonEnvironment(options.python),
@@ -169,7 +171,7 @@ export async function runAFlowSearch(options: {
     }
     return parsed;
   };
-  type Row = { taskId: string; score: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; error?: string; organization?: ReturnType<typeof organizationEvidence> };
+  type Row = { taskId: string; score: number; f1?: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; error?: string; organization?: ReturnType<typeof organizationEvidence> };
   async function evaluation(number: number, repeat: number, strategy: Strategy) {
     const dir = join(out, `round-${number}`, `pass-${repeat}`);
     await mkdir(dir, { recursive: true });
@@ -229,7 +231,7 @@ export async function runAFlowSearch(options: {
     });
     const organizations = rows.map(r => ({ taskId: r.taskId, score: r.score, organization: r.organization }));
     await save(join(dir, 'organizations.json'), organizations);
-    return { organizationSummary: summarizeOrganizations(organizations), score: mean(rows.map((r) => r.score)), meanTokens: mean(rows.map((r) => r.tokens)),
+    return { organizationSummary: summarizeOrganizations(organizations), score: mean(rows.map((r) => r.f1 ?? r.score)), meanTokens: mean(rows.map((r) => r.tokens)),
       tokens: rows.reduce((n, r) => n + r.tokens, 0),
       failures: rows.flatMap((r, i) => r.score ? [] : [{ taskId: r.taskId, question: tasks[i].prompt,
         expected_output: tasks[i].answer, prediction: r.answer, solutionEvidence: r.solutionEvidence, error: r.error, organization: r.organization }]) };
@@ -240,7 +242,9 @@ export async function runAFlowSearch(options: {
       for await (const chunk of req) body += chunk;
       const input = JSON.parse(body || '{}');
       let result: unknown;
-      if (req.url === '/bootstrap') result = { config, composition: aflowInspiredComposition, prompts: programPrompts, organization: initialOrganization, interface: policyInterface };
+      if (req.url === '/bootstrap') result = { config, dataset: seed.dataset, questionType: seed.kind,
+        composition: seed.composition, prompts: seed.prompts, organization: seed.organization,
+        interface: policyInterface + `\nCURRENT TASK FAMILY: ${seed.kind}. Follow the dataset-specific output contract in the inherited prompts. Do not impose mathematical boxed answers on code or reading-comprehension tasks.` };
       else if (req.url === '/propose') {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
@@ -278,7 +282,8 @@ export async function runAFlowSearch(options: {
         await save(join(out, 'agent-library.json'), { templates: strategy.organization!.agentTemplates, initialBindings: strategy.organization!.initialBindings, selectedRound: input.round, strategyHash: digest(strategy), frozenBeforeTest: true });
         await save(join(out, 'organization.json'), { organization: strategy.organization, composition: strategy.composition,
           prompts: strategy.prompts, note: 'Reusable MAS specification. Task-specific graphs are in round/pass organizations.json and execution logs; no episode memory is imported into inference.' });
-        await save(join(out, 'summary.json'), { selectedRound: input.round, validationAccuracy: input.score,
+        await save(join(out, 'summary.json'), { selectedRound: input.round,
+          ...(tasks[0].metric === 'drop' ? { validationMeanF1: input.score } : { validationAccuracy: input.score }),
           validationRounds: config.validationRounds, protocol: manifest.protocol, stopReason: input.stopReason, frozenBeforeTest: true });
         result = { frozen: true };
       } else throw new Error('Unknown route');

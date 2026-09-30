@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { availableParallelism } from 'node:os';
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, copyFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Sandbox, createLocalSandboxExecutor } from "@codesoul-co/ditto";
 import { score } from "./data.js";
 import type { Task } from "./types.js";
+import { evalplusEnvironment } from './benchmark-hub.js';
 
 const exec = promisify(execFile);
 const docker = process.env.MFLOW_DOCKER ?? (process.platform === "darwin" ? "/opt/homebrew/bin/docker" : "docker");
@@ -118,13 +119,13 @@ function cleanCode(answer: string, completion = false): string {
   return fence ? fence[1] : completion ? answer.trimEnd() : trimmed;
 }
 
-function sandbox(): Sandbox {
+function sandbox(timeoutMs = 20_000): Sandbox {
   const env: Record<string, string> = {};
   if (process.env.DOCKER_HOST) env.DOCKER_HOST = process.env.DOCKER_HOST;
   else if (process.platform === "darwin" && process.env.USER)
     env.DOCKER_HOST = `unix:///Users/${process.env.USER}/.docker/run/docker.sock`;
   return new Sandbox(process.cwd(), { execute: true }, createLocalSandboxExecutor({
-    commands: [docker], timeoutMs: 20_000, maxOutputBytes: 65_536, env,
+    commands: [docker], timeoutMs, maxOutputBytes: 65_536, env,
   }));
 }
 
@@ -142,6 +143,31 @@ export async function checkScoring(tasks: Task[]): Promise<void> {
     if (result.exitCode !== 0)
       throw new Error(`Python scoring needs a running Docker daemon and local ${image} image`);
   }
+  if (metrics.has('evalplus')) await evalplusRuntime();
+}
+
+let plusRuntime: Promise<{ raw: string; image: string }> | undefined;
+function evalplusRuntime() {
+  return plusRuntime ??= (async () => {
+    const env = await evalplusEnvironment();
+    const result = await sandbox().run({ command: docker, args: ['image', 'inspect', env.image, '--format', '{{.Id}}'] });
+    const image = result.stdout.trim();
+    if (result.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(image))
+      throw new Error('HumanEval+ scoring needs the verified EvalPlus Docker image; see docs/shared-benchmarks.md');
+    // Probe imports before any paid requests; the build itself does not prove a usable checker.
+    const probe = await sandbox().run({ command: docker, args: ['run', '--rm', '--network', 'none', image,
+      'python', '-c', 'from evalplus.eval import untrusted_check; from evalplus.gen.util import trusted_exec'] });
+    if (probe.exitCode !== 0) throw new Error(`EvalPlus checker unavailable: ${probe.stderr.slice(-1000)}`);
+    return { raw: env.raw, image };
+  })();
+}
+
+/** Additional identity only for the new protocol; historical MATH manifests stay compatible. */
+export async function gradingIdentity(tasks: Task[]) {
+  if (!tasks.some(t => t.metric === 'evalplus')) return {};
+  const env = await evalplusRuntime();
+  return { evalplusImage: env.image, evalplusSource: createHash('sha256').update(await readFile(env.raw)).digest('hex'),
+    evalplusGrader: createHash('sha256').update(await readFile('scripts/grade_evalplus.py')).digest('hex') };
 }
 
 async function gradePython(task: Task, answer: string): Promise<0 | 1> {
@@ -176,6 +202,33 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
   }
 }
 
+async function gradeEvalplus(task: Task, answer: string): Promise<0 | 1> {
+  const env = await evalplusRuntime(), ref = task.reference!;
+  let code = cleanCode(answer, true);
+  if (!code.startsWith(ref.prefix!) &&
+      (/^[ \t]/.test(code) || !/^(?:def |from |import |class )/.test(code.trimStart()))) code = ref.prefix + code;
+  const dir = await mkdtemp(join(process.cwd(), '.benchmark-sandbox-'));
+  try {
+    await writeFile(join(dir, 'candidate.py'), code, { mode: 0o444 });
+    await copyFile('scripts/grade_evalplus.py', join(dir, 'grade.py'));
+    await copyFile(env.raw, join(dir, 'data.jsonl.gz'));
+    const result = await sandbox(180_000).run({ command: docker, args: [
+      'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+      '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '1g',
+      '--cpus', '1', '--user', '65534:65534', '--mount', `type=bind,source=${dir},target=/work,readonly`,
+      '--workdir', '/tmp', '--tmpfs', '/tmp:rw,nosuid,size=64m', env.image,
+      'timeout', '-s', 'KILL', '175', 'python', '-B', '/work/grade.py', ref.evalplusTaskId!,
+      '/work/data.jsonl.gz', '/work/candidate.py',
+    ] });
+    if (result.exitCode !== 0) throw new GradingFailure({ code: 'EVALPLUS_INFRASTRUCTURE', stderr: result.stderr.slice(-1000) });
+    let value;
+    try { value = JSON.parse(result.stdout.trim()); } catch { throw new GradingFailure({ code: 'EVALPLUS_INVALID_RESULT' }); }
+    if (![0, 1].includes(value.score) || typeof value.base !== 'boolean' || typeof value.plus !== 'boolean' ||
+        value.score !== Number(value.base && value.plus)) throw new GradingFailure({ code: 'EVALPLUS_INVALID_RESULT' });
+    return value.score;
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
 export async function grade(task: Task, answer: string): Promise<{ score: 0 | 1; f1?: number }> {
   if (task.aflowSplit && task.metric === "drop") return aflowDropScore(task.answer, answer);
   if (task.aflowSplit && task.benchmark === "gsm8k") {
@@ -185,5 +238,6 @@ export async function grade(task: Task, answer: string): Promise<{ score: 0 | 1;
   if (task.metric === "exact" || task.metric === "numeric") return { score: score(task, answer) };
   if (task.metric === "drop") return dropScore(answer, task.reference!.answers!);
   if (task.metric === "python") return { score: await gradePython(task, answer) };
+  if (task.metric === 'evalplus') return { score: await gradeEvalplus(task, answer) };
   return { score: await gradeMath(task, answer) };
 }

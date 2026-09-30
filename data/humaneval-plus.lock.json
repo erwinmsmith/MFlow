@@ -1,0 +1,16 @@
+{
+  "protocol": "humaneval-plus-aflow-v1",
+  "dataVersion": "v0.1.10",
+  "evaluatorRevision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+  "sourceSha256": "272720b90ac375502c8ed23cd791c2a93dfb22a911641a494da74a426c09f101",
+  "splits": {
+    "search": {
+      "count": 33,
+      "sha256": "70603c8a55169ec28e9be462865583818c001542313609b89741301e7608cf50"
+    },
+    "test": {
+      "count": 131,
+      "sha256": "fa476476e7057a90e1ea63622a472e9b1904daf27b3879494aef8122791780d7"
+    }
+  }
+}

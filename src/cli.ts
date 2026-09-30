@@ -15,7 +15,8 @@ import {
 import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool } from "./ditto.js";
 import { createPythonTool } from './python-tool.js';
 import { prepare, readTasks, assertTestDisjoint } from "./data.js";
-import { grade, checkScoring } from "./grading.js";
+import { grade, checkScoring, gradingIdentity } from "./grading.js";
+import { benchmarkHome, benchmarkPath } from './benchmark-hub.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -48,6 +49,8 @@ const { positionals, values } = parseArgs({
     state: { type: "string" },
     "state-out": { type: "string" },
     name: { type: "string" },
+    benchmark: { type: 'string' },
+    split: { type: 'string' },
     verify: { type: "boolean" },
     resume: { type: "boolean" },
     source: { type: "string" },
@@ -76,13 +79,22 @@ async function outputDirectory(path: string) {
 }
 async function run() {
   const command = positionals[0];
+  const datasetPath = async (role: 'search' | 'test') => {
+    if (values[role]) return values[role]!;
+    if (values.benchmark) return benchmarkPath(values.benchmark, role);
+    return required(role);
+  };
   if (values.resume && ((command !== "evaluate" && command !== "search") || (values.protocol && values.protocol !== "standard")))
     throw new Error("--resume supports frozen standard evaluation only");
   if (command === "benchmarks") {
     const exec = promisify(execFile);
     if (values.seed) throw new Error("AFlow benchmark splits are fixed; --seed cannot resplit them");
-    const args = ["scripts/benchmarks.py", "--name", values.name ?? "all",
-      "--out", values.out ?? "data/benchmarks", ...(values.verify ? ["--verify"] : [])];
+    const action = positionals[1] ?? (values.verify ? 'verify' : 'list');
+    const args = values.out ? ["scripts/benchmarks.py", "--name", values.name ?? "all",
+      "--out", values.out, ...(values.verify ? ["--verify"] : [])] :
+      ['benchmark-hub/bench.py', '--root', benchmarkHome(), action,
+        ...(action === 'verify' ? ['--name', values.name ?? 'all'] : []),
+        ...(action === 'path' ? [required('name'), ...(values.split ? ['--split', values.split] : [])] : [])];
     const { stdout } = await exec(process.env.MFLOW_BENCH_PYTHON ?? "python3", args, { maxBuffer: 2_000_000 });
     process.stdout.write(stdout);
     return;
@@ -152,7 +164,7 @@ async function run() {
       throw new Error('Official AFlow search uses the full validation split and fresh standard episodes');
     const { runAFlowSearch, aflowConfigSchema } = await import('./aflow-search.js');
     const config = aflowConfigSchema.parse(values.config ? await json(values.config) : {});
-    await runAFlowSearch({ out: required('out'), search: required('search'), config,
+    await runAFlowSearch({ out: required('out'), search: await datasetPath('search'), config,
       model: model(config.seed), resume: !!values.resume,
       source: values.source ?? '../MFlow-baselines/sources/AFlow',
       python: values.python ?? '../MFlow-baselines/.venv-aflow/bin/python' });
@@ -198,7 +210,7 @@ async function run() {
       config.episode,
       pool,
     );
-    const tasks = await readTasks(required("search")),
+    const tasks = await readTasks(await datasetPath('search')),
       confirmation = values.confirmation
         ? await readTasks(values.confirmation)
         : [];
@@ -268,7 +280,7 @@ async function run() {
       );
       return;
     }
-    const tasks = await readTasks(required("test"));
+    const tasks = await readTasks(await datasetPath('test'));
     const knownSourceOverlaps = assertTestDisjoint(tasks, bundle);
     if (knownSourceOverlaps.length)
       console.log(`Retaining ${knownSourceOverlaps.length} documented AFlow DROP prompt overlaps for exact split replication.`);
@@ -276,6 +288,7 @@ async function run() {
     const out = required("out");
     if (protocol === "standard") {
       const manifest = {
+        ...await gradingIdentity(tasks),
         bundleHash: digest(bundle), testDataHash: digest(tasks), protocol,
         gradingCode: digest(await readFile(new URL("./grading.js", import.meta.url), "utf8")),
         mathGrader: digest(await readFile("scripts/grade_math.py", "utf8")),

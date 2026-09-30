@@ -2,10 +2,14 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import aflow from "../data/aflow.lock.json" with { type: "json" };
+import evalplus from '../data/humaneval-plus.lock.json' with { type: 'json' };
 import { taskSchema, type TaskInput, type Task } from "./types.js";
 import { Random, digest, save } from "./util.js";
+import { benchmarkPath } from './benchmark-hub.js';
 
 export async function readTasks(path: string): Promise<Task[]> {
+  const shared = /^benchmark:([^/]+)\/(search|test)$/.exec(path);
+  if (shared) path = await benchmarkPath(shared[1], shared[2] as 'search' | 'test');
   const text = await readFile(path, "utf8");
   const tasks = text
     .split(/\r?\n/)
@@ -25,6 +29,13 @@ export async function readTasks(path: string): Promise<Task[]> {
     if (!pinned || createHash("sha256").update(text).digest("hex") !== pinned.convertedSha256)
       throw new Error("AFlow data must match the complete pinned split; run benchmarks --verify");
   }
+  if (tasks.some(t => t.dataset)) {
+    const first = tasks[0];
+    const split = first.dataset?.split;
+    if (!split || tasks.some(t => t.dataset?.split !== split || t.dataset.protocol !== evalplus.protocol) ||
+        createHash('sha256').update(text).digest('hex') !== evalplus.splits[split].sha256)
+      throw new Error('HumanEval+ data must match the complete locked split');
+  }
   assertDisjoint(tasks);
   return tasks;
 }
@@ -32,10 +43,16 @@ export const promptKey = (task: TaskInput) =>
   task.prompt.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 
 export function assertDatasetRole(tasks: Task[], role: "search" | "confirmation" | "test" | "prepare") {
-  for (const task of tasks)
+  for (const task of tasks) {
     if (task.aflowSplit && task.aflowSplit !== ({ search: "validate", test: "test" } as Record<string, string>)[role])
       throw new Error(`AFlow ${task.aflowSplit} cannot be used for ${role}: ${task.id}`);
+    if (task.dataset && task.dataset.split !== role)
+      throw new Error(`${task.dataset.protocol} ${task.dataset.split} cannot be used for ${role}: ${task.id}`);
+  }
 }
+
+/** HumanEval and its expanded tests are the same task family across protocols. */
+const familyId = (id: string) => id.replace(/^humaneval_plus:/, 'humaneval:');
 
 /** Preserve only the five prompt collisions already present in AFlow's pinned DROP split. */
 export function assertTestDisjoint(tasks: Task[], selection: {
@@ -44,7 +61,9 @@ export function assertTestDisjoint(tasks: Task[], selection: {
   assertDatasetRole(tasks, "test");
   const knownOverlaps: typeof aflow.knownPromptOverlaps = [];
   for (const task of tasks) {
-    if (selection.selectionTaskIds.includes(task.id) || (task.group && selection.selectionGroups.includes(task.group)))
+    const group = task.group;
+    if (selection.selectionTaskIds.some(id => familyId(id) === familyId(task.id)) ||
+        (group && selection.selectionGroups.some(id => familyId(id) === familyId(group))))
       throw new Error(`Test overlaps strategy selection data: ${task.id}`);
     const hash = digest(promptKey(task));
     selection.selectionPromptHashes.forEach((promptHash, i) => {
@@ -63,11 +82,11 @@ export function assertDisjoint(...splits: Task[][]) {
     groups = new Map<string, number>();
   splits.forEach((tasks, index) =>
     tasks.forEach((t) => {
-      if (ids.has(t.id) || (prompts.has(promptKey(t)) && prompts.get(promptKey(t)) !== index))
+      if (ids.has(familyId(t.id)) || (prompts.has(promptKey(t)) && prompts.get(promptKey(t)) !== index))
         throw new Error(`Duplicate task ID or normalized prompt: ${t.id}`);
       if (t.group && groups.has(t.group) && groups.get(t.group) !== index)
         throw new Error(`Group crosses splits: ${t.group}`);
-      ids.add(t.id);
+      ids.add(familyId(t.id));
       prompts.set(promptKey(t), index);
       if (t.group) groups.set(t.group, index);
     }),
