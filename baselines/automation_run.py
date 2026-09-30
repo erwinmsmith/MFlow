@@ -3,6 +3,7 @@ import argparse
 import concurrent.futures as futures
 import contextlib
 import json
+import os
 import time
 from bench_common import RUNS, SCOPE, tasks, freeze_run, benchmark_rpc, usage, save_row, TransportFailure
 
@@ -20,7 +21,8 @@ def initialize(name):
         method = AutoAgents()
 
 def episode(name, phase, task):
-    SCOPE.set((name,phase,task['id']))
+    execution_id=os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE','')+task['id']
+    SCOPE.set((name,phase,execution_id))
     started=time.monotonic();out=RUNS/name/phase;status='completed';answer=''
     restored=benchmark_rpc('start',task)['checkpoint']
     if not restored:
@@ -32,7 +34,7 @@ def episode(name, phase, task):
             status='execution_error';save_row(out/'errors.jsonl',{'taskId':task['id'],'error':repr(error)})
     grade=benchmark_rpc('finish',task)
     row={'taskId':task['id'],**grade,'answer':answer,'status':status,'checkpointRecovered':restored,
-         'tokens':usage(name,phase,task['id']),'seconds':time.monotonic()-started}
+         'tokens':usage(name,phase,execution_id),'seconds':time.monotonic()-started}
     save_row(out/'results.jsonl',row)
     return row
 

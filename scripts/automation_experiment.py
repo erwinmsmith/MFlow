@@ -29,10 +29,13 @@ def status(out):
     jobs=read(out/'jobs.json',{})
     planned=119 if read(out/'experiment-manifest.json',{}).get('benchmark')=='math' else 200
     report={'run':str(out),'jobs':jobs.get('jobs',{}),'methods':{}}
+    overrides=read(out/'method-outputs.json',{})
     recovery=read(out/'recovery.json')
     if recovery:report['recovery']=recovery
     for method in ('MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'):
-        folder=out/method;entry={}
+        override=overrides.get(method,{})
+        folder=Path(override['output']) if override else out/method;entry={}
+        if override:entry['replacement']=override
         controller=read(folder/('search/controller.json' if method=='MFlow' else 'controller.json'),{})
         entry.update({k:controller[k] for k in ('round','phase','stopReason','seedRound') if k in controller})
         frozen=read(folder/('search/summary.json' if method=='MFlow' else 'frozen.json'),{})
@@ -63,6 +66,14 @@ def status(out):
             progress=read(folder/phase/'status.json')
             if progress:entry[phase+'Status']=progress
         report['methods'][method]=entry
+        if override:
+            entry['originalJob']=report['jobs'].get(method,{})
+            progress=entry.get('testStatus',entry.get('pilotStatus',{}))
+            report['jobs'][method]={'status':progress.get('status','queued'),'service':override['service'],'output':str(folder)}
+            try:
+                state=subprocess.run(['systemctl','--user','show',override['service'],'--property=ActiveState','--value'],capture_output=True,text=True,timeout=3,check=True).stdout.strip()
+                if state:report['jobs'][method].update(serviceState=state,status='running' if state=='active' else 'failed' if state=='failed' else report['jobs'][method]['status'])
+            except (OSError,subprocess.SubprocessError):pass
     try:
         with urllib.request.urlopen(os.environ.get('MFLOW_BASELINE_ENDPOINT','http://127.0.0.1:8197')+'/status',timeout=3) as response:
             transport=json.load(response)
@@ -77,6 +88,11 @@ def status(out):
             for item in (entry,phase):
                 if row['unknownUsage']:item['unknownCalls']+=1
                 else:item['knownTokens']+=row['charged']
+            override=overrides.get(row['method'])
+            if override and row['taskId'].startswith(override['executionNamespace']):
+                selected=entry.setdefault('replacementCost',{'knownTokens':0,'unknownCalls':0})
+                if row['unknownUsage']:selected['unknownCalls']+=1
+                else:selected['knownTokens']+=row['charged']
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
 def main():

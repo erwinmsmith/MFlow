@@ -95,6 +95,8 @@ DITTO-004 尚缺的通用能力缩小为：工具参数/隐藏推理/keep-alive 
 
 补充复现：供应商返回 `tool_calls[].function.arguments = "null"`，公共 provider 抛出 `INVALID_MODEL_OUTPUT: value must be an object`。即使供应商帧里有 usage，解析失败后公共错误未携带它；应用必须记 unknown，不能以预留值冒充实耗。验收应覆盖上述错误的字段路径和已知 usage 保存。MFlow 未复制解析器或修改 node_modules。
 
+2026-09-30 实际复现：AutomationBench 开发题 `simple.gmail_invoice_email` 的 AFlow 工具调用持续约 15 分钟，公开 text_delta 只观察到 404 个字符，最终抛出工具参数 JSON 未闭合（position 786428），usage 丢失。需要公开参数增量的调用 ID、字节数/最后更新时间，允许应用检测参数生成的精确重复周期，并在解析失败/取消时保留供应商已返回的 usage。验收包含长参数正常完成、参数重复、截断 JSON 与取消；不能把无文本事件视为无进展。当前不复制解析器；模型输出错误按真实世界状态评分，HTTP/基础设施错误仍停止实验。
+
 ## DITTO-005：声明式的隔离代码工具创建与任务局部注册（待支持）
 
 核查版本：registry `@codesoul-co/ditto@0.1.1`，2026-09-29。

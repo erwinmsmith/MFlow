@@ -19,6 +19,51 @@ from repairs import parse_roles, validate_workflow, validate_role_plan, install_
 
 
 class AdapterTests(unittest.TestCase):
+    def test_bad_model_output_is_quality_failure_and_http_outage_stops(self):
+        import urllib.error
+        token=common.SCOPE.set(('AFlow','search','fixture'))
+        try:
+            for message,kind in [('[INVALID_MODEL_OUTPUT] malformed action JSON',common.ModelOutputFailure),('{"code":"INVALID_MODEL_OUTPUT","message":"duplicate action ID"}',common.ModelOutputFailure),('[DEGENERATE_OUTPUT] repeated output',common.ModelOutputFailure),('Model provider returned HTTP 402',common.TransportFailure)]:
+                error=urllib.error.HTTPError('http://fixture',502,'fixture',{},io.BytesIO(json.dumps({'error':message}).encode()))
+                with patch.object(common.urllib.request,'urlopen',side_effect=error):
+                    with self.assertRaises(kind):common.call([{'role':'user','content':'fixture'}])
+        finally:common.SCOPE.reset(token)
+
+    def test_replacement_episode_uses_fresh_scope_and_shared_ledger(self):
+        import automation_run as runner
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);out=root/'AutoAgents/pilot';out.mkdir(parents=True)
+            ledger=root/'shared-usage.jsonl'
+            ledger.write_text('\n'.join(json.dumps({'method':'AutoAgents','phase':'AutoAgents:pilot','taskId':task_id,'charged':tokens}) for task_id,tokens in [('fixture',30),('new/fixture',7)])+'\n')
+            token=common.SCOPE.set(('fixture','fixture','fixture'))
+            try:
+                with patch.dict(os.environ,{'MFLOW_BASELINE_EXECUTION_NAMESPACE':'new/','MFLOW_BASELINE_USAGE_PATH':str(ledger)}),patch.object(runner,'RUNS',root),patch.object(runner,'method',types.SimpleNamespace(solve=lambda prompt:'executed')),patch.object(common.urllib.request,'urlopen') as send:
+                    send.return_value.__enter__.side_effect=[io.StringIO('{"checkpoint":false}'),io.StringIO('{"score":1,"partialCredit":1}')]
+                    row=runner.episode('AutoAgents','pilot',{'id':'fixture','prompt':'fixture'})
+                    bodies=[json.loads(call.args[0].data) for call in send.call_args_list]
+                self.assertEqual(row['tokens'],7)
+                self.assertEqual(row['taskId'],'fixture')
+                self.assertFalse(row['checkpointRecovered'])
+                self.assertTrue(all(body['taskId']=='new/fixture' and body['benchmarkTaskId']=='fixture' for body in bodies))
+            finally:common.SCOPE.reset(token)
+
+    def test_progress_replacement_reports_live_status_and_separate_cost(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
+        runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);replacement=root/'replacement/AutoAgents';(replacement/'pilot').mkdir(parents=True)
+            (root/'jobs.json').write_text(json.dumps({'jobs':{'AutoAgents':{'status':'failed'}}}))
+            (root/'method-outputs.json').write_text(json.dumps({'AutoAgents':{'output':str(replacement),'service':'replacement.service','executionNamespace':'new/'}}))
+            (replacement/'pilot/status.json').write_text('{"status":"running","completed":1}')
+            (root/'usage.jsonl').write_text('\n'.join(json.dumps({'method':'AutoAgents','phase':'AutoAgents:pilot','taskId':task_id,'charged':tokens,'unknownUsage':False}) for task_id,tokens in [('fixture',30),('new/fixture',7)])+'\n')
+            with patch.object(runner.urllib.request,'urlopen',side_effect=OSError),patch.object(runner.subprocess,'run',side_effect=OSError),contextlib.redirect_stdout(io.StringIO()) as output:runner.status(root)
+            result=json.loads(output.getvalue())
+            self.assertEqual(result['jobs']['AutoAgents']['status'],'running')
+            self.assertEqual(result['methods']['AutoAgents']['originalJob']['status'],'failed')
+            self.assertEqual(result['baselineCost']['AutoAgents']['knownTokens'],37)
+            self.assertEqual(result['baselineCost']['AutoAgents']['replacementCost']['knownTokens'],7)
+
     def test_sequential_experiment_preserves_stages_and_runs_one_method_at_a_time(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
@@ -161,6 +206,17 @@ class AdapterTests(unittest.TestCase):
             out = Path(directory)
             common.freeze_run(out, 'DyLAN', 'test')
             common.freeze_run(out, 'DyLAN', 'test')
+            with patch.dict(os.environ,{'MFLOW_BASELINE_EXECUTION_NAMESPACE':'changed/'}):
+                with self.assertRaises(RuntimeError):common.freeze_run(out,'DyLAN','test')
+            server=Path(directory)/'server'
+            for name in ('baselines/bridge.mjs','configs/automationbench-baselines.json','package-lock.json','benchmark-hub/automation_bridge.py','dist/src/runtime.js'):
+                file=server/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('fixture')
+            with patch.dict(os.environ,{'MFLOW_BASELINE_TRANSPORT_ROOT':str(server)}):
+                shared=Path(directory)/'shared'
+                common.freeze_run(shared,'DyLAN','test')
+                common.freeze_run(shared,'DyLAN','test')
+                (server/'dist/src/runtime.js').write_text('changed')
+                with self.assertRaises(RuntimeError):common.freeze_run(shared,'DyLAN','test')
             path = out / 'manifest.json'
             data = json.loads(path.read_text())
             data['model'] = 'different model'

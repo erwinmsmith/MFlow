@@ -37,8 +37,10 @@ bash scripts/hb-model.sh deepseek python3 scripts/automation_experiment.py --res
 The 2026-09-30 snapshot is `/home/b/project/experiments/deepseek-automation-20260930-v2/MFlow`. Query it directly from a local terminal:
 
 ```bash
-ssh hb 'cd /home/b/project/experiments/deepseek-automation-20260930-v2/MFlow; python3 scripts/automation_experiment.py --status'
+ssh hb 'cd /home/b/project/MFlow; python3 scripts/automation_experiment.py --status --run /home/b/project/experiments/deepseek-automation-20260930-v2/MFlow/runs/automationbench-deepseek-flash-20260930-v2'
 ssh hb 'systemctl --user status mflow-deepseek-automation-20260930-v2 --no-pager'
+ssh hb 'systemctl --user status mflow-deepseek-autoagents-20260930-v3 --no-pager'
+ssh hb 'systemctl --user status mflow-deepseek-aflow-20260930-v3 --no-pager'
 ```
 
 The runner starts all five methods, then automatically advances each from search/development to the full test set. Initial concurrency is 24 MFlow episodes, 12 AFlow episodes and one worker process for each of the other methods, leaving more RAM for the retained Qwen service. Official worlds are multiplexed in one Python bridge per Node process to avoid repeating imports for every episode. LLM requests remain concurrent; benchmark API requests are short, serialized local operations.
@@ -46,6 +48,16 @@ The runner starts all five methods, then automatically advances each from search
 Outputs live in `runs/automationbench-deepseek-flash-20260930-v2/`: `jobs.json`, one log per method, `bridge.log`, `usage.jsonl`, request progress, per-task world checkpoints and results. `--status` reports phases, current round/pass, completed counts, correct counts, token accounting and transport activity. Completed rows are preserved. If only scoring fails, the saved world is regraded without new model calls. Provider/infrastructure failures stop the affected stage and remain visible; they are not recorded as ordinary wrong answers.
 
 Resume requires the same immutable snapshot and configuration. It reuses completed tasks, partial validation passes and frozen selection; it does not reinterpret partial roots as converged search. A code repair requires an explicitly recorded new snapshot/run. Scripted providers in local checks only verify contracts and isolation; they are not benchmark performance evidence.
+
+### AutoAgents capability correction
+
+The v2 development run exposed a role planner claiming API writes were unavailable. The planner now receives the actual actor capabilities: registered API discovery and read/write tools execute through Ditto, while role design and observer calls still cannot execute tools. Native role and action formats remain unchanged. This change uses only development feedback; test has not selected prompts.
+
+Only AutoAgents restarts, from `/home/b/project/experiments/deepseek-autoagents-20260930-v3/MFlow`, with all 200 development and 600 test episodes. It reuses the unchanged v2 Ditto bridge at port 8197 to avoid another resident benchmark process. `MFLOW_BASELINE_EXECUTION_NAMESPACE=autoagents-capabilities-v3/` gives it fresh worlds/checkpoints. `MFLOW_BASELINE_RUN_DIRECTORY`, `MFLOW_BASELINE_USAGE_PATH` and `MFLOW_BASELINE_TRANSPORT_ROOT` select its separate output and the actual bridge ledger/source. Each phase manifest hashes both client and server code; changing either refuses resume.
+
+The v2 output's `method-outputs.json` points the current status command to the replacement. It retains the stopped original job and all original cost, and reports replacement cost separately. AutoAgents v2 quality rows are excluded from v3 accuracy. Resume v3 by starting its own user service after fixing infrastructure; it preserves completed rows and advances development to test only on success. The shared bridge must remain active until v3 finishes; check both services before a resume.
+
+AFlow also resumes with the repaired client in this snapshot: malformed/degenerate model output is an episode execution failure, graded against the resulting world, rather than an HTTP infrastructure outage. Its unchanged workflows, prompts, native search controller and 199 completed evaluations are copied with an explicit `recovery.json` provenance receipt; the original manifest is retained separately and the new manifest hashes the actual client and unchanged shared server. The failed remaining world's state is checkpointed and graded without replaying successful writes. Future model-output failures use the same path, while provider HTTP/network errors still stop the run. Test remains untouched.
 
 ## Initial startup attempts
 

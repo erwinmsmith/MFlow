@@ -5,11 +5,12 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCES=ROOT.parent/'MFlow-baselines/sources'
 PROTOCOL_PATH=ROOT/os.environ.get('MFLOW_BASELINE_PROTOCOL','baselines/protocol.json')
 PROTOCOL=json.loads(PROTOCOL_PATH.read_text())
-RUNS=ROOT/PROTOCOL['runDirectory']
+RUNS=ROOT/os.environ.get('MFLOW_BASELINE_RUN_DIRECTORY',PROTOCOL['runDirectory'])
 SCOPE=contextvars.ContextVar('scope')
 class BudgetStop(BaseException):
     def __init__(self,reason):self.reason=reason
 class TransportFailure(RuntimeError):pass
+class ModelOutputFailure(RuntimeError):pass
 
 def endpoint():return os.environ.get('MFLOW_BASELINE_ENDPOINT',f"http://127.0.0.1:{os.environ.get('MFLOW_BASELINE_PORT','8197')}")
 
@@ -29,6 +30,7 @@ def call(messages,tools=True):
     except urllib.error.HTTPError as e:
         error=e.read().decode()
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
+        if any(f'[{code}]' in error or f'"code":"{code}"' in error for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT')):raise ModelOutputFailure(error) from None
         raise TransportFailure(error) from None
     if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']
@@ -64,9 +66,10 @@ def grade(task,answer):
     return int(p.stdout.strip()=='1')
 
 def usage(method,phase,task_id):
-    path=RUNS/'usage.jsonl'
+    path=Path(os.environ.get('MFLOW_BASELINE_USAGE_PATH',RUNS/'usage.jsonl'))
     if not path.exists():return 0
-    return sum(r['charged'] for r in map(json.loads,path.read_text().splitlines()) if r['method']==method and r['phase']==f'{method}:{phase}' and r['taskId']==task_id)
+    with path.open() as stream:
+        return sum(r['charged'] for r in map(json.loads,stream) if r['method']==method and r['phase']==f'{method}:{phase}' and r['taskId']==task_id)
 
 def save_row(out,row):
     out.parent.mkdir(parents=True,exist_ok=True)
@@ -87,6 +90,11 @@ def freeze_run(out,method,phase):
     if PROTOCOL.get('benchmark')!='automationbench':files += [ROOT/'dist/src/python-tool.js',ROOT/'scripts/resume_aflow_test.py']
     if PROTOCOL.get('benchmark')=='automationbench':files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
     manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':len(tasks('test')),'validationCount':len(tasks('search')),'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
+    manifest['transport']={'endpoint':endpoint(),'executionNamespace':os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE',''),'usagePath':str(Path(os.environ.get('MFLOW_BASELINE_USAGE_PATH',RUNS/'usage.jsonl')).resolve())}
+    if os.environ.get('MFLOW_BASELINE_TRANSPORT_ROOT'):
+        server=Path(os.environ['MFLOW_BASELINE_TRANSPORT_ROOT']).resolve()
+        server_files=[server/'baselines/bridge.mjs',server/'configs/automationbench-baselines.json',server/'package-lock.json',server/'benchmark-hub/automation_bridge.py',*sorted((server/'dist/src').glob('*.js'))]
+        manifest['transport'].update(root=str(server),files={str(p.relative_to(server)):hashlib.sha256(p.read_bytes()).hexdigest() for p in server_files})
     manifest['pythonPackages']=sorted(f"{p.metadata['Name']}=={p.version}" for p in importlib.metadata.distributions())
     source=json.loads((ROOT/'baselines/sources.lock.json').read_text())[method]
     for name,digest in source['files'].items():
