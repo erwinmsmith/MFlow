@@ -1,7 +1,7 @@
 # 本地统一 benchmark 管理
 
-更新日期：2026-09-30。管理十一个 benchmark 的本地资产，接入七个文本评测与 AutomationBench 官方交互环境。
-未启动付费实验；GAIA/BFCL/τ³ 的交互 adapter 不在本轮范围。
+更新日期：2026-09-30。管理十一个 benchmark 的本地资产，接入六个文本评测、HLE 多模态评测与 AutomationBench 官方交互环境。
+GAIA/BFCL/τ³ 当前仅管理资产，交互 adapter 尚未接通。执行配置与支持范围见 [README](../README.md#llm-配置)。
 
 ## 共享目录
 
@@ -92,7 +92,7 @@ GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据�
   原数学种子的 boxed 默认行为保留。
 - DROP 默认搜索优化平均 F1，逐题二元成功另保留；最终报告 accuracy 和 meanF1。
   五对已知上游跨集重复题仍保留，见 [AFlow 协议](aflow-data-protocol.md)。
-- 新执行标识 v3.4.0。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
+- 当前执行标识 v3.6。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
   静默恢复旧搜索或重解释历史结果。manifest、数据锁和镜像 ID 会阻止不兼容恢复。
 
 ## HLE 与 AutomationBench

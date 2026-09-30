@@ -11,8 +11,8 @@
 - 搜索完整 Ditto Graph/Loop 编排源码、异构初始 agent 配置、可复用 agent 模板（能力与内部图/loop）及提示词。各 agent 可以有不同 node 权限、graph 拓扑、推理策略与 loop；执行中动态派生、重新配置并交织多个 agent 的节点。每个 child 继承完整父编排及实际执行反馈。
 - 官方 AFlow 的父节点采样、经验去重、失败样例、优化循环和收敛检测直接从固定源码导入；完整候选由 Ditto 中的优化模型生成，不从枚举 edit 列表挑选。
 - 每个候选、每次重复都从头运行完整 validate。没有 MIA acquisition、affected-set 继承、前缀/agent 缓存、逐批淘汰或廉价候选替换规则。
-- 默认不设优化轮数上限，按官方 top-3 均分连续五轮稳定判定收敛；每候选 5 次完整验证重复、50 题并发。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
-- 候选可通过 Ditto INFER 图生成新成员配置，再构造其图；SAMPLE、TRAJECTORY、REFLECT、DELIBERATE、Context 与 Interaction 节点按成员权限组合。arithmetic 和隔离 Python 工具由发布包执行。
+- 默认不设优化轮数上限，按官方 top-3 均分连续五轮稳定判定收敛；每候选 5 次完整验证重复，并发按模型和服务器资源配置。无额外搜索总 token、单题 token、组织步数、agent 数或深度预算；保留供应商输出上限与 Python 工具执行隔离。
+- 候选可通过 Ditto INFER 图生成新成员配置，再构造其图；SAMPLE、TRAJECTORY、REFLECT、DELIBERATE、Context 与 Interaction 节点按成员权限组合。算术、隔离 Python、HLE 网页搜索和 AutomationBench 官方 API 工具按任务协议注册，由发布包执行。
 - 标准协议每题重置状态；test 在选择冻结后才打开，答案只交给评分器。不同轮次/重复不共享模型执行结果。
 - 每次请求保存 Ditto 用量账本；逐题结果和控制器状态可恢复。只有同一候选同一次重复的已完成题目可以在中断恢复时跳过。
 
@@ -22,7 +22,7 @@
 
 原有 standard/continual、BranchStore 和 checkpoint 能力保留；原生编排使用 standard 逐题重置，不使用旧动作 checkpoint 或跨任务记忆。发布包边界与尚未满足的通用需求见 [Ditto 需求](docs/ditto-requirements.md)。
 
-官方基线的独立运行协议见 [baseline 完整重跑协议](docs/baseline-rerun.md)。MFlow 默认验证重复次数为 5，当前旧 AFlow baseline 为 1，比较时必须报告这一计算量差异。
+官方基线的独立运行协议见 [baseline 完整重跑协议](docs/baseline-rerun.md)。MFlow 默认验证重复次数为 5；旧 MATH AFlow baseline 为 1，当前 AutomationBench/HLE AFlow 为 5。比较时按各运行 manifest 报告计算量差异。
 
 ## 安装和验证
 
@@ -76,11 +76,13 @@ npm run mflow -- benchmarks --verify
 npm run mflow -- benchmarks path --name HumanEval+ --split test
 ```
 
-本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 全量多模态、自定义隔离搜索/测试和 AutomationBench；GAIA、BFCL、τ³
+当前可执行八个 benchmark：DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 和 AutomationBench。HLE 支持全量多模态及自定义隔离搜索/测试；GAIA、BFCL、τ³
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
-六个 benchmark 的默认搜索分别选择数学、阅读理解或 Python 代码提示词和输出契约；
-DROP 按平均 F1 优化。新执行标识 v3.5.1，旧运行需使用其保存的 runtime 与原评分环境。
+默认搜索按任务选择数学、阅读理解、Python 代码、学术问答或 API 工作流提示词和输出契约；
+DROP 按平均 F1 优化。当前执行标识 v3.6，旧运行需使用其保存的 runtime 与原评分环境。
+
+HLE 的图片传递、工具检索规则、judge 与五框架完整比较见 [HLE 实验协议](docs/hle-experiment.md)。其 200 search / 2300 test 为自定义 holdout，不能当作官方 2500 题全量 test 成绩。
 
 配置 `MFLOW_BENCH_PYTHON=../Benchmarks/environments/text/bin/python`；HumanEval+ 另需
 `MFLOW_EVALPLUS_IMAGE=mflow-evalplus:0.1.10`，镜像准备见共享说明。外部工具统一通过
@@ -119,11 +121,17 @@ docker pull python:3.12-alpine
 
 评分经 Ditto 发布包的 `Sandbox` 接口调用 Docker：容器禁网、只读、非特权，并限制 CPU、内存、进程数与运行时间。缺少 Docker、镜像或数学评分依赖时，命令在模型调用前报错；不会把基础设施故障记成答错。不要在没有这些条件的机器上运行代码 benchmark 的搜索或评测。
 
-## 搜索
+## LLM 配置
 
 复制 `.env.example` 为 `.env`，填写 API key、OpenAI-compatible endpoint 和实际模型名。凭据不进入搜索产物。
 
-默认使用 DeepSeek Flash：`MFLOW_BASE_URL=https://api.deepseek.com`，`MFLOW_MODEL=deepseek-flash`。模型名和接口以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/harness) 为准。`MFLOW_API_KEY` 只放在被 Git 忽略的本地 `.env`。DeepSeek 请求通过 Ditto 发布包的 OpenAI 兼容 Provider 发送，并使用其要求的 `max_tokens` 字段；当前默认关闭 DeepSeek thinking，以便结构化 JSON 输出遵守本项目的输出预算。`seed` 仅用于本地搜索/抽样，DeepSeek 请求不会发送该字段。
+MFlow 通过 Ditto 发布包的 `createHttpProvider` 接入 OpenAI 兼容接口，配置入口为 `MFLOW_BASE_URL`、`MFLOW_MODEL`、`MFLOW_API_KEY`，可用 `MFLOW_PROVIDER_OPTIONS` 补充供应商参数。已有 DeepSeek Flash API 与本地 llama-server 的 Qwen3.5-9B 配置；其他兼容模型仍需验证结构化输出、工具调用，以及 HLE 图片题所需的视觉能力。
+
+默认使用 DeepSeek Flash：`MFLOW_BASE_URL=https://api.deepseek.com`，`MFLOW_MODEL=deepseek-flash`。`MFLOW_API_KEY` 只放在被 Git 忽略的本地 `.env`。DeepSeek 使用 `max_tokens` 字段，默认关闭 thinking；`seed` 仅用于本地搜索/抽样，不发送给 DeepSeek。HLE 必须显式设置同一 endpoint 支持的 `MFLOW_HLE_JUDGE_MODEL`，并在结果中报告 judge。
+
+hb 使用私有 `.env.deepseek` / `.env.qwen`，通过 `bash scripts/hb-model.sh deepseek|qwen <命令>` 选择模型。五框架完整实验脚本当前为 MATH 配置 DeepSeek/Qwen，为 AutomationBench/HLE 配置 DeepSeek Flash；新增模型需另存配置及运行目录。模型、供应商参数与代码在 manifest/bundle 中冻结，切换配置不能续接旧实验。
+
+## 搜索
 
 需要固定 AFlow checkout、其 Python 依赖环境，以及本地 Docker 的 `python:3.12-alpine` 镜像。现有 baseline 环境可以直接复用。镜像 ID、源文件哈希、配置、数据、编译代码和评分器均写入运行 manifest。
 
