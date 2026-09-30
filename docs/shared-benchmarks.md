@@ -1,6 +1,6 @@
 # 本地统一 benchmark 管理
 
-更新日期：2026-09-30。本轮管理九个 benchmark 的已有本地资产，接入六个文本 benchmark。
+更新日期：2026-09-30。管理十一个 benchmark 的本地资产，接入七个文本评测与 AutomationBench 官方交互环境。
 未启动付费实验；GAIA/BFCL/τ³ 的交互 adapter 不在本轮范围。
 
 ## 共享目录
@@ -51,6 +51,8 @@ python3 ../Benchmarks/bench.py path bfcl --protocol raw
 | GAIA | HF `682dd723`；2023 validation 与附件 | 尚未制定 MFlow 划分 | 仅管理资产，官方 test 未下载 |
 | BFCL | V4 checkout `6ea57973` | 原类别与会话保留 | 仅管理资产与官方工具/评分代码 |
 | τ³ | v1.0.1 / `fc0055dc` | 保留原 split 结构 | 仅管理资产与官方环境/评分代码 |
+| HLE | `cais/hle@5a81a4c7`；官方 evaluator `22ed3074` | 无 search / 2158 无图题 test | 全部 2500 题原始文件已下载；文本评测与 Ditto judge 已接入 |
+| AutomationBench | Zapier 1.0.6 / `4a8e1061`，API toolset | 200 simple / 600 public domain | 官方环境、工具与断言评分已接入 |
 
 GAIA 的附件及 gated 条件见[官方数据卡](https://huggingface.co/datasets/gaia-benchmark/GAIA)。
 BFCL 单轮、多轮、Memory 和 Web Search 保留各自协议；本机 commit 不等于在线排行榜的
@@ -92,6 +94,59 @@ GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据�
   五对已知上游跨集重复题仍保留，见 [AFlow 协议](aflow-data-protocol.md)。
 - 新执行标识 v3.4.0。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
   静默恢复旧搜索或重解释历史结果。manifest、数据锁和镜像 ID 会阻止不兼容恢复。
+
+## HLE 与 AutomationBench
+
+```sh
+python3 benchmark-hub/bench.py install
+python3 ../Benchmarks/prepare_extra.py automationbench
+python3 ../Benchmarks/prepare_extra.py hle
+python3 ../Benchmarks/bench.py verify
+
+# 不访问数据、不调用模型：导出未搜索的初始 MAS。
+npm run mflow -- seed --benchmark hle --out runs/hle-seed.json
+npm run mflow -- seed --benchmark automationbench --out runs/automation-seed.json
+
+# 下列命令会调用模型，需另行授权实验。
+MFLOW_HLE_JUDGE_MODEL=deepseek-flash npm run mflow -- evaluate --benchmark hle \
+  --bundle runs/hle-seed.json --out runs/hle-text-test
+npm run mflow -- search --benchmark automationbench --config configs/aflow-search.json --out runs/automation-search
+npm run mflow -- evaluate --benchmark automationbench \
+  --bundle runs/automation-search/best.json --out runs/automation-test
+```
+
+固定来源与 split 哈希见 [`data/extended-benchmarks.lock.json`](../data/extended-benchmarks.lock.json)。
+HLE 的整个官方 Parquet（274,276,147 bytes）已通过授权浏览器下载；现有 HF token 的文件
+访问仍返回 403，换机器时需让下载 token 具备该 gated repo 权限，也可授权浏览器下载到
+`collections/hle/raw/data/test-00000-of-00001.parquet` 后再运行准备命令。
+
+HLE 只有官方 test，本轮不切出 search，也不允许 prepare 重划。
+MFlow 暂用全部 2158 道无图题；342 道有图题仍在原始文件，文本子集成绩不能称为完整 HLE 成绩。
+复用固定官方 system/judge prompt 与判定 schema（MIT，Copyright 2025 centerforaisafety；许可见 LICENSE）；judge 经 Ditto INFER Worker 执行，
+参考答案仅给 judge。必须显式设置 `MFLOW_HLE_JUDGE_MODEL`，并由同一配置 endpoint 提供；
+固定官方 evaluator 默认 judge 为 `o3-mini-2025-01-31`，改用 DeepSeek 必须披露，不能直接等同官方评分。
+逐题保存 judgement/confidence 与 judge 用量，summary 当前报告 accuracy，未报告 calibration error。
+用量账本中的 `hle-judge` 单独标识评分成本，计入实际总 tokens。
+
+[AutomationBench 官方仓库](https://github.com/zapier/AutomationBench)提供 600 道公开领域任务、
+200 道不计正式分数的 simple 任务；官方排行榜另用私有集。本地明确命名
+`automationbench-public-simple-v1`：simple 用于开发搜索，六个领域全部用于冻结后 test。
+这是 MFlow 开发协议，不是官方提供的 train/test，也不是私有排行榜。
+所有题目、顺序、断言、API schema 和允许服务使用固定官方代码；search/test ID、prompt、group 检查无重叠。
+
+官方 `AutomationBenchEnv.setup_state` 初始化每题 world，`update_tool_args/call_tool` 分发模拟 API，
+`partial_credit/task_completed_correctly` 评分（严格模式遇到断言错误报基础设施故障）。
+`api_search/api_fetch/base64_encode` 以 `RegisteredTool` 注册到 Ditto `createInteractionWorker`，
+由 `INTERACTION.ACT.TOOL/OBSERVE` 执行；未调用官方 OpenAI/Anthropic agent runner。
+同一 MAS 的成员共享该题 world；每次新题/重试重置官方 world。Python 进程只复用导入和任务构建缓存，
+没有模型输出或跨题环境缓存。执行快照保存 world/contract，评分失败后重评同一状态，避免重新抽模型。
+不启用有外部副作用工具的前缀缓存；continual 入口明确拒绝此协议。
+官方 strict pass 是主报告，partial credit 另列，未伪装成 F1。
+
+本次磁盘 `du`：HLE collection 约 272 MiB、文本 view 约 2.7 MiB；AutomationBench collection
+约 487 MiB（其中官方锁定 Python 环境约 447 MiB），view 约 1.1 MiB。均为本机实测，
+不包含全局 uv/Hugging Face 下载缓存、模型权重或未来实验日志。
+本轮未启动付费模型实验；离线 fixture 通过只证明接线、数据隔离与评分恢复，不代表模型效果。
 
 ## HumanEval+ 评分
 

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import aflow from "../data/aflow.lock.json" with { type: "json" };
 import evalplus from '../data/humaneval-plus.lock.json' with { type: 'json' };
+import extended from '../data/extended-benchmarks.lock.json' with { type: 'json' };
 import { taskSchema, type TaskInput, type Task } from "./types.js";
 import { Random, digest, save } from "./util.js";
 import { benchmarkPath } from './benchmark-hub.js';
@@ -32,9 +33,12 @@ export async function readTasks(path: string): Promise<Task[]> {
   if (tasks.some(t => t.dataset)) {
     const first = tasks[0];
     const split = first.dataset?.split;
-    if (!split || tasks.some(t => t.dataset?.split !== split || t.dataset.protocol !== evalplus.protocol) ||
-        createHash('sha256').update(text).digest('hex') !== evalplus.splits[split].sha256)
-      throw new Error('HumanEval+ data must match the complete locked split');
+    const protocol = first.dataset?.protocol;
+    const lock = protocol === evalplus.protocol ? evalplus : Object.values(extended).find(l => l.protocol === protocol);
+    const splits = lock?.splits as Record<string, {sha256: string}> | undefined;
+    if (!split || tasks.some(t => t.dataset?.split !== split || t.dataset.protocol !== protocol) ||
+        createHash('sha256').update(text).digest('hex') !== splits?.[split]?.sha256)
+      throw new Error('Benchmark data must match the complete locked split');
   }
   assertDisjoint(tasks);
   return tasks;

@@ -214,6 +214,8 @@ export interface EpisodeState {
 }
 export type EpisodeCheckpoint = StateCheckpoint<EpisodeState>;
 export interface Execution {
+  /** Grader-only world checkpoint; never included in agent inputs. */
+  environment?: { contract: string; world: unknown };
   /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
   orchestration?: {
     graphs: { id: string; nodes: { id: string; type: string; dependencies: string[] }[]; inputs: Record<string, unknown>; outputs: unknown }[];
@@ -245,10 +247,10 @@ export const taskSchema = z
     id: z.string().min(1),
     prompt: z.string().min(1),
     answer: z.string(),
-    metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus"]).default("exact"),
-    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus"]).optional(),
+    metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus", "hle", "automationbench"]).default("exact"),
+    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "hle", "automationbench"]).optional(),
     aflowSplit: z.enum(["validate", "test"]).optional(),
-    dataset: z.object({ protocol: z.literal('humaneval-plus-aflow-v1'), split: z.enum(['search', 'test']) }).strict().optional(),
+    dataset: z.object({ protocol: z.enum(['humaneval-plus-aflow-v1', 'hle-text-test-v1', 'automationbench-public-simple-v1']), split: z.enum(['search', 'test']) }).strict().optional(),
     reference: z.object({
       answers: z.array(z.array(z.string())).optional(),
       tests: z.array(z.string()).optional(),
@@ -256,6 +258,7 @@ export const taskSchema = z
       prefix: z.string().optional(),
       entryPoint: z.string().optional(),
       evalplusTaskId: z.string().optional(),
+      automationTaskId: z.string().optional(),
     }).strict().optional(),
     group: z.string().optional(),
   })
@@ -268,8 +271,14 @@ export const taskSchema = z
     if (task.metric === 'evalplus' && (task.benchmark !== 'humaneval_plus' || !task.dataset ||
         !task.reference?.evalplusTaskId || !task.reference.entryPoint || !task.reference.prefix))
       ctx.addIssue({ code: 'custom', message: 'HumanEval+ requires a locked dataset and EvalPlus task reference' });
-    if (task.dataset && (task.benchmark !== 'humaneval_plus' || task.metric !== 'evalplus' || task.aflowSplit))
-      ctx.addIssue({ code: 'custom', message: 'HumanEval+ derived protocol cannot be mixed with AFlow source metadata' });
+    const protocol = ({ evalplus: 'humaneval-plus-aflow-v1', hle: 'hle-text-test-v1', automationbench: 'automationbench-public-simple-v1' } as Record<string, string>)[task.metric];
+    if ((protocol && (!task.dataset || task.dataset.protocol !== protocol || task.benchmark !== (task.metric === 'evalplus' ? 'humaneval_plus' : task.metric))) ||
+        (task.dataset && (!protocol || task.aflowSplit)))
+      ctx.addIssue({ code: 'custom', message: 'Benchmark metric needs matching locked protocol and benchmark metadata' });
+    if (task.metric === 'hle' && task.dataset?.split !== 'test')
+      ctx.addIssue({ code: 'custom', message: 'HLE official test cannot be used for search' });
+    if (task.metric === 'automationbench' && !task.reference?.automationTaskId)
+      ctx.addIssue({ code: 'custom', message: 'AutomationBench requires an official task reference' });
   });
 export type Task = z.infer<typeof taskSchema>;
 export type TaskInput = Pick<Task, "id" | "prompt">;
@@ -277,6 +286,9 @@ export interface Evaluated {
   taskId: string;
   score: 0 | 1;
   f1?: number;
+  partialCredit?: number;
+  confidence?: number;
+  judge?: unknown;
   execution: Execution;
   inheritedFrom?: string;
 }

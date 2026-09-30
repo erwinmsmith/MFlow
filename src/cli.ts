@@ -16,7 +16,8 @@ import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeti
 import { createPythonTool } from './python-tool.js';
 import { prepare, readTasks, assertTestDisjoint } from "./data.js";
 import { grade, checkScoring, gradingIdentity } from "./grading.js";
-import { benchmarkHome, benchmarkPath } from './benchmark-hub.js';
+import { benchmarkHome, benchmarkPath, benchmarkName } from './benchmark-hub.js';
+import { executeBenchmark } from './benchmark-environment.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -24,6 +25,7 @@ import {
   strategySchema,
   profileSchema,
   rootProfile,
+  initialStrategy,
   type SearchConfig,
 } from "./types.js";
 import { OrganizationRuntime } from "./runtime.js";
@@ -106,6 +108,25 @@ async function run() {
       Number(values.seed ?? 42),
     );
     console.log("Prepared disjoint search, confirmation and test splits.");
+    return;
+  }
+  if (command === 'seed') {
+    const name = benchmarkName(required('benchmark'));
+    if (name !== 'hle' && name !== 'automationbench') throw new Error('seed supports hle and automationbench');
+    const { benchmarkSeed } = await import('./aflow-seed.js');
+    const { unrestrictedConfig, aflowConfigSchema } = await import('./aflow-search.js');
+    const seed = benchmarkSeed([{ benchmark: name, metric: name }]);
+    const config = unrestrictedConfig(aflowConfigSchema.parse({}).maxOutputTokens);
+    const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1',
+      model: model(42), config, strategy: { ...initialStrategy, id: `${name}-unsearched-seed`,
+        composition: seed.composition, organization: seed.organization, prompts: seed.prompts },
+      pool: seed.organization.initialAgents, experimentalScope: 'standard-isolated-state-v2', searchDataHash: digest([]),
+      selectionTaskIds: [], selectionPromptHashes: [], selectionGroups: [] };
+    await access(required('out')).then(() => { throw new Error('Seed output already exists'); }, error => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    await save(required('out'), bundle);
+    console.log('Saved an unsearched seed bundle; no dataset or model was accessed.');
     return;
   }
   if (command === "doctor") {
@@ -281,6 +302,8 @@ async function run() {
       return;
     }
     const tasks = await readTasks(await datasetPath('test'));
+    if (protocol === 'continual' && tasks.some(t => t.metric === 'automationbench'))
+      throw new Error('AutomationBench uses fresh standard task worlds; continual evaluation is not supported');
     const knownSourceOverlaps = assertTestDisjoint(tasks, bundle);
     if (knownSourceOverlaps.length)
       console.log(`Retaining ${knownSourceOverlaps.length} documented AFlow DROP prompt overlaps for exact split replication.`);
@@ -300,14 +323,15 @@ async function run() {
       const result = await evaluateFrozen({ out, resume: !!values.resume, manifest, tasks, provider,
         evaluate: async (task) => {
           const execution = await checkpointExecution(join(out, 'executions', `${digest(task.id)}.json`), task.id,
-            () => execute({ id: task.id, prompt: task.prompt }));
-          return { taskId: task.id, ...await grade(task, execution.answer), execution };
+            () => executeBenchmark(task, agents, bundle.strategy, bundle.config.episode, bundle.pool));
+          return { taskId: task.id, ...await grade(task, execution.answer, execution, agents), execution };
         },
       });
       await save(join(out, "summary.json"), {
         strategy: bundle.strategy.id, count: result.rows.length,
         accuracy: mean(result.rows.map((r) => r.score)),
         ...(result.rows.some((r) => r.f1 !== undefined) ? { meanF1: mean(result.rows.map((r) => r.f1 ?? 0)) } : {}),
+        ...(result.rows.some(r => r.partialCredit !== undefined) ? { meanPartialCredit: mean(result.rows.map(r => r.partialCredit ?? 0)), passRate: mean(result.rows.map(r => r.score)) } : {}),
         meanTokens: mean(result.rows.map((r) => r.execution.tokens)),
         testDataHash: digest(tasks), knownSourceOverlaps, protocol,
         actualTokens: result.actualTokens, accounting: result.accounting, usage: result.usage,
@@ -325,7 +349,7 @@ async function run() {
       });
       const result = {
         taskId: task.id,
-        ...await grade(task, execution.answer),
+        ...await grade(task, execution.answer, execution, agents),
         execution,
       };
       results.push(result);
@@ -353,6 +377,7 @@ async function run() {
   console.log(`MFlow (Node 24+, published Ditto 0.1.1)
   doctor
   benchmarks --name all [--verify]
+  seed --benchmark hle|automationbench --out runs/seed.json
   prepare --input tasks.jsonl --out data/prepared --seed 42
   search --search data/benchmarks/math/search.jsonl --config configs/aflow-search.json --out runs/search-1 [--test data/benchmarks/math/test.jsonl] [--resume]
   legacy-search --search data/prepared/search.jsonl --config configs/search.json --out runs/legacy-1

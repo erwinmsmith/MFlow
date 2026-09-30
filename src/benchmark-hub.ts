@@ -24,9 +24,23 @@ export async function benchmarkPath(name: string, split: 'search' | 'test') {
   const view = record.views?.[record.defaultProtocol];
   if (!view || view.format !== 'mflow-jsonl')
     throw new Error(`${name}: shared assets are installed, but the MFlow interactive adapter is not implemented`);
+  if (record.runtime === 'access-pending') throw new Error(`${name}: official dataset access is pending`);
+  if (benchmarkName(name) === 'hle' && split === 'search') throw new Error('HLE has only official test data; no search split');
   const path = sharedPath(home, `${view.path}/${split}.jsonl`);
   await access(path);
   return path;
+}
+
+export async function extraBenchmarkIdentity(name: 'hle' | 'automationbench') {
+  const locks = JSON.parse(await readFile(new URL('../data/extended-benchmarks.lock.json', import.meta.url), 'utf8'));
+  const lock = locks[name];
+  const installed = JSON.parse(await readFile(sharedPath(benchmarkHome(), `views/${lock.protocol}/manifest.json`), 'utf8'));
+  if (JSON.stringify(installed) !== JSON.stringify(lock)) throw new Error(`${name}: benchmark protocol lock mismatch`);
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  await promisify(execFile)(process.env.MFLOW_BENCH_PYTHON ?? 'python3',
+    ['benchmark-hub/bench.py', '--root', benchmarkHome(), 'verify', '--name', name]);
+  return lock;
 }
 
 export async function evalplusEnvironment() {

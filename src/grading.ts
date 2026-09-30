@@ -8,6 +8,11 @@ import { Sandbox, createLocalSandboxExecutor } from "@codesoul-co/ditto";
 import { score } from "./data.js";
 import type { Task } from "./types.js";
 import { evalplusEnvironment } from './benchmark-hub.js';
+import { extraBenchmarkIdentity } from './benchmark-hub.js';
+import { checkAutomation, gradeAutomation, automationPython } from './benchmark-environment.js';
+import { gradeHLE } from './hle-grading.js';
+import type { DittoAgents } from './ditto.js';
+import type { Execution } from './types.js';
 
 const exec = promisify(execFile);
 const docker = process.env.MFLOW_DOCKER ?? (process.platform === "darwin" ? "/opt/homebrew/bin/docker" : "docker");
@@ -144,6 +149,11 @@ export async function checkScoring(tasks: Task[]): Promise<void> {
       throw new Error(`Python scoring needs a running Docker daemon and local ${image} image`);
   }
   if (metrics.has('evalplus')) await evalplusRuntime();
+  if (metrics.has('automationbench')) await checkAutomation();
+  if (metrics.has('hle')) {
+    if (!process.env.MFLOW_HLE_JUDGE_MODEL) throw new Error('HLE scoring requires explicit MFLOW_HLE_JUDGE_MODEL (same configured provider endpoint)');
+    await extraBenchmarkIdentity('hle');
+  }
 }
 
 let plusRuntime: Promise<{ raw: string; image: string }> | undefined;
@@ -164,6 +174,13 @@ function evalplusRuntime() {
 
 /** Additional identity only for the new protocol; historical MATH manifests stay compatible. */
 export async function gradingIdentity(tasks: Task[]) {
+  if (tasks.some(t => t.metric === 'automationbench' || t.metric === 'hle')) {
+    const name = tasks[0].metric as 'hle' | 'automationbench';
+    return { extendedBenchmark: await extraBenchmarkIdentity(name),
+      ...(name === 'hle' ? { hleJudgeModel: process.env.MFLOW_HLE_JUDGE_MODEL } : {
+        automationBridge: createHash('sha256').update(await readFile('benchmark-hub/automation_bridge.py')).digest('hex'),
+        automationPythonEnvironment: (await exec(automationPython(), ['-c', "import sys,json,importlib.metadata as m; print(json.dumps([sys.version,sorted((p.metadata['Name'],p.version) for p in m.distributions())]))"])).stdout.trim() }) };
+  }
   if (!tasks.some(t => t.metric === 'evalplus')) return {};
   const env = await evalplusRuntime();
   return { evalplusImage: env.image, evalplusSource: createHash('sha256').update(await readFile(env.raw)).digest('hex'),
@@ -229,7 +246,11 @@ async function gradeEvalplus(task: Task, answer: string): Promise<0 | 1> {
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
-export async function grade(task: Task, answer: string): Promise<{ score: 0 | 1; f1?: number }> {
+export async function grade(task: Task, answer: string, execution?: Execution, agents?: DittoAgents): Promise<{ score: 0 | 1; f1?: number; partialCredit?: number; confidence?: number; judge?: unknown }> {
+  if (task.metric === 'automationbench' || task.metric === 'hle') {
+    try { return task.metric === 'automationbench' ? await gradeAutomation(task, execution) : await gradeHLE(task, answer, agents); }
+    catch (error) { throw new GradingFailure({ code: 'EXTENDED_GRADER', stderr: String(error).slice(-1000) }); }
+  }
   if (task.aflowSplit && task.metric === "drop") return aflowDropScore(task.answer, answer);
   if (task.aflowSplit && task.benchmark === "gsm8k") {
     const lastNumber = (text: string) => text.match(/[-+]?\d+(?:,\d{3})*(?:\.\d+)?|\d+\.\d+/g)?.at(-1) ?? "";

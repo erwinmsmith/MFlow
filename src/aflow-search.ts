@@ -9,7 +9,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool, type ModelSettings } from "./ditto.js";
 import { pythonImage, createPythonTool } from './python-tool.js';
-import { OrganizationRuntime } from "./runtime.js";
 import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy } from "./types.js";
 import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
@@ -20,6 +19,7 @@ import { organizationEvidence, summarizeOrganizations } from "./organization.js"
 import { initialAgentComposition, initialVerifierComposition, validateComposition } from "./composition.js";
 import { ProviderFailure } from "./provider-progress.js";
 import { checkpointExecution } from "./evaluation.js";
+import { automationTools, executeBenchmark } from './benchmark-environment.js';
 import type { Bundle } from "./search.js";
 
 import { benchmarkSeed, textOrganization, textPrompts } from './aflow-seed.js';
@@ -119,6 +119,8 @@ export async function runAFlowSearch(options: {
   const tasks = await readTasks(options.search);
   assertDatasetRole(tasks, 'search');
   const seed = benchmarkSeed(tasks);
+  const allowedTools = ['arithmetic', 'python', ...(tasks[0].metric === 'automationbench' ? automationTools : [])];
+  const taskInterface = policyInterface.replace('tools must be drawn from arithmetic and python', `tools must be drawn from ${allowedTools.join(', ')}`);
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
   const image = await pythonImage();
@@ -167,7 +169,7 @@ export async function runAFlowSearch(options: {
     const profiles = [...parsed.organization.initialAgents, ...parsed.organization.agentTemplates.map(t => ({ ...t.profile, id: t.id }))];
     for (const profile of profiles) {
       if (!profile.nodes?.length || profile.id.includes('/')) throw new Error('Every native agent requires node capabilities and an ID without /');
-      if (profile.tools.some(t => !['arithmetic', 'python'].includes(t))) throw new Error('Unknown organization tool');
+      if (profile.tools.some(t => !allowedTools.includes(t))) throw new Error('Unknown organization tool');
     }
     return parsed;
   };
@@ -201,7 +203,7 @@ export async function runAFlowSearch(options: {
         for (let attempt = 0; ; attempt++) {
           await append(join(dir, `${index}.attempts.jsonl`), { event: 'started', phase: 'generation', attempt, at: new Date().toISOString() });
           try {
-            return await new OrganizationRuntime(agents, runtimeConfig.episode).run(strategy, { id: task.id, prompt: task.prompt });
+            return await executeBenchmark(task, agents, strategy, runtimeConfig.episode);
           } catch (error) {
             await append(join(dir, `${index}.attempts.jsonl`), { event: 'failed', phase: 'generation', attempt, error: String(error), at: new Date().toISOString() });
             if (error instanceof PolicyContractError || error instanceof ProviderFailure || /HTTP \d{3}|Provider returned invalid JSON/.test(String(error))) throw error;
@@ -217,7 +219,7 @@ export async function runAFlowSearch(options: {
         return undefined;
       });
       try {
-        if (execution) row = { taskId: task.id, ...await grade(task, execution.answer), answer: execution.answer,
+        if (execution) row = { taskId: task.id, ...await grade(task, execution.answer, execution, agents), answer: execution.answer,
           tokens: agents.provider.tokens, actualTokens: execution.actualTokens, organization: organizationEvidence(execution),
           solutionEvidence: execution.outputs.map(({ agentId, output }) => ({ agentId, artifacts: output.artifacts })) };
       } catch (error) {
@@ -244,7 +246,7 @@ export async function runAFlowSearch(options: {
       let result: unknown;
       if (req.url === '/bootstrap') result = { config, dataset: seed.dataset, questionType: seed.kind,
         composition: seed.composition, prompts: seed.prompts, organization: seed.organization,
-        interface: policyInterface + `\nCURRENT TASK FAMILY: ${seed.kind}. Follow the dataset-specific output contract in the inherited prompts. Do not impose mathematical boxed answers on code or reading-comprehension tasks.` };
+        interface: taskInterface + `\nCURRENT TASK FAMILY: ${seed.kind}. Follow the dataset-specific output contract in the inherited prompts. Do not impose mathematical boxed answers on other tasks. Workflow tools share one fresh official world per task; use inspection or repair, never duplicate a write merely to compare wording.` };
       else if (req.url === '/propose') {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
@@ -256,7 +258,7 @@ export async function runAFlowSearch(options: {
               await append(join(out, 'contract-errors.jsonl'), { round: input.round, attempt, proposal, error: String(error) });
               if (attempt >= 2) throw error;
               proposal = (await agents.structured('aflow-contract-repair',
-                'Repair only the composition/interface contract. Preserve the proposed optimization and substantive prompts. Do not solve any benchmark or optimize answers. Return the complete corrected artifact.\n' + policyInterface,
+                'Repair only the composition/interface contract. Preserve the proposed optimization and substantive prompts. Do not solve any benchmark or optimize answers. Return the complete corrected artifact.\n' + taskInterface,
                 { proposal, error: String(error) }, proposalSchema, runtimeConfig.episode)).value;
             }
           }

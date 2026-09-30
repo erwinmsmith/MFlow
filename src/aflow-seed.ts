@@ -1,4 +1,4 @@
-import { organizationSchema, rootProfile, type Task } from './types.js';
+import { organizationSchema, rootProfile, compositionNodes, type Task } from './types.js';
 import { FACTORY_PROMPT } from './prompts.js';
 
 // Adapted from the actual AFlow MATH round-12 solve/revise candidate. These are
@@ -91,20 +91,24 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 }});`;
 
 /** The search method is shared; its initialization and answer contract belong to the dataset. */
-export function benchmarkSeed(tasks: Task[]) {
+export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   const benchmarks = new Set(tasks.map(t => t.benchmark ?? t.metric));
   if (benchmarks.size !== 1) throw new Error('A search run must use one benchmark and scoring protocol');
   const benchmark = [...benchmarks][0];
   const dataset = ({ math: 'MATH', gsm8k: 'GSM8K', drop: 'DROP', humaneval: 'HumanEval',
-    humaneval_plus: 'HumanEvalPlus', mbpp: 'MBPP' } as Record<string, string>)[benchmark] ?? 'Custom';
+    humaneval_plus: 'HumanEvalPlus', mbpp: 'MBPP', hle: 'HLE', automationbench: 'AutomationBench' } as Record<string, string>)[benchmark] ?? 'Custom';
   if (benchmark === 'math' || benchmark === 'gsm8k' || benchmark === 'numeric') return {
     dataset, kind: 'mathematical reasoning', composition: aflowInspiredComposition,
     organization: textOrganization, prompts: textPrompts,
     provenance: 'AFlow MATH round-12 solve/revise prompts, with adaptive independent reasoning; validation-informed transfer, no test data',
   };
   const code = tasks[0].metric === 'python' || tasks[0].metric === 'evalplus';
+  const workflow = benchmark === 'automationbench';
+  const academic = benchmark === 'hle';
   const contract = code
     ? 'Return the complete executable Python solution with the requested function signature and any needed imports. No Markdown fences, explanations or boxed answers. Only public examples from the problem may be used as checks; hidden evaluation tests are not available.'
+    : workflow ? 'Complete the requested workflow in the shared simulated environment using api_search, api_fetch and base64_encode. Discover endpoint documentation before calls. Verify consequential writes. Summarize only actions actually completed; textual claims do not change the environment.'
+    : academic ? 'Solve the academic question and preserve the required Explanation, Answer and Confidence format. Do not invent missing evidence.'
     : 'Answer the question using only the supplied passage and question. Return only the concise final answer; multiple answer spans may be separated with |. Do not include a derivation, Markdown or a boxed answer.';
   const prompts = {
     agent: `Solve the original task accurately. ${contract}\n\nTask:`,
@@ -115,10 +119,17 @@ export function benchmarkSeed(tasks: Task[]) {
   };
   const organization = structuredClone(textOrganization);
   for (const profile of [...organization.initialAgents, ...organization.agentTemplates!.map(t => t.profile)]) {
-    profile.objective = code ? 'Implement the requested Python function correctly.' : 'Answer the supplied reading-comprehension question accurately.';
-    profile.capability = code ? 'Python programming and specification checking' : 'Evidence-grounded reading comprehension';
+    profile.objective = code ? 'Implement the requested Python function correctly.' : workflow ? 'Execute and verify the requested business workflow.' : academic ? 'Solve the academic question accurately.' : 'Answer the supplied reading-comprehension question accurately.';
+    profile.capability = code ? 'Python programming and specification checking' : workflow ? 'Cross-application API orchestration' : academic ? 'Academic knowledge and reasoning' : 'Evidence-grounded reading comprehension';
+    if (workflow) { profile.tools = ['api_search', 'api_fetch', 'base64_encode']; profile.nodes = [...compositionNodes]; }
+    if (academic) profile.tools = [];
     profile.expected_output = contract;
     profile.stop_condition = 'A complete answer or a concrete unresolved obstacle is stated.';
+  }
+  if (workflow) for (const template of organization.agentTemplates!) {
+    // All agents use the same task world. Review may inspect or repair concrete effects.
+    template.composition = textSolver.replace(/ctx\.publishText\(id,([^\n;]+)\)/g, "ctx.publishText(id,$1,'raw')");
+    template.description = `${template.id}: workflow execution and state verification`;
   }
   for (const template of organization.agentTemplates!) {
     // Code and QA answers are raw output, even if their content contains a literal boxed expression.
@@ -127,7 +138,13 @@ export function benchmarkSeed(tasks: Task[]) {
     if (template.id === 'reviewer') template.profile.objective = 'Find and correct specific errors in the supplied candidate.';
     if (template.id === 'independent') template.profile.objective = 'Solve independently using a complementary method and the original specification.';
   }
-  const composition = `function solution(output){
+  const composition = workflow ? `return loop({id:'workflow-mas',plan:function*(ctx){
+  const first=yield* ctx.runAgent('root','','agent');
+  ctx.spawnTemplate('reviewer','reviewer','root');
+  const review=yield* ctx.runAgent('reviewer',{candidate:first,instruction:'Inspect the existing resulting state. Repair only missing or incorrect effects. Do not repeat successful writes or create duplicate records.'},'review');
+  ctx.dormant('reviewer');
+  return review.candidate_answer || first.candidate_answer;
+}});` : `function solution(output){
   return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');
 }
 return loop({id:'adaptive-mas',plan:function*(ctx){
@@ -145,6 +162,6 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
   const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Candidate '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');
   return final.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;
 }});`;
-  return { dataset, kind: code ? 'code generation' : 'reading comprehension', composition, organization, prompts,
+  return { dataset, kind: code ? 'code generation' : workflow ? 'workflow automation' : academic ? 'academic reasoning' : 'reading comprehension', composition, organization, prompts,
     provenance: 'Dataset-specific editable MFlow seed; official AFlow optimization controller; no MATH round-12 initialization or test data' };
 }

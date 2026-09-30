@@ -11,6 +11,8 @@ python3 ../Benchmarks/bench.py list
 python3 ../Benchmarks/bench.py verify
 python3 ../Benchmarks/bench.py path math --split search
 python3 ../Benchmarks/bench.py path gaia
+python3 ../Benchmarks/prepare_extra.py automationbench
+python3 ../Benchmarks/prepare_extra.py hle
 ```
 
 迁移先验证已有哈希和上游 revision，然后在同一卷移动目录、保留原路径符号链接。
@@ -18,6 +20,7 @@ python3 ../Benchmarks/bench.py path gaia
 评估代码和本地旧划分保留；现有实验产物留在各项目。后续环境输出、embedding cache、
 模拟记录写入 `state/`，不修改固定源文件。不要提交 `collections/`、`views/` 或凭据。
 GAIA 是授权数据，不可公开转存。
+HLE 同样仅保留本地，访问同意与文件下载权限由 Hugging Face 账户管理。
 
 ## 协议
 
@@ -30,6 +33,9 @@ GAIA 是授权数据，不可公开转存。
 - BFCL：保存官方 V4 checkout。指定 commit，不能默认宣称与在线 leaderboard 的 pin 一致。
 - τ³：保存官方 v1.0.1 checkout，原始领域政策、工具、任务与 split 保留。
 - GAIA/BFCL/τ³ 本轮只管理资产和官方评估代码，尚未提供 MFlow 交互执行 adapter。
+- HLE：完整 2500 题 Parquet；无图 2158 题提供 test-only view；没有 search，含图执行尚未接入。
+- AutomationBench：固定 Zapier 1.0.6，200 simple 开发搜索 / 600 public domain 评测。
+  该命名开发协议不等于官方 train/test 或私有 leaderboard；保留官方 API 环境和 strict/partial 评分。
 
 没有统一随机切分这些数据。GAIA 新切分要明示为开发协议；BFCL Memory 的预填充
 与问答属于同一任务族；τ³ 原始 train/test/base 不能混用。参考答案、预期动作和用户模拟器

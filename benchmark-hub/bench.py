@@ -10,7 +10,7 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-NAMES = ("drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "gaia", "bfcl", "tau3")
+NAMES = ("drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "gaia", "bfcl", "tau3", "hle", "automationbench")
 ALIASES = {"humaneval+": "humaneval_plus", "τ³": "tau3", "bfcl_v4": "bfcl"}
 AFLOW = json.loads(Path(__file__).with_name("aflow.lock.json").read_text())
 PROTOCOL = "aflow-3f457218"
@@ -196,6 +196,8 @@ def import_local(root, mflow, official):
     if (root / "catalog.json").exists():
         # A rerun must not silently establish a new checksum baseline.
         verify(root)
+        manifest = {**read(root / 'manifests/files.json'), **manifest}
+        benchmarks = {**read(root / 'catalog.json')['benchmarks'], **benchmarks}
     save(root / "manifests/files.json", manifest)
     save(root / "catalog.json", {"version": 1, "benchmarks": benchmarks,
                                 "fileManifest": "manifests/files.json", "mutableState": "state/"})
@@ -255,7 +257,7 @@ def resolve_path(root, benchmark, protocol=None, split=None):
 
 def install(root):
     root.mkdir(parents=True, exist_ok=True)
-    for filename in ("bench.py", "aflow.lock.json", "humaneval-plus.lock.json", "README.md", "Dockerfile.evalplus"):
+    for filename in ("bench.py", "aflow.lock.json", "humaneval-plus.lock.json", "README.md", "Dockerfile.evalplus", "prepare_extra.py", "automation_bridge.py"):
         source = Path(__file__).with_name(filename)
         target = root / filename
         if source.resolve() != target.resolve():
