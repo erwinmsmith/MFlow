@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { Agent } from 'undici';
 import type { ModelProvider, SampleOutput } from '@codesoul-co/ditto/worker/infer';
+
+// Ditto/caller AbortSignal owns the deadline, including time queued for local inference.
+const modelDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+export const modelFetch: typeof globalThis.fetch = (input, init) =>
+  globalThis.fetch(input, { ...init, dispatcher: modelDispatcher } as RequestInit);
 
 export class ProviderFailure extends Error {
   constructor(readonly code: string, message: string, cause?: unknown) {

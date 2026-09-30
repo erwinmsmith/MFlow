@@ -10,7 +10,7 @@ import { openAutomation, checkAutomation } from '../dist/src/benchmark-environme
 import { benchmarkPath } from '../dist/src/benchmark-hub.js';
 import { readTasks } from '../dist/src/data.js';
 import { automationInstruction } from '../dist/src/aflow-seed.js';
-import { observableProvider } from '../dist/src/provider-progress.js';
+import { modelFetch, observableProvider } from '../dist/src/provider-progress.js';
 import { createPythonTool, pythonImage, pythonExecutor } from '../dist/src/python-tool.js';
 const root=resolve(import.meta.dirname,'..');
 process.loadEnvFile(resolve(root,'.env'));
@@ -21,7 +21,7 @@ const append=(file,row)=>appendFileSync(resolve(out,file),JSON.stringify(row)+'\
 const readRows=file=>existsSync(file)?readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse):[];
 let spent=readRows(resolve(out,'usage.jsonl')).reduce((n,r)=>n+r.charged,0),active=0;
 const optimizerFailures=new Map();
-const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(resolve(out,'requests',p.id+'.json'),JSON.stringify(p));}});
+const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(resolve(out,'requests',p.id+'.json'),JSON.stringify(p));}});
 const automation=config.benchmark==='automationbench',sessions=new Map(),lookup=new Map();
 const image=automation?undefined:await pythonImage(config.aflowPythonImage);
 if(automation){await checkAutomation();for(const split of ['search','test'])for(const t of await readTasks(await benchmarkPath('automationbench',split)))lookup.set(t.id,t);}

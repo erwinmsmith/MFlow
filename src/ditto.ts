@@ -21,7 +21,7 @@ import type {
 } from "@codesoul-co/ditto/worker/infer";
 import { z } from "zod";
 import { setTimeout as delay } from 'node:timers/promises';
-import { observableProvider, ProviderFailure, type TransportOptions } from "./provider-progress.js";
+import { modelFetch, observableProvider, ProviderFailure, type TransportOptions } from "./provider-progress.js";
 import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
 import { pythonExecutor } from "./python-tool.js";
 import {
@@ -36,7 +36,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.5.1/tool-error-observations", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.5.2/model-transport-deadline", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -212,6 +212,7 @@ export function httpProvider(
     apiKey: key,
     // The per-call Limits deadline below owns cancellation. Avoid a hidden 30s HTTP cutoff.
     timeoutMs: 2147483647,
+    fetch: modelFetch,
     ...(deepseek ? {
       maxTokensField: "max_tokens" as const,
       providerOptions: { thinking: { type: "disabled" }, response_format: { type: "json_object" } },
@@ -221,7 +222,7 @@ export function httpProvider(
       network: [new URL(settings.baseUrl).origin],
     }),
   });
-  return observableProvider(provider, { stream: deepseek, ...transport });
+  return observableProvider(provider, { stream: true, ...transport });
 }
 
 export const arithmeticTool: RegisteredTool = {

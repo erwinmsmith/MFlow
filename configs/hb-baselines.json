@@ -1,5 +1,5 @@
 {
-  "runDirectory": "runs/hb-qwen-math-20260930",
+  "runDirectory": "runs/hb-qwen-math-20260930-v2",
   "model": "qwen3.5-9b",
   "aflowPythonImage": "sha256:2fc2c915ed384368f492e415d42f7491defbaaa29436b3013e84627fe85b57a6",
   "temperature": 0,

@@ -16,7 +16,11 @@ and `chat_template_kwargs.enable_thinking=false`.
 MFlow freezes these provider options in newly created bundles.
 `configs/hb-baselines.json` selects the same model for AFlow, DyLAN, AutoAgents and EvoAgent;
 both their bridge and Python controllers read `MFLOW_BASELINE_PROTOCOL`.
-Formal MATH results go to `runs/hb-qwen-math-20260930`; earlier transport/pilot results remain separate.
+Formal MATH results go to `runs/hb-qwen-math-20260930-v2`; earlier transport/pilot results remain separate.
+Both MFlow and the baseline bridge consume the published Ditto stream. Its public `fetch` injection
+uses a dedicated Undici dispatcher with HTTP headers/body waiting limits disabled; Ditto/caller
+AbortSignal still controls cancellation. This avoids Node's implicit 300-second cutoff while
+requests queue behind the four local inference slots. Other HTTP requests retain their defaults.
 The MATH AFlow Programmer retains its pinned upstream `run_code`, executed through public Ditto
 `INTERACTION.ACT.TOOL` and the existing isolated Python tool. Its ARM64 image pins NumPy 2.0.2,
 pandas 2.2.3 and SymPy 1.14.0; the immutable image ID is recorded in both hb baseline protocols.
@@ -90,13 +94,16 @@ snapshot with independent pinned baseline sources next to it. Qwen uses port 819
 Start under a user service with `sg docker -c` so Docker group membership is applied:
 
 ```sh
-bash scripts/hb-model.sh qwen python3 scripts/automation_experiment.py --benchmark math
+bash scripts/hb-model.sh qwen python3 scripts/automation_experiment.py --benchmark math --sequential
 bash scripts/hb-model.sh qwen python3 scripts/automation_experiment.py --benchmark math --status
 ```
 
 MFlow and AFlow search on all 119 fixed validation tasks and freeze their selected artifact before
 testing all 486 fixed test tasks. DyLAN, EvoAgent and AutoAgents directly test the same 486 tasks.
 Qwen MFlow validates/evaluates with concurrency 4; the inference server admits 4 simultaneous slots.
+When DeepSeek also runs on the 16 GB Jetson, `--sequential` queues complete methods to reduce resident
+Python processes: MFlow search/test, AFlow search/test, DyLAN, EvoAgent, AutoAgents. Each method keeps
+its original algorithm and within-method concurrency. The manifest records this scheduling choice.
 The runner records each method's stage and exit code, and `--resume` verifies the immutable manifest.
 
 To start only a new MFlow search explicitly:

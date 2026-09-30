@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ProviderFailure, observableProvider, type ProviderProgress } from "../src/provider-progress.js";
+import { createServer } from 'node:http';
+import { Agent } from 'undici';
+import { modelFetch, ProviderFailure, observableProvider, type ProviderProgress } from "../src/provider-progress.js";
 import { httpProvider } from "../src/ditto.js";
 
 test('local provider options reach the published Ditto transport', async () => {
@@ -11,7 +13,9 @@ test('local provider options reach the published Ditto transport', async () => {
       assert.equal(body.model, 'qwen3.5-9b');
       assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false });
       assert.equal(body.thinking, undefined);
-      return Response.json({ choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] });
+      assert.equal(body.stream, true);
+      assert.ok(options && 'dispatcher' in options);
+      return new Response('data: '+JSON.stringify({ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] })+'\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
     };
     const provider = httpProvider({ model: 'qwen3.5-9b', baseUrl: 'http://127.0.0.1:11434/v1', temperature: 0,
       seed: 42, providerOptions: { chat_template_kwargs: { enable_thinking: false } } }, 'local');
@@ -19,6 +23,28 @@ test('local provider options reach the published Ditto transport', async () => {
       messages: [{ role: 'user', content: 'fixture' }], generation: { maxTokens: 16 } },
     { signal: AbortSignal.timeout(1000) })).message.content, 'OK');
   } finally { globalThis.fetch = previous; }
+});
+
+test('model transport waits for headers/body while preserving caller cancellation', async () => {
+  const short = new Agent({ headersTimeout: 50, bodyTimeout: 50 });
+  const server = createServer((request, response) => {
+    if (request.url === '/body') { response.writeHead(200); response.write('O'); }
+    setTimeout(() => response.end(request.url === '/body' ? 'K' : 'OK'), 1500).unref();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    await assert.rejects(globalThis.fetch(url+'/headers', { dispatcher: short } as RequestInit), /fetch failed/);
+    const body = await globalThis.fetch(url+'/body', { dispatcher: short } as RequestInit);
+    await assert.rejects(body.text(), /terminated/);
+    for (const path of ['/headers', '/body'])
+      assert.equal(await (await modelFetch(url+path, { signal: AbortSignal.timeout(5000) })).text(), 'OK');
+    await assert.rejects(modelFetch(url+'/headers', { signal: AbortSignal.timeout(20) }), /timeout/i);
+  } finally {
+    await short.destroy(); server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });
 
 test("DeepSeek requests use the published Ditto provider with supported fields", async () => {

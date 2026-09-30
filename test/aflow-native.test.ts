@@ -131,8 +131,8 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       // Candidate is deliberately worse: it must still execute every task/repetition.
       value = candidate ? String.raw`\boxed{wrong}` : String.raw`\boxed{42}`;
     }
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: isText ? value : JSON.stringify(value) }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }));
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end('data: '+JSON.stringify({ choices: [{ delta: { content: isText ? value : JSON.stringify(value) }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })+'\n\ndata: [DONE]\n\n');
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
@@ -209,9 +209,9 @@ test('DROP controller ranks partial F1 and a corrected child using its own datas
     const value = text ? (full ? 'Alice Bob' : 'Alice') :
       { organization: seed.organization, composition: seed.composition, modification: 'Check both requested people.',
         prompts: { ...seed.prompts, agent: seed.prompts.agent + ' FULL-ANSWER-MARKER' } };
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: text ? value : JSON.stringify(value) }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }));
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end('data: '+JSON.stringify({ choices: [{ delta: { content: text ? value : JSON.stringify(value) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })+'\n\ndata: [DONE]\n\n');
   });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
@@ -263,7 +263,7 @@ test('optimizer infrastructure/format failure stops without creating phantom rou
     let raw='';for await(const chunk of req)raw+=chunk;
     const input=JSON.parse(raw);calls++;
     const content=input.response_format?.type==='text'?String.raw`\boxed{42}`:'invalid JSON';
-    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10,total_tokens:20}}));
+    res.setHeader('Content-Type','text/event-stream');res.end('data: '+JSON.stringify({choices:[{delta:{content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:10,total_tokens:20}})+'\n\ndata: [DONE]\n\n');
   });
   await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));const address=server.address();assert.ok(address&&typeof address!=='string');
   try{

@@ -80,7 +80,7 @@ def status(out):
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math'],default='automationbench');p.add_argument('--run');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math'],default='automationbench');p.add_argument('--run');a=p.parse_args()
     math=a.benchmark=='math'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
     protocol='configs/'+(profile if math else 'automationbench-baselines.json')
@@ -92,7 +92,7 @@ def main():
     env={**os.environ,'MFLOW_BASELINE_PROTOCOL':protocol,'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
-    manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
+    manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'schedule':'sequential' if a.sequential else 'parallel','code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
     saved=read(out/'experiment-manifest.json')
     if saved and saved!=manifest:raise RuntimeError('Immutable experiment code/config changed')
     if saved and not a.resume:raise RuntimeError('Run exists; use --resume')
@@ -132,15 +132,22 @@ def main():
                     break
             except OSError:time.sleep(1)
         else:raise RuntimeError('Bridge did not become ready')
-        for name in commands:
-            if jobs['jobs'].get(name,{}).get('status')!='completed':launch(name,0)
+        pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
+        for name in pending:jobs['jobs'].setdefault(name,{'status':'queued'})
+        persist()
+        if a.sequential:
+            if pending:launch(pending.pop(0),0)
+        else:
+            for name in pending:launch(name,0)
         while active:
             for name,(child,index) in list(active.items()):
                 code=child.poll()
                 if code is None:continue
                 del active[name]
                 if code==0 and index+1<len(commands[name]):launch(name,index+1)
-                else:jobs['jobs'][name].update(status='completed' if code==0 else 'failed',exitCode=code,finishedAt=time.time());persist()
+                else:
+                    jobs['jobs'][name].update(status='completed' if code==0 else 'failed',exitCode=code,finishedAt=time.time());persist()
+                    if a.sequential and pending:launch(pending.pop(0),0)
             time.sleep(2)
         if any(j['status']=='failed' for j in jobs['jobs'].values()):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
     finally:

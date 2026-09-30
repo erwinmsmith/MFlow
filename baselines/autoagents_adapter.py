@@ -3,6 +3,7 @@ import asyncio, importlib, os, re, sys, types
 from pathlib import Path
 from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, call, save_row, search_web
 from repairs import install_autoagents_repairs
+automation_capabilities = '''AutomationBench execution capability: every actor running native CustomAction can call api_search, api_fetch and base64_encode through the provider's Ditto function tools. api_fetch performs real reads and writes in this task's simulated world, not just a proposed specification. Role design and observer steps cannot execute tools themselves, but must plan executable actors. Keep tools fields and text Action names in the original AutoAgents catalogue; the API function tools are separate from that catalogue. SearchAndSummarize's custom engine discovers API documentation; use actor api_fetch calls to read records and perform writes. Do not describe API work as impossible for lack of tools. Preserve native output formats and confirm actual effects before claiming completion.'''
 class AutoAgents:
     def __init__(self):
         source=SOURCES/'AutoAgents';sys.path.insert(0,str(source))
@@ -11,8 +12,11 @@ class AutoAgents:
         class LLM:
             def __init__(self,*args,**kwargs):pass
             async def aask(self,prompt,system_msgs=None):
-                design=PROTOCOL.get('benchmark')=='automationbench' and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
-                content=call([{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]+[{'role':'user','content':prompt}],tools=not design)
+                workflow=PROTOCOL.get('benchmark')=='automationbench'
+                design=workflow and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
+                messages=[{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]
+                if workflow:messages.insert(0,{'role':'system','content':automation_capabilities})
+                content=call(messages+[{'role':'user','content':prompt}],tools=not design)
                 owner.remember_roles(content)
                 return content
         transport=types.ModuleType('autoagents.system.provider.llm_api');transport.LLMAPI=LLM

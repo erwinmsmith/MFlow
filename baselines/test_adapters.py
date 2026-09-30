@@ -19,6 +19,51 @@ from repairs import parse_roles, validate_workflow, validate_role_plan, install_
 
 
 class AdapterTests(unittest.TestCase):
+    def test_sequential_experiment_preserves_stages_and_runs_one_method_at_a_time(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
+        runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+        live=set();commands=[]
+        class Child:
+            def __init__(self,command,**kwargs):
+                self.bridge='baselines/bridge.mjs' in command;self.pid=len(commands)+1;self.command=command
+                if not self.bridge:
+                    self.assert_single();live.add(self.pid);commands.append(command)
+            def assert_single(self):
+                if live:raise AssertionError('overlapping methods')
+            def poll(self):
+                if self.bridge:return None
+                live.discard(self.pid);return 0
+            def terminate(self):live.discard(self.pid)
+            def wait(self,**kwargs):return 0
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'configs').mkdir()
+            (root/'configs/hb-baselines.json').write_text(json.dumps({'runDirectory':'runs/check'}))
+            (root/'package-lock.json').write_text('{}')
+            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'qwen3.5-9b','BENCHMARK_HOME':directory}),patch.object(sys,'argv',['experiment','--benchmark','math','--sequential']),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner.urllib.request,'urlopen',return_value=io.StringIO('{"runDirectory":"runs/check"}')):
+                runner.main()
+            self.assertEqual([command[3] for command in commands[:2]],['search','evaluate'])
+            self.assertEqual([Path(command[1]).name for command in commands[2:]],['aflow.py','run.py','run.py','run.py'])
+            self.assertEqual([command[2] for command in commands[3:]],['DyLAN','EvoAgent','AutoAgents'])
+            jobs=json.loads((root/'runs/check/jobs.json').read_text())['jobs']
+            self.assertEqual({job['status'] for job in jobs.values()},{'completed'})
+            self.assertEqual(json.loads((root/'runs/check/experiment-manifest.json').read_text())['schedule'],'sequential')
+
+    def test_autoagents_planner_knows_actor_api_capabilities_without_execution_access(self):
+        import asyncio
+        import autoagents_adapter as adapter
+        original=os.getcwd()
+        try:
+            with patch.dict(common.PROTOCOL,{'benchmark':'automationbench'}),patch.object(adapter,'call',return_value='fixture') as invoke:
+                adapter.AutoAgents()
+                llm=sys.modules['autoagents.system.provider.llm_api'].LLMAPI()
+                asyncio.run(llm.aask('You are a manager and expert prompt engineer.'))
+                self.assertFalse(invoke.call_args.kwargs['tools'])
+                self.assertIn('api_fetch performs real reads and writes',invoke.call_args.args[0][0]['content'])
+                asyncio.run(llm.aask('Execute this workflow.'))
+                self.assertTrue(invoke.call_args.kwargs['tools'])
+        finally:os.chdir(original)
+
     def test_native_programmer_uses_scoped_ditto_python_without_host_execution(self):
         import asyncio
         import ast
