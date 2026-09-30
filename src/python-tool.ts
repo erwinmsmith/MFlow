@@ -21,9 +21,14 @@ export function createPythonTool(image: string): RegisteredTool {
   return {
     name: 'python', description: 'Execute Python 3 code in a fresh isolated container. Print the result. Standard library math, fractions, decimal, itertools and statistics are available. No network, host files or persistent state. Execution timeout 30 seconds.',
     effects: ['execute'], inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
-    validate(args) { argsSchema.parse(args); },
+    // RegisteredTool validation throws abort the node in Ditto 0.1.1. Return
+    // malformed model arguments as an observation from the tool instead.
+    validate() {},
     async execute(args, context) {
-      const { code } = argsSchema.parse(args);
+      const parsed = argsSchema.safeParse(args);
+      if (!parsed.success) return { status: 'failed', content: 'Python requires exactly one field: code, a non-empty string containing Python source. Supply corrected arguments.',
+        error: { code: 'PYTHON_ARGUMENTS', message: 'Invalid Python arguments' } };
+      const { code } = parsed.data;
       const result = await context.services.sandbox.run({ command: dockerCommand, args: [
         'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '256m',

@@ -20,6 +20,7 @@ import type {
   SampleOutput,
 } from "@codesoul-co/ditto/worker/infer";
 import { z } from "zod";
+import { setTimeout as delay } from 'node:timers/promises';
 import { observableProvider, ProviderFailure, type TransportOptions } from "./provider-progress.js";
 import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
 import { pythonExecutor } from "./python-tool.js";
@@ -35,7 +36,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.2/text-reasoning-local-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.3/tool-input-observations-transport-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -118,6 +119,7 @@ export class MeteredProvider implements ModelProvider {
   async invoke(
     input: SampleInput,
     options: { signal: AbortSignal },
+    attempt = 0,
   ): Promise<SampleOutput> {
     options.signal.throwIfAborted();
     const nodeId = String(input.metadata?.nodeId ?? '');
@@ -153,6 +155,16 @@ export class MeteredProvider implements ModelProvider {
         typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'PROVIDER_FAILURE',
         error instanceof Error ? error.message : String(error), error);
       this.nodeFailures.set(nodeId, failure);
+      const cause = failure.cause as { code?: string; cause?: { code?: string } } | undefined;
+      const transient = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT'].includes(
+        String(cause?.code ?? cause?.cause?.code ?? failure.code)) ||
+        (failure.code === 'PROVIDER_FAILURE' && /^(?:\[PROVIDER_FAILURE\] )?terminated$/.test(failure.message));
+      if (transient && attempt < 2 && !options.signal.aborted) {
+        // Each attempt reserves/settles separately. No partial text is reused,
+        // and missing usage remains unknown rather than disappearing on retry.
+        await delay(1000 * (attempt + 1), undefined, { signal: options.signal });
+        return this.invoke(input, options, attempt + 1);
+      }
       // A detected generation cycle belongs to this node. Network/auth/service
       // failures remain episode-fatal, including when sibling nodes succeed.
       if (!['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(failure.code)) this.lastFailure = failure;

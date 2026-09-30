@@ -22,14 +22,22 @@ export interface TransportOptions {
 export function repeatedOutput(tail: string): boolean {
   if (tail.length < 8192) return false;
   const anchor = tail.slice(-128);
-  const previous = tail.lastIndexOf(anchor, tail.length - 129);
-  const period = tail.length - 128 - previous;
-  if (previous < 0 || period > 2048) return false;
-  const span = Math.max(8192, period * 8);
-  if (tail.length < span + period) return false;
-  for (let i = tail.length - span; i < tail.length; i++)
-    if (tail[i] !== tail[i - period]) return false;
-  return true;
+  let previous = tail.lastIndexOf(anchor, tail.length - 129);
+  while (previous >= 0) {
+    const period = tail.length - 128 - previous;
+    if (period > 8192) break;
+    const span = Math.max(8192, period * 8);
+    if (tail.length >= span + period) {
+      let matches = true;
+      for (let i = tail.length - span; i < tail.length; i++) {
+        if (tail[i] !== tail[i - period]) { matches = false; break; }
+      }
+      if (matches) return true;
+    }
+    // A repeated phrase inside a larger cycle is not necessarily its period.
+    previous = tail.lastIndexOf(anchor, previous - 1);
+  }
+  return false;
 }
 
 /** Consume the published provider's stream; Ditto owns SSE parsing, tool assembly and cancellation. */
@@ -52,7 +60,7 @@ export function observableProvider(provider: ModelProvider, options: TransportOp
           progress.state = 'streaming'; progress.textChars += event.delta.length;
           progress.nonWhitespaceChars += event.delta.replace(/\s/g, '').length;
           head = (head + event.delta).slice(0, 1024);
-          tail = (tail + event.delta).slice(-32768);
+          tail = (tail + event.delta).slice(-131072);
           if (progress.textChars - checkedAt >= 4096) {
             checkedAt = progress.textChars;
             if (repeatedOutput(tail)) {
