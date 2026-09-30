@@ -1,0 +1,165 @@
+{
+  "at": "2026-09-30T07:04:49.051961+00:00",
+  "testDataHash": "ae66f173a56e977602039c35428114a83d827459dd8c97a3f5f7861574774e0f",
+  "selection": "Frozen Round 2 library; new controls not searched or selected using test scores",
+  "runtime": "v3.3.1, registry Ditto 0.1.1",
+  "complete": true,
+  "usageNote": "Known usage is a lower bound when unknown calls exist; ledger reservations are not billed tokens",
+  "uniformNote": "Shared internal graph/loop and tools; different role objectives and private instructions retained",
+  "runs": {
+    "dynamic": {
+      "path": "runs/math-v8-round2-test-repaired-20260930-02/test",
+      "completed": 486,
+      "planned": 486,
+      "complete": true,
+      "correct": 469,
+      "accuracy": 0.9650205761316872,
+      "unfinishedFailedTasks": 0,
+      "historicalFailedAttempts": 0,
+      "knownTokens": 1943722,
+      "inputTokens": 1224727,
+      "outputTokens": 718995,
+      "cachedInputTokens": 735074,
+      "modelCalls": 1141,
+      "unknownUsageCalls": 26,
+      "usageStatuses": {
+        "known": 1115,
+        "unknown": 26
+      },
+      "ledgerChargedTokensNotBill": 12317594,
+      "completedTaskAgentCalls": {
+        "root": 486,
+        "reviewer": 486,
+        "independent": 28,
+        "checker": 11
+      },
+      "completedTaskToolCalls": {
+        "python": 121,
+        "arithmetic": 9
+      },
+      "completedTaskAgentFailures": 26
+    },
+    "single": {
+      "path": "runs/math-v8-round2-ablations-20260930-01/single/test",
+      "completed": 486,
+      "planned": 486,
+      "complete": true,
+      "correct": 453,
+      "accuracy": 0.9320987654320988,
+      "unfinishedFailedTasks": 0,
+      "historicalFailedAttempts": 0,
+      "knownTokens": 898284,
+      "inputTokens": 95014,
+      "outputTokens": 803270,
+      "cachedInputTokens": 10747,
+      "modelCalls": 486,
+      "unknownUsageCalls": 14,
+      "usageStatuses": {
+        "known": 472,
+        "unknown": 14
+      },
+      "ledgerChargedTokensNotBill": 6437248,
+      "completedTaskAgentCalls": {
+        "root": 486
+      },
+      "completedTaskToolCalls": {},
+      "completedTaskAgentFailures": 15
+    },
+    "fixed-full": {
+      "path": "runs/math-v8-round2-ablations-20260930-01/fixed-full/test",
+      "completed": 486,
+      "planned": 486,
+      "complete": true,
+      "correct": 477,
+      "accuracy": 0.9814814814814815,
+      "unfinishedFailedTasks": 0,
+      "historicalFailedAttempts": 0,
+      "knownTokens": 9327251,
+      "inputTokens": 7542500,
+      "outputTokens": 1784751,
+      "cachedInputTokens": 4823256,
+      "modelCalls": 3925,
+      "unknownUsageCalls": 36,
+      "usageStatuses": {
+        "known": 3889,
+        "unknown": 36
+      },
+      "ledgerChargedTokensNotBill": 23673605,
+      "completedTaskAgentCalls": {
+        "root": 972,
+        "reviewer": 486,
+        "independent": 486,
+        "checker": 486
+      },
+      "completedTaskToolCalls": {
+        "python": 1297,
+        "arithmetic": 446
+      },
+      "completedTaskAgentFailures": 35
+    },
+    "fixed-uniform": {
+      "path": "runs/math-v8-round2-uniform-20260930-01/fixed-uniform/test",
+      "completed": 486,
+      "planned": 486,
+      "complete": true,
+      "correct": 478,
+      "accuracy": 0.9835390946502057,
+      "unfinishedFailedTasks": 0,
+      "historicalFailedAttempts": 1,
+      "knownTokens": 14711775,
+      "inputTokens": 11731101,
+      "outputTokens": 2980674,
+      "cachedInputTokens": 9268336,
+      "modelCalls": 5904,
+      "unknownUsageCalls": 38,
+      "usageStatuses": {
+        "known": 5866,
+        "unknown": 38
+      },
+      "ledgerChargedTokensNotBill": 29838204,
+      "completedTaskAgentCalls": {
+        "root": 972,
+        "reviewer": 486,
+        "independent": 486,
+        "checker": 486
+      },
+      "completedTaskToolCalls": {
+        "python": 3012,
+        "arithmetic": 1077
+      },
+      "completedTaskAgentFailures": 26
+    }
+  },
+  "paired": {
+    "single vs dynamic": {
+      "compared": 486,
+      "bothCorrect": 449,
+      "correctedDynamicError": 4,
+      "regressedDynamicCorrect": 20,
+      "bothWrong": 13
+    },
+    "fixed-full vs dynamic": {
+      "compared": 486,
+      "bothCorrect": 465,
+      "correctedDynamicError": 12,
+      "regressedDynamicCorrect": 4,
+      "bothWrong": 5
+    },
+    "fixed-uniform vs dynamic": {
+      "compared": 486,
+      "bothCorrect": 464,
+      "correctedDynamicError": 14,
+      "regressedDynamicCorrect": 5,
+      "bothWrong": 3
+    },
+    "fixed-uniform vs fixed-full": {
+      "compared": 486,
+      "uniformOnlyCorrect": 3,
+      "heterogeneousOnlyCorrect": 2
+    }
+  },
+  "scope": "Test inference only, excluding search; uniform costs include the failed arithmetic attempt and its successful resume",
+  "knownNewTestTokens": 24937310,
+  "newTestUnknownUsageCalls": 88,
+  "qualityNote": "Same previously used MATH test; uniform changes both internal graph and tool capability, not a graph-only single-variable experiment"
+}

@@ -47,3 +47,27 @@ fixed-full 使用相同命令，将路径的 single 改为 fixed-full。两组�
 新增组准备时使用 `--variant fixed-uniform --out runs/math-v8-round2-uniform-20260930-01`，执行对应 `fixed-uniform/best.json`，输出到 `fixed-uniform/test`，使用 `--concurrency 50`；前两组继续执行，不取消未完成模型请求。
 
 最终报告按同一 task ID 比较准确率、配对的纠正/退步题数、已知 token 和未知 usage 请求。基础设施失败只记未完成，不改写成错误答案。未知 usage 的预算预留数不视为供应商实耗。
+
+
+## 完整结果（2026-09-30）
+
+四组均完整测试相同 486 道题。动态组使用此前完成的冻结 test；新三组全部重新生成。
+
+| 组别 | 正确题数 | 准确率 | 已确认 token | 缺失 usage 请求 |
+|---|---:|---:|---:|---:|
+| single | 453/486 | 93.21% | 898,284 | 14 |
+| dynamic | 469/486 | 96.50% | 1,943,722 | 26 |
+| fixed-full（异构） | 477/486 | 98.15% | 9,327,251 | 36 |
+| fixed-uniform（同构） | 478/486 | 98.35% | 14,711,775 | 38 |
+
+已确认 token 包含缓存输入；有未知 usage，以上均为实际总用量的下限。预算账本包含未知请求预留量，不是实际收费。新增三组已确认总计 24,937,310 token，另有 88 次请求缺失 usage；不包含搜索开销。
+
+配对比较：dynamic 相对 single 纠正 20 题、退步 4 题，净增 16 题；fixed-full 相对 dynamic 纠正 12 题、退步 4 题，净增 8 题；fixed-uniform 相对 dynamic 纠正 14 题、退步 5 题，净增 9 题。uniform 相对异构 fixed 纠正 3 题、退步 2 题，净增仅 1 题，不能据此证明同构优于异构。相同图基线同时改变 root/reviewer 的工具能力，也不能把差异全部归因于图结构。
+
+所有组保持 v3.3.1、Ditto 0.1.1。single 和 fixed-full 最终没有整题执行失败；uniform 第一遍一题因 arithmetic 参数 values 数量不足而中断，已按相同 bundle/runtime 续跑成功，保留其他 485 道题（包括错题）和第一次失败用量。最后无未完成题，没有将运行失败直接记为零分。
+
+仍有节点级推理故障：single 15 次、dynamic 26 次、fixed-full 35 次、uniform 26 次，包含返回不完整结果或重复生成后由程序处理的故障。某些长推理持续十几至二十分钟，并发只加速不同题目，不能缩短单条长请求。arithmetic 参数校验目前仍可能中断整题，后续应与 Python 参数错误一样返回可纠正的工具观察；本次未修改冻结运行时或提示词来消除它。
+
+回归检查：新增同构组后 `npm test` 为 97 通过、0 失败、0 跳过。脚本 provider 测试只证明路由与隔离语义。
+
+完整统计：[JSON 结果](math-v8-round2-ablation-results.json)，包括输入、输出、缓存、模型调用数、失败记录与配对计数。原始结果位于各运行目录的 test/summary.json、test/rows、test/task-usage。
