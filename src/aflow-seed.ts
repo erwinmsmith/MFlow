@@ -62,6 +62,10 @@ Resolve names to real record IDs; follow pagination and cross-application identi
 Inspect current state before writes; every agent shares this task's world. Reuse completed work, never recreate records or repeat successful sends.
 After each consequential write, inspect the resulting state and verify every requested postcondition. Repair concrete missing effects; do not replace tool execution with prose.
 Only API observations and the user's request are evidence. Grading references and hidden world snapshots are unavailable. Summarize completed effects, identifiers and any specific blocker concisely.`;
+export const hleInstruction = `Solve the original expert-level academic question, including any supplied image. Respect its exact definitions, assumptions, units and requested precision; for multiple choice give the option letter.
+Choose a subject-appropriate method. Separate established facts from speculation, and check the decisive step with an independent argument or exact computation when useful. Inspect supplied images directly; do not pretend to see labels or details that are not present.
+Available external tools are arithmetic, isolated Python and web_search. Use web results as cited evidence, verify their relevance, and do not seek benchmark answer keys or author rationales. State a concrete blocker if the evidence is insufficient; do not repeatedly cycle through the same conjecture or computation.
+For final solution responses, return these sections (framework control, role-design and operator-format stages must instead follow their requested schema exactly): Explanation: your reasoning; Answer: the precise final answer, without extra alternatives; Confidence: your estimated probability of correctness from 0% to 100%. Confidence reflects evidence, not the number of agents that agree.`;
 export const textOrganization = organizationSchema.parse({
   initialAgents: [profile], initialBindings: { root: 'solver' },
   agentTemplates: [
@@ -115,7 +119,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   const contract = code
     ? 'Return the complete executable Python solution with the requested function signature and any needed imports. No Markdown fences, explanations or boxed answers. Only public examples from the problem may be used as checks; hidden evaluation tests are not available.'
     : workflow ? automationInstruction
-    : academic ? 'Solve the academic question and preserve the required Explanation, Answer and Confidence format. Do not invent missing evidence.'
+    : academic ? hleInstruction
     : 'Answer the question using only the supplied passage and question. Return only the concise final answer; multiple answer spans may be separated with |. Do not include a derivation, Markdown or a boxed answer.';
   const prompts = {
     agent: `Solve the original task accurately. ${contract}\n\nTask:`,
@@ -129,7 +133,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
     profile.objective = code ? 'Implement the requested Python function correctly.' : workflow ? 'Execute and verify the requested business workflow.' : academic ? 'Solve the academic question accurately.' : 'Answer the supplied reading-comprehension question accurately.';
     profile.capability = code ? 'Python programming and specification checking' : workflow ? 'Cross-application API orchestration' : academic ? 'Academic knowledge and reasoning' : 'Evidence-grounded reading comprehension';
     if (workflow) { profile.tools = ['api_search', 'api_fetch', 'base64_encode']; profile.nodes = [...compositionNodes]; }
-    if (academic) profile.tools = [];
+    if (academic) { profile.tools=['arithmetic','python','web_search']; profile.nodes=[...compositionNodes]; }
     profile.expected_output = contract;
     profile.stop_condition = 'A complete answer or a concrete unresolved obstacle is stated.';
   }
@@ -141,7 +145,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   for (const template of organization.agentTemplates!) {
     // Code and QA answers are raw output, even if their content contains a literal boxed expression.
     template.composition = template.composition.replace(/ctx\.publishText\(id,([^\n;]+)\)/g, "ctx.publishText(id,$1,'raw')");
-    template.description = `${template.id}: ${code ? 'Python implementation and review' : workflow ? 'API workflow execution and state repair' : 'Reading comprehension and evidence checking'}`;
+    template.description = `${template.id}: ${code ? 'Python implementation and review' : workflow ? 'API workflow execution and state repair' : academic ? 'Subject-specific reasoning and independent evidence checking' : 'Reading comprehension and evidence checking'}`;
     if (template.id === 'reviewer') template.profile.objective = 'Find and correct specific errors in the supplied candidate.';
     if (template.id === 'independent') template.profile.objective = 'Solve independently using a complementary method and the original specification.';
   }
@@ -177,49 +181,53 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 /** Multiple measured roots; selection and all descendants use search data only. */
 export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], names?: string[]) {
   const seed = benchmarkSeed(tasks);
-  if (tasks[0].metric !== 'automationbench') return [{ name: 'default', ...seed }];
+  if (!['automationbench','hle'].includes(tasks[0].metric)) return [{ name: 'default', ...seed }];
+  const academic=tasks[0].metric==='hle';
+  const planAssignment=academic?'Identify the subject, exact assumptions, viable reasoning approaches and decisive checks. Do not give a guessed answer.':'Produce a dependency plan and verification checklist.';
+  const executeAssignment=academic?'Solve the original question using the plan as a proposal; verify its decisive steps and return the required academic answer format.':'Execute the plan against the actual APIs and verify requested effects.';
+  const auditAssignment=academic?'Identify alternative methods, ambiguous assumptions, counterexamples and exact checks for this question.':'Plan exact postcondition checks and protection against duplicate effects.';
   const single = `return loop({id:'single',plan:function*(ctx){return (yield* ctx.runAgent('root')).candidate_answer;}});`;
   const planned = structuredClone(seed.organization);
-  const planner = { ...planned.agentTemplates![0], id: 'planner', description: 'Plan exact dependencies and postconditions without making writes.',
+  const planner = { ...planned.agentTemplates![0], id: 'planner', description: academic?'Design a subject-specific method and decisive checks.':'Plan exact dependencies and postconditions without making writes.',
     profile: { ...planned.agentTemplates![0].profile, tools: [], nodes: ['INFER.REASONING.SAMPLE'] as ['INFER.REASONING.SAMPLE'],
-      objective: 'Produce an executable dependency plan, entity lookup requirements and postcondition checklist. Do not claim execution.', capability: 'Workflow decomposition and API dependency planning', expected_output: 'Dependency plan and exact verification checklist, without claims of execution.', stop_condition: 'The plan and unresolved lookup requirements are clearly stated.' },
+      objective: planAssignment, capability: academic?'Subject-specific method selection':'Workflow decomposition and API dependency planning', expected_output: academic?'A concrete solution plan and decisive verification checks.':'Dependency plan and exact verification checklist, without claims of execution.', stop_condition: 'The plan and unresolved lookup requirements are clearly stated.' },
     composition: textReviewer.replace('ctx.publishText(id,ctx.unwrap(out[node]).message.content)', "ctx.publishText(id,ctx.unwrap(out[node]).message.content,'raw')") };
   planned.agentTemplates!.push(planner);
   planned.initialAgents.push({ id: 'planner', ...planner.profile });
   planned.initialBindings!.planner = 'planner';
   const planExecute = `return loop({id:'plan-execute',plan:function*(ctx){
-    const plan=yield* ctx.runAgent('planner','Produce a dependency plan and verification checklist.'); ctx.dormant('planner');
-    return (yield* ctx.runAgent('root',{plan,instruction:'Execute the plan against the actual APIs and verify requested effects.'})).candidate_answer;
+    const plan=yield* ctx.runAgent('planner',${JSON.stringify(planAssignment)}); ctx.dormant('planner');
+    return (yield* ctx.runAgent('root',{plan,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
   }});`;
   const parallel = structuredClone(planned);
-  parallel.initialAgents.push({...parallel.initialAgents[1],id:'auditor',objective:'Identify exact postconditions, duplicate-effect risks and verification queries.',capability:'Independent effect and consistency planning'});
+  parallel.initialAgents.push({...parallel.initialAgents[1],id:'auditor',objective:auditAssignment,capability:academic?'Independent method and assumption checking':'Independent effect and consistency planning'});
   parallel.initialBindings!.auditor='planner';
   const parallelPlan = `return loop({id:'parallel-plan',plan:function*(ctx){
-    const g=graph('parallel-planning').node('planner/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner','Plan entity resolution and API dependency ordering.'),false,'text'))
-      .node('auditor/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor','Plan exact postcondition checks and protection against duplicate effects.'),false,'text'));
+    const g=graph('parallel-planning').node('planner/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner',${JSON.stringify(planAssignment)}),false,'text'))
+      .node('auditor/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor',${JSON.stringify(auditAssignment)}),false,'text'));
     const out=yield* graphStep(g,null,{concurrency:2});
     const plans=['planner','auditor'].map(id=>ctx.publishText(id,ctx.unwrap(out[id+'/plan']).message.content,'raw'));
     ctx.dormant('planner');ctx.dormant('auditor');
-    return (yield* ctx.runAgent('root',{plans,instruction:'Integrate these complementary plans, execute the workflow and verify actual effects.'})).candidate_answer;
+    return (yield* ctx.runAgent('root',{plans,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
   }});`;
   const adaptive = structuredClone(seed);
-  adaptive.prompts.factory = `Design a task-local subagent for this workflow. Return JSON {profile,composition} only.
-profile has id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. Available tools: api_search, api_fetch, base64_encode. Available nodes: ${compositionNodes.join(', ')}.
+  adaptive.prompts.factory = `Design a task-local subagent for this ${academic?'academic question':'workflow'}. Return JSON {profile,composition} only.
+profile has id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. Available tools: ${academic?'arithmetic, python, web_search':'api_search, api_fetch, base64_encode'}. Available nodes: ${compositionNodes.join(', ')}.
 composition is JavaScript source returning a public Ditto loop({id,plan:function*(ctx){...}}); the generator returns an AgentOutput object, never a string. Use ctx.self for node IDs; ctx.task contains only id/prompt, ctx.evidence the assignment.
-Build graph/loop structure and reasoning appropriate to this task's concrete API dependencies. It may delegate recursively with ctx.spawn(profile,parentId,composition) and yield* ctx.runAgent. Tools execute only through native INTERACTION.ACT.TOOL and INTERACTION.OBSERVE; no imports/process/network/eval.
+Build graph/loop structure and reasoning appropriate to this task's ${academic?'subject, uncertainties and competing approaches':'concrete API dependencies'}. It may delegate recursively with ctx.spawn(profile,parentId,composition) and yield* ctx.runAgent. Tools execute only through native INTERACTION.ACT.TOOL and INTERACTION.OBSERVE; no imports/process/network/eval.
 For SAMPLE use ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),true,'text'); ctx.unwrap checks node success. Preserve assistant actionRequests metadata and tool actionRequestId. ctx.publishText(id,text,'raw') returns AgentOutput.
 This complete tool-using program illustrates the public contract; adapt its structure and profile when the task calls for a specialist: ${seed.organization.agentTemplates![0].composition}
-${automationInstruction}`;
+${academic?hleInstruction:automationInstruction}`;
   adaptive.composition = `return loop({id:'adaptive-factory',plan:function*(ctx){
     const node='root/factory';
-    let messages=ctx.textMessages('root','Design a distinct subagent to execute this task; choose its actual internal graph and capability.','factory'),design;
+    let messages=ctx.textMessages('root',${JSON.stringify(academic?'Design a subject-specific subagent and internal graph suited to this question; it may reason, compute or research and should resolve the decisive uncertainty.':'Design a distinct subagent to execute this task; choose its actual internal graph and capability.')},'factory'),design;
     for(let attempt=0;attempt<3;attempt++){
       const g=graph('factory').node(node,'INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
       const result=yield* graphStep(g,null),response=ctx.unwrap(result[node]);
       try{design=JSON.parse(response.message.content);ctx.spawn(design.profile,'root',design.composition);break;}
       catch(error){if(attempt===2){ctx.failedAgent('root',String(error));return '';}messages.push(response.message,{role:'user',content:'Repair the JSON/profile/program interface only; preserve the intended specialist and method. Error: '+String(error)});}
     }
-    const executed=yield* ctx.runAgent(design.profile.id,'Execute the original task and verify its exact postconditions.');
+    const executed=yield* ctx.runAgent(design.profile.id,${JSON.stringify(executeAssignment)});
     ctx.dormant(design.profile.id);
     return executed.candidate_answer;
   }});`;

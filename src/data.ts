@@ -6,7 +6,8 @@ import evalplus from '../data/humaneval-plus.lock.json' with { type: 'json' };
 import extended from '../data/extended-benchmarks.lock.json' with { type: 'json' };
 import { taskSchema, type TaskInput, type Task } from "./types.js";
 import { Random, digest, save } from "./util.js";
-import { benchmarkPath } from './benchmark-hub.js';
+import { benchmarkPath, benchmarkHome, sharedPath } from './benchmark-hub.js';
+import type { Message } from '@codesoul-co/ditto/worker/infer';
 
 export async function readTasks(path: string): Promise<Task[]> {
   const shared = /^benchmark:([^/]+)\/(search|test)$/.exec(path);
@@ -44,7 +45,29 @@ export async function readTasks(path: string): Promise<Task[]> {
   return tasks;
 }
 export const promptKey = (task: TaskInput) =>
-  task.prompt.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  task.prompt.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase()+(task.images?.length?'\nImages:'+task.images.map(i=>i.sha256).join(','):'');
+
+/** Load only public question images; labels/rationales never enter the actor input. */
+export async function actorInput(task: Task): Promise<TaskInput> {
+  const imageParts=await Promise.all((task.images??[]).map(async image=>{
+    const bytes=await readFile(sharedPath(benchmarkHome(),image.path));
+    if(createHash('sha256').update(bytes).digest('hex')!==image.sha256)throw new Error('Question image checksum mismatch');
+    // Some official data URLs declare JPEG while carrying PNG/WebP bytes. Keep the bytes; normalize the transport MIME.
+    const mime=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':bytes.subarray(0,3).equals(Buffer.from([255,216,255]))?'image/jpeg':/^GIF8[79]a$/.test(bytes.subarray(0,6).toString())?'image/gif':bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP'?'image/webp':undefined;
+    if(!mime)throw new Error('Unsupported question image bytes');
+    return {type:'image_url' as const,image_url:{url:`data:${mime};base64,${bytes.toString('base64')}`,detail:'original' as const}};
+  }));
+  return {id:task.id,prompt:task.prompt,...(imageParts.length?{images:task.images,imageParts}:{})};
+}
+export function withTaskImages(messages: Message[], task?: TaskInput): Message[] {
+  return task?.imageParts?.length?[...messages,{role:'user',content:[{type:'text',text:'Images supplied with this original question. Inspect them directly; do not invent missing visual details.'},...task.imageParts]}]:messages;
+}
+
+/** Logs retain asset identity instead of duplicating base64 in every node/turn. */
+export function imageLog(value: unknown, task: TaskInput): unknown {
+  const assets=new Map(task.imageParts?.map((p,i)=>[p.image_url.url,`benchmark-asset:${task.images![i].path}#sha256=${task.images![i].sha256}`]));
+  return JSON.parse(JSON.stringify(value,(_key,v)=>typeof v==='string'?(assets.get(v)??v):v));
+}
 
 export function assertDatasetRole(tasks: Task[], role: "search" | "confirmation" | "test" | "prepare") {
   for (const task of tasks) {

@@ -1,3 +1,4 @@
+import { createBenchmarkWebTool } from './python-tool.js';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
@@ -10,6 +11,7 @@ import { benchmarkHome, extraBenchmarkIdentity } from './benchmark-hub.js';
 import { DittoAgents } from './ditto.js';
 import { OrganizationRuntime } from './runtime.js';
 import type { Task, Strategy, Limits, Execution } from './types.js';
+import { actorInput } from './data.js';
 
 export const automationTools = ['api_search', 'api_fetch', 'base64_encode'];
 const argumentsSchemas = {
@@ -94,8 +96,11 @@ export async function openAutomation(task: Task) {
 
 /** Every attempt has a fresh official world, shared by all agents within that MAS. */
 export async function executeBenchmark(task: Task, agents: DittoAgents, strategy: Strategy, limits: Limits, pool?: ConstructorParameters<typeof OrganizationRuntime>[2]): Promise<Execution> {
-  const input = { id: task.id, prompt: task.prompt };
-  if (task.metric !== 'automationbench') return new OrganizationRuntime(agents, limits, pool).run(strategy, input);
+  const input = await actorInput(task);
+  if (task.metric !== 'automationbench') {
+    const scoped=task.metric==='hle'?new DittoAgents(agents.provider,agents.model,agents.tools.map(t=>t.name==='web_search'?createBenchmarkWebTool(input):t)):agents;
+    return new OrganizationRuntime(scoped, limits, pool).run(strategy, input);
+  }
   const env = await openAutomation(task);
   try {
     const scoped = new DittoAgents(agents.provider, agents.model, [...agents.tools, ...env.tools]);

@@ -109,6 +109,35 @@ class AdapterTests(unittest.TestCase):
                 self.assertTrue(invoke.call_args.kwargs['tools'])
         finally:os.chdir(original)
 
+    def test_hle_shared_jsonl_preserves_unicode_question_separators(self):
+        with patch.dict(common.PROTOCOL,{'benchmark':'hle','datasetProtocol':'hle-full-holdout-v1'}):
+            search,test=common.tasks('search'),common.tasks('test')
+        self.assertEqual((len(search),len(test)),(200,2300))
+        self.assertFalse({t['id'] for t in search}&{t['id'] for t in test})
+        self.assertEqual(sum(bool(t.get('images')) for t in search+test),342)
+
+    def test_hle_retrieval_filters_answer_repositories_and_verbatim_queries(self):
+        from search_provider import hle_rules
+        check=hle_rules('In this distinctive academic question the original full text must never be copied verbatim to retrieve an answer key.')
+        self.assertTrue(check(query='site:huggingface.co hle'))
+        self.assertTrue(check(query='In this distinctive academic question the original full text must never be copied verbatim to retrieve an answer key.'))
+        self.assertTrue(check(result={'href':'https://github.com/answers/hle','title':'answers','body':'data'}))
+        self.assertIsNone(check(result={'href':'https://en.wikipedia.org/wiki/Entropy','title':'Entropy','body':'General thermodynamic definition'}))
+
+    def test_hle_native_consensus_keeps_response_and_resume_keeps_answer_without_actor_repeat(self):
+        import automation_run as runner
+        method=DyLAN()
+        response='Explanation: offline fixture.\nAnswer: B\nConfidence: 70%'
+        with patch.dict(common.PROTOCOL,{'benchmark':'hle'}),patch('dylan.call',return_value=response) as invoke,contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(method.solve('Offline academic fixture'),response)
+            self.assertEqual(invoke.call_count,3)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'DyLAN/test').mkdir(parents=True)
+            with patch.object(runner,'RUNS',root),patch.object(runner,'method',types.SimpleNamespace(solve=lambda _: (_ for _ in ()).throw(AssertionError('actor repeated')))),patch.object(runner,'usage',return_value=0),patch.object(runner,'benchmark_rpc',side_effect=[{'checkpoint':True,'answer':response},{'score':1,'partialCredit':1,'confidence':70}]) as rpc:
+                row=runner.episode('DyLAN','test',{'id':'fixture','prompt':'question'})
+            self.assertEqual(row['answer'],response)
+            self.assertEqual(rpc.call_args.kwargs['answer'],response)
+
     def test_native_programmer_uses_scoped_ditto_python_without_host_execution(self):
         import asyncio
         import ast

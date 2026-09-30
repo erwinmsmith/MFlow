@@ -6,6 +6,7 @@ import { EpisodeExhausted, type DittoAgents } from './ditto.js';
 import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, type Execution, type Limits,
   type Strategy, type TaskInput } from './types.js';
 import { PolicyContractError } from './strategy-program.js';
+import { withTaskImages, imageLog } from './data.js';
 class GeneratedProgramError extends PolicyContractError {}
 
 /** The seed is itself a searched artifact, not a hidden fixed agent executor. */
@@ -276,20 +277,20 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   };
   // Wrap bindings for contract enforcement and synchronous VM deadlines. Graph
   // dependency scheduling, concurrent nodes, tools and inference remain Ditto's.
-  const bind = (task: ExecutionGraph<unknown>['tasks'][number], input: unknown, output: unknown) => {
-    machine.context.binding = task.bind; machine.context.graphInput = input; machine.context.nodeOutputs = output;
+  const bind = (nodeTask: ExecutionGraph<unknown>['tasks'][number], input: unknown, output: unknown) => {
+    machine.context.binding = nodeTask.bind; machine.context.graphInput = input; machine.context.nodeOutputs = output;
     let value: Record<string, any>;
     try { value = machine.evaluate('binding(graphInput, nodeOutputs)'); }
-    catch (error) { throw new PolicyContractError(`Node ${task.id} binding: ${String(error)}`); }
-    const id = task.id.split('/')[0], agent = member(id);
-    if (!agent.profile.nodes!.includes(task.node as typeof compositionNodes[number]))
-      throw new PolicyContractError(`Agent ${id} cannot execute node ${task.node}`);
+    catch (error) { throw new PolicyContractError(`Node ${nodeTask.id} binding: ${String(error)}`); }
+    const id = nodeTask.id.split('/')[0], agent = member(id);
+    if (!agent.profile.nodes!.includes(nodeTask.node as typeof compositionNodes[number]))
+      throw new PolicyContractError(`Agent ${id} cannot execute node ${nodeTask.node}`);
     if (agent.status !== 'ACTIVE') {
       if ([...population.values()].filter(a => a.status === 'ACTIVE').length >= limits.maxActiveAgents)
         throw new EpisodeExhausted('Active population limit reached');
       agent.status = 'ACTIVE'; event('ACTIVATE', id);
     }
-    if (task.node.startsWith('INFER.')) {
+    if (nodeTask.node.startsWith('INFER.')) {
       for (const action of value.actions ?? []) {
         if (!agent.profile.tools.includes(action.name) || action.target?.kind !== 'tool')
           throw new PolicyContractError(`Agent ${id} requested an unavailable action`);
@@ -297,15 +298,15 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       // Deployment settings cannot be optimized into another provider/model.
       const format = value.model?.providerOptions?.response_format?.type ?? 'json_object';
       if (!['text', 'json_object'].includes(format)) throw new PolicyContractError('Unsupported response format');
-      value = { ...value, model: { provider: 'mflow', model: agents.model.model,
+      value = { ...value, ...(Array.isArray(value.messages)?{messages:withTaskImages(value.messages,task)}:{}), model: { provider: 'mflow', model: agents.model.model,
         providerOptions: { response_format: { type: format } } },
         generation: { ...value.generation, temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens },
-        metadata: { ...value.metadata, kind: 'agent', agentId: id, nodeId: task.id } };
-      if (task.node === 'INFER.REASONING.TRAJECTORY')
+        metadata: { ...value.metadata, kind: 'agent', agentId: id, nodeId: nodeTask.id } };
+      if (nodeTask.node === 'INFER.REASONING.TRAJECTORY')
         value.constraints = { maxSteps: limits.maxSteps, maxTotalTokens: limits.maxTokens,
           timeoutMs: limits.timeoutMs, ...value.constraints };
     }
-    if (task.node === 'INTERACTION.ACT.TOOL') {
+    if (nodeTask.node === 'INTERACTION.ACT.TOOL') {
       if (!agent.profile.tools.includes(value.call?.name)) throw new PolicyContractError(`Agent ${id} cannot use tool ${value.call?.name}`);
       if (++toolCalls > limits.maxToolCalls) throw new EpisodeExhausted('Tool call limit reached');
     }
@@ -339,7 +340,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
             throw new (programs.has(owner.profile.id)?GeneratedProgramError:PolicyContractError)(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
           checked = checked.node(node.id, node.node, node.dependencies, (input, output) => {
             const value = bind(node, input, output);
-            bindings[node.id] = structuredClone(value);
+            bindings[node.id] = task.imageParts?.length ? imageLog(value,task) : structuredClone(value);
             return value;
           });
           topology.push({ id: node.id, type: node.node, dependencies: [...node.dependencies] });

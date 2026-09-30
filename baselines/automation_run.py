@@ -24,7 +24,7 @@ def episode(name, phase, task):
     execution_id=os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE','')+task['id']
     SCOPE.set((name,phase,execution_id))
     started=time.monotonic();out=RUNS/name/phase;status='completed';answer=''
-    restored=benchmark_rpc('start',task)['checkpoint']
+    checkpoint=benchmark_rpc('start',task);restored=checkpoint['checkpoint'];answer=checkpoint.get('answer','')
     if not restored:
         try:
             with (out/(task['id'].replace('/','-')+'.log')).open('a') as stream,contextlib.redirect_stdout(stream),contextlib.redirect_stderr(stream):
@@ -32,7 +32,7 @@ def episode(name, phase, task):
         except TransportFailure:raise
         except Exception as error:
             status='execution_error';save_row(out/'errors.jsonl',{'taskId':task['id'],'error':repr(error)})
-    grade=benchmark_rpc('finish',task)
+    grade=benchmark_rpc('finish',task,answer=answer)
     row={'taskId':task['id'],**grade,'answer':answer,'status':status,'checkpointRecovered':restored,
          'tokens':usage(name,phase,execution_id),'seconds':time.monotonic()-started}
     save_row(out/'results.jsonl',row)

@@ -13,9 +13,11 @@ class AutoAgents:
             def __init__(self,*args,**kwargs):pass
             async def aask(self,prompt,system_msgs=None):
                 workflow=PROTOCOL.get('benchmark')=='automationbench'
-                design=workflow and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
+                academic=PROTOCOL.get('benchmark')=='hle'
+                design=(workflow or academic) and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
                 messages=[{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]
                 if workflow:messages.insert(0,{'role':'system','content':automation_capabilities})
+                if academic:messages.insert(0,{'role':'system','content':'Academic execution capability: native CustomAction actors can inspect the original question images and call arithmetic, isolated Python and web_search via Ditto function tools. Design subject-specific specialists and complementary methods. Role/observer steps plan and assess; tools fields remain in the original AutoAgents Action catalogue. SearchAndSummarize supplies external evidence. The final response must preserve Explanation, Answer and Confidence (0-100%) sections.'})
                 content=call(messages+[{'role':'user','content':prompt}],tools=not design)
                 owner.remember_roles(content)
                 return content

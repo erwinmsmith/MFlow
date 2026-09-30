@@ -29,8 +29,10 @@ def call(messages,tools=True):
         with urllib.request.urlopen(req,timeout=None) as response:result=json.load(response)
     except urllib.error.HTTPError as e:
         error=e.read().decode()
+        try:detail=json.loads(error).get('error',error)
+        except (ValueError,AttributeError):detail=error
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
-        if any(f'[{code}]' in error or f'"code":"{code}"' in error for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT')):raise ModelOutputFailure(error) from None
+        if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT')):raise ModelOutputFailure(error) from None
         raise TransportFailure(error) from None
     if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']
@@ -38,25 +40,27 @@ def call(messages,tools=True):
 def search_web(query):
     query=' '.join(query.split())
     if len(query)>600 or len(query.split())>75:
-        query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}]).strip()
+        query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}],tools=False).strip()
     method,phase,task_id=SCOPE.get()
     req=urllib.request.Request(endpoint()+'/search',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'query':query}).encode(),headers={'Content-Type':'application/json'})
     with urllib.request.urlopen(req,timeout=None) as response:return json.dumps(json.load(response)['results'])
 
 def tasks(split):
-    if PROTOCOL.get('benchmark')=='automationbench':
+    if PROTOCOL.get('benchmark') in ('automationbench','hle'):
         home=Path(os.environ.get('BENCHMARK_HOME',ROOT.parent/'Benchmarks'))
-        path=home/f'views/automationbench-public-simple-v1/{split}.jsonl'
-        entry=json.loads((ROOT/'data/extended-benchmarks.lock.json').read_text())['automationbench']['splits'][split]
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=entry['sha256']:raise ValueError('Pinned AutomationBench split hash mismatch')
-        rows=[json.loads(s) for s in path.read_text().splitlines()]
-        if len(rows)!=entry['count']:raise ValueError('Pinned AutomationBench split count mismatch')
+        protocol=PROTOCOL.get('datasetProtocol','automationbench-public-simple-v1')
+        path=home/f'views/{protocol}/{split}.jsonl'
+        lock=json.loads((ROOT/'data/extended-benchmarks.lock.json').read_text())
+        entry=next(v for v in lock.values() if v['protocol']==protocol)['splits'][split]
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=entry['sha256']:raise ValueError('Pinned shared split hash mismatch')
+        rows=[json.loads(s) for s in path.read_text().split('\n') if s.strip()]
+        if len(rows)!=entry['count']:raise ValueError('Pinned shared split count mismatch')
         return rows
     path=ROOT/f'data/benchmarks/math/{split}.jsonl'
     lock=json.loads((ROOT/'data/aflow.lock.json').read_text())
     entry=lock["files"][f"math_{'validate' if split=='search' else 'test'}.jsonl"]
     if hashlib.sha256(path.read_bytes()).hexdigest()!=entry["convertedSha256"]:raise ValueError("Pinned split hash mismatch")
-    rows=[json.loads(s) for s in path.read_text().splitlines()]
+    rows=[json.loads(s) for s in path.read_text().split('\n') if s.strip()]
     if len(rows)!=entry["count"]:raise ValueError("Pinned split count mismatch")
     return rows
 
@@ -77,9 +81,9 @@ def save_row(out,row):
     with out.open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX);f.write(json.dumps(row)+'\n');f.flush()
 
-def benchmark_rpc(route,task):
+def benchmark_rpc(route,task,**fields):
     method,phase,task_id=SCOPE.get()
-    req=urllib.request.Request(endpoint()+'/'+route,data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'benchmarkTaskId':task['id']}).encode(),headers={'Content-Type':'application/json'})
+    req=urllib.request.Request(endpoint()+'/'+route,data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'benchmarkTaskId':task['id'],**fields}).encode(),headers={'Content-Type':'application/json'})
     try:
         with urllib.request.urlopen(req,timeout=None) as response:return json.load(response)
     except urllib.error.HTTPError as e:raise TransportFailure(e.read().decode()) from None
@@ -88,7 +92,7 @@ def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""
     files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',PROTOCOL_PATH,ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
     if PROTOCOL.get('benchmark')!='automationbench':files += [ROOT/'dist/src/python-tool.js',ROOT/'scripts/resume_aflow_test.py']
-    if PROTOCOL.get('benchmark')=='automationbench':files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
+    if PROTOCOL.get('benchmark') in ('automationbench','hle'):files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
     manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':len(tasks('test')),'validationCount':len(tasks('search')),'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
     manifest['transport']={'endpoint':endpoint(),'executionNamespace':os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE',''),'usagePath':str(Path(os.environ.get('MFLOW_BASELINE_USAGE_PATH',RUNS/'usage.jsonl')).resolve())}
     if os.environ.get('MFLOW_BASELINE_TRANSPORT_ROOT'):

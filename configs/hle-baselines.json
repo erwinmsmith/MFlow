@@ -1,0 +1,30 @@
+{
+  "benchmark": "hle",
+  "runDirectory": "runs/hle-deepseek-flash-20260930-v1",
+  "model": "deepseek-flash",
+  "temperature": 0,
+  "maxOutputTokens": 393216,
+  "providerTimeoutMs": 2147483647,
+  "providerOptions": {
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "episodeTokenLimit": null,
+  "overallTokenCeiling": null,
+  "concurrency": 2,
+  "aflow": {
+    "maxRounds": null,
+    "validationRounds": 5,
+    "checkConvergence": true,
+    "operators": [
+      "Custom",
+      "ScEnsemble",
+      "Programmer"
+    ]
+  },
+  "seed": 42,
+  "datasetProtocol": "hle-full-holdout-v1",
+  "judgeModel": "deepseek-flash",
+  "toolProtocol": "tool-augmented: arithmetic, isolated Python, web_search; not official no-tools full-test"
+}

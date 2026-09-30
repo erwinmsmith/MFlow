@@ -1,4 +1,8 @@
-import { Sandbox, createLocalSandboxExecutor, type RegisteredTool } from '@codesoul-co/ditto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { TaskInput } from './types.js';
+import { resolve } from 'node:path';
+import { Sandbox, createLocalSandboxExecutor, createWebSearchTool, type RegisteredTool } from '@codesoul-co/ditto';
 import { z } from 'zod';
 
 export const dockerCommand = process.env.MFLOW_DOCKER ?? (process.platform === 'darwin' ? '/opt/homebrew/bin/docker' : 'docker');
@@ -47,4 +51,14 @@ export function createPythonTool(image: string): RegisteredTool {
         { status: 'failed', content: result.stderr, error: { code: 'PYTHON_EXECUTION', message: `Python exited ${result.exitCode}` } };
     },
   };
+}
+
+/** External search provider; execution and permissions remain public Ditto tools. */
+export function createBenchmarkWebTool(task?: TaskInput) {
+  return createWebSearchTool({provider:{origin:'https://duckduckgo.com',async search({query,limit},options){
+    const {stdout}=await promisify(execFile)(resolve(process.cwd(),'../MFlow-baselines/.venv-legacy/bin/python'),
+      [new URL('../../baselines/search_provider.py',import.meta.url).pathname,query,String(limit),...(task?[task.prompt,task.id]:[])],
+      {signal:options?.signal,maxBuffer:8*1024*1024});
+    return JSON.parse(stdout);
+  }}});
 }

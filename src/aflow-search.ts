@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool, type ModelSettings } from "./ditto.js";
-import { pythonImage, createPythonTool } from './python-tool.js';
+import { pythonImage, createPythonTool, createBenchmarkWebTool } from './python-tool.js';
 import { strategySchema, organizationSchema, rootProfile, searchConfigSchema, type Task, type Strategy } from "./types.js";
 import { AGENT_PROMPT, FACTORY_PROMPT, REVIEW_PROMPT } from "./prompts.js";
 import { readTasks, assertDatasetRole, promptKey } from "./data.js";
@@ -121,7 +121,8 @@ export async function runAFlowSearch(options: {
   assertDatasetRole(tasks, 'search');
   const seeds = benchmarkSeeds(tasks, config.initializations), seed = seeds[0];
   const workflow = tasks[0].metric === 'automationbench';
-  const allowedTools = workflow ? automationTools : ['arithmetic', 'python'];
+  const webSearch=tasks[0].metric==='hle';
+  const allowedTools = workflow ? automationTools : ['arithmetic', 'python', ...(webSearch?['web_search']:[])];
   const taskInterface = policyInterface.replace('tools must be drawn from arithmetic and python', `tools must be drawn from ${allowedTools.join(', ')}`);
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
@@ -129,7 +130,7 @@ export async function runAFlowSearch(options: {
   const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>, context: Record<string, unknown> = {}) =>
     new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? '', {
       onProgress: progress => save(join(out, 'requests', `${progress.id}.json`), { ...context, ...progress }),
-    }), undefined, observe), options.model, image ? [arithmeticTool, createPythonTool(image)] : []);
+    }), undefined, observe), options.model, image ? [arithmeticTool, createPythonTool(image), ...(webSearch?[createBenchmarkWebTool()]:[])] : []);
   // Check configuration before starting the Python optimizer or creating paid requests.
   makeAgents();
   const source = resolve(options.source);
@@ -147,7 +148,7 @@ export async function runAFlowSearch(options: {
     if (name.endsWith('.js')) code[name] = digest(await readFile(join(codeDir, name), 'utf8'));
   const manifest = { protocol: 'official-aflow-ditto-library-v2', transport: 'ditto-public-stream-v1', seedProvenance: seed.provenance, config, model: options.model,
     ...await gradingIdentity(tasks),
-    dataHash: digest(tasks), source: lock, code, pythonImage: image,
+    dataHash: digest(tasks), source: lock, code, pythonImage: image, webSearch,
     controller: digest(await readFile(controller, 'utf8')),
     pythonEnvironment: await pythonEnvironment(options.python),
     graderEnvironment: tasks.some((t) => t.metric === 'math') ? await pythonEnvironment(process.env.MFLOW_BENCH_PYTHON ?? 'python3') : undefined,
@@ -277,7 +278,7 @@ export async function runAFlowSearch(options: {
         result = await evaluation(input.round, input.repeat, candidate(input.strategy));
       } else if (req.url === '/freeze') {
         const strategy = candidate(input.strategy);
-        const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1', pythonImage: image, strategy,
+        const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1', pythonImage: image, webSearch, strategy,
           pool: strategy.organization!.initialAgents, model: options.model, config: runtimeConfig,
           searchDataHash: digest(tasks), selectionTaskIds: tasks.map((t) => t.id),
           selectionPromptHashes: tasks.map((t) => digest(promptKey(t))),

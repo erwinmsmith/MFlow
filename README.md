@@ -76,7 +76,7 @@ npm run mflow -- benchmarks --verify
 npm run mflow -- benchmarks path --name HumanEval+ --split test
 ```
 
-本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 文本子集和 AutomationBench；GAIA、BFCL、τ³
+本轮可执行 DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 全量多模态、自定义隔离搜索/测试和 AutomationBench；GAIA、BFCL、τ³
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
 六个 benchmark 的默认搜索分别选择数学、阅读理解或 Python 代码提示词和输出契约；
@@ -202,3 +202,5 @@ Consolidation 只接收任务输入与 agent 输出，不接收评分或参考�
 最新搜索协议见 [v5：异构 MAS 配置、父节点执行图继承与动态策略](docs/search-v5.md)。
 
 当前实验实现：[v8 完整文本推理与动态 MAS](docs/search-v8.md)。该版借用 AFlow 验证搜索产物初始化，比较时需要披露迁移先验；持久化工具创建仍待 Ditto 公共包支持。
+
+HLE 的五框架协议、图片/工具接入和远端运行命令见 [HLE experiment](docs/hle-experiment.md)。

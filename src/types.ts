@@ -252,7 +252,10 @@ export const taskSchema = z
     metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus", "hle", "automationbench"]).default("exact"),
     benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "hle", "automationbench"]).optional(),
     aflowSplit: z.enum(["validate", "test"]).optional(),
-    dataset: z.object({ protocol: z.enum(['humaneval-plus-aflow-v1', 'hle-text-test-v1', 'automationbench-public-simple-v1']), split: z.enum(['search', 'test']) }).strict().optional(),
+    dataset: z.object({ protocol: z.enum(['humaneval-plus-aflow-v1', 'hle-text-test-v1', 'hle-full-test-v1', 'hle-full-holdout-v1', 'automationbench-public-simple-v1']), split: z.enum(['search', 'test']) }).strict().optional(),
+    images: z.array(z.object({path:z.string().min(1),sha256:z.string().regex(/^[a-f0-9]{64}$/),mimeType:z.enum(['image/png','image/jpeg','image/gif','image/webp'])}).strict()).min(1).optional(),
+    category: z.string().optional(),
+    answerType: z.string().optional(),
     reference: z.object({
       answers: z.array(z.array(z.string())).optional(),
       tests: z.array(z.string()).optional(),
@@ -274,16 +277,17 @@ export const taskSchema = z
         !task.reference?.evalplusTaskId || !task.reference.entryPoint || !task.reference.prefix))
       ctx.addIssue({ code: 'custom', message: 'HumanEval+ requires a locked dataset and EvalPlus task reference' });
     const protocol = ({ evalplus: 'humaneval-plus-aflow-v1', hle: 'hle-text-test-v1', automationbench: 'automationbench-public-simple-v1' } as Record<string, string>)[task.metric];
-    if ((protocol && (!task.dataset || task.dataset.protocol !== protocol || task.benchmark !== (task.metric === 'evalplus' ? 'humaneval_plus' : task.metric))) ||
+    const matchingProtocol=task.metric==='hle' ? ['hle-text-test-v1','hle-full-test-v1','hle-full-holdout-v1'].includes(task.dataset?.protocol??'') : task.dataset?.protocol===protocol;
+    if ((protocol && (!task.dataset || !matchingProtocol || task.benchmark !== (task.metric === 'evalplus' ? 'humaneval_plus' : task.metric))) ||
         (task.dataset && (!protocol || task.aflowSplit)))
       ctx.addIssue({ code: 'custom', message: 'Benchmark metric needs matching locked protocol and benchmark metadata' });
-    if (task.metric === 'hle' && task.dataset?.split !== 'test')
+    if (task.metric === 'hle' && task.dataset?.protocol!=='hle-full-holdout-v1' && task.dataset?.split !== 'test')
       ctx.addIssue({ code: 'custom', message: 'HLE official test cannot be used for search' });
     if (task.metric === 'automationbench' && !task.reference?.automationTaskId)
       ctx.addIssue({ code: 'custom', message: 'AutomationBench requires an official task reference' });
   });
 export type Task = z.infer<typeof taskSchema>;
-export type TaskInput = Pick<Task, "id" | "prompt">;
+export type TaskInput = Pick<Task, "id" | "prompt" | "images"> & {imageParts?:{type:'image_url';image_url:{url:string;detail:'original'}}[]};
 export interface Evaluated {
   taskId: string;
   score: 0 | 1;

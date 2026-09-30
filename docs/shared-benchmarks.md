@@ -51,7 +51,7 @@ python3 ../Benchmarks/bench.py path bfcl --protocol raw
 | GAIA | HF `682dd723`；2023 validation 与附件 | 尚未制定 MFlow 划分 | 仅管理资产，官方 test 未下载 |
 | BFCL | V4 checkout `6ea57973` | 原类别与会话保留 | 仅管理资产与官方工具/评分代码 |
 | τ³ | v1.0.1 / `fc0055dc` | 保留原 split 结构 | 仅管理资产与官方环境/评分代码 |
-| HLE | `cais/hle@5a81a4c7`；官方 evaluator `22ed3074` | 无 search / 2158 无图题 test | 全部 2500 题原始文件已下载；文本评测与 Ditto judge 已接入 |
+| HLE | `cais/hle@5a81a4c7`；官方 evaluator `22ed3074` | 官方 2500 test；另有自定义 200 search / 2300 test | 全部图片、五框架 actor 和官方 prompt/schema 的 Ditto judge 已接入 |
 | AutomationBench | Zapier 1.0.6 / `4a8e1061`，API toolset | 200 simple / 600 public domain | 官方环境、工具与断言评分已接入 |
 
 GAIA 的附件及 gated 条件见[官方数据卡](https://huggingface.co/datasets/gaia-benchmark/GAIA)。
@@ -120,8 +120,11 @@ HLE 的整个官方 Parquet（274,276,147 bytes）已通过授权浏览器下载
 访问仍返回 403，换机器时需让下载 token 具备该 gated repo 权限，也可授权浏览器下载到
 `collections/hle/raw/data/test-00000-of-00001.parquet` 后再运行准备命令。
 
-HLE 只有官方 test，本轮不切出 search，也不允许 prepare 重划。
-MFlow 暂用全部 2158 道无图题；342 道有图题仍在原始文件，文本子集成绩不能称为完整 HLE 成绩。
+HLE 只有官方 test。保留原始 `hle-text-test-v1`，新增 `hle-full-test-v1`（2500 题、342 图片题、无 search），
+以及 `hle-full-holdout-v1`（分层 200 search / 2300 test，28 / 314 图片题）。
+按类别、答案类型与模态以 seed 42 最大余数分配，SHA256(42:taskId) 排序；题目/图片组合不跨划分。
+这是单独命名的自定义实验协议，不能将其 test 分数称为官方完整 HLE 成绩。
+完整五框架实验使用后者，详细运行、工具与 judge 差异见 [HLE experiment](hle-experiment.md)。
 复用固定官方 system/judge prompt 与判定 schema（MIT，Copyright 2025 centerforaisafety；许可见 LICENSE）；judge 经 Ditto INFER Worker 执行，
 参考答案仅给 judge。必须显式设置 `MFLOW_HLE_JUDGE_MODEL`，并由同一配置 endpoint 提供；
 固定官方 evaluator 默认 judge 为 `o3-mini-2025-01-31`，改用 DeepSeek 必须披露，不能直接等同官方评分。

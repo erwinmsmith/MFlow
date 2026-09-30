@@ -152,7 +152,7 @@ export async function checkScoring(tasks: Task[]): Promise<void> {
   if (metrics.has('automationbench')) await checkAutomation();
   if (metrics.has('hle')) {
     if (!process.env.MFLOW_HLE_JUDGE_MODEL) throw new Error('HLE scoring requires explicit MFLOW_HLE_JUDGE_MODEL (same configured provider endpoint)');
-    await extraBenchmarkIdentity('hle');
+    await extraBenchmarkIdentity('hle',tasks[0].dataset?.protocol);
   }
 }
 
@@ -176,7 +176,7 @@ function evalplusRuntime() {
 export async function gradingIdentity(tasks: Task[]) {
   if (tasks.some(t => t.metric === 'automationbench' || t.metric === 'hle')) {
     const name = tasks[0].metric as 'hle' | 'automationbench';
-    return { extendedBenchmark: await extraBenchmarkIdentity(name),
+    return { extendedBenchmark: await extraBenchmarkIdentity(name,tasks[0].dataset?.protocol),
       ...(name === 'hle' ? { hleJudgeModel: process.env.MFLOW_HLE_JUDGE_MODEL } : {
         automationBridge: createHash('sha256').update(await readFile('benchmark-hub/automation_bridge.py')).digest('hex'),
         automationPythonEnvironment: (await exec(automationPython(), ['-c', "import sys,json,importlib.metadata as m; print(json.dumps([sys.version,sorted((p.metadata['Name'],p.version) for p in m.distributions())]))"])).stdout.trim() }) };

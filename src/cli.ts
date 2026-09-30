@@ -14,7 +14,7 @@ import {
   type StoreSnapshot,
 } from "@codesoul-co/ditto";
 import { DittoAgents, MeteredProvider, httpProvider, executionVersion, arithmeticTool } from "./ditto.js";
-import { createPythonTool } from './python-tool.js';
+import { createPythonTool, createBenchmarkWebTool } from './python-tool.js';
 import { prepare, readTasks, assertTestDisjoint } from "./data.js";
 import { grade, checkScoring, gradingIdentity } from "./grading.js";
 import { benchmarkHome, benchmarkPath, benchmarkName } from './benchmark-hub.js';
@@ -263,7 +263,7 @@ async function run() {
       throw new Error("Canonical state requires --protocol continual");
     if (protocol === "continual") required("state-out");
     const agents = new DittoAgents(provider, bundle.model,
-      bundle.pythonImage ? [arithmeticTool, createPythonTool(bundle.pythonImage)] : undefined);
+      bundle.pythonImage ? [arithmeticTool, createPythonTool(bundle.pythonImage), ...(bundle.webSearch?[createBenchmarkWebTool()]:[])] : undefined);
     // Independent held-out evaluation does not share the training execution cache.
     const canonical =
       protocol === "continual"
@@ -345,7 +345,7 @@ async function run() {
           const meter = new MeteredProvider(httpProvider(bundle.model,process.env.MFLOW_API_KEY??'',{
             onProgress:p=>save(join(out,'requests',`${p.id}.json`),{taskId:task.id,...p}),
           }),undefined,records=>save(usagePath,[...previous,...records]));
-          const local = new DittoAgents(meter,bundle.model,bundle.pythonImage?[arithmeticTool,createPythonTool(bundle.pythonImage)]:[]);
+          const local = new DittoAgents(meter,bundle.model,bundle.pythonImage?[arithmeticTool,createPythonTool(bundle.pythonImage),...(bundle.webSearch?[createBenchmarkWebTool()]:[])]:[]);
           const execution = await checkpointExecution(join(out,'executions',`${digest(task.id)}.json`),task.id,
             ()=>executeBenchmark(task,local,bundle.strategy,bundle.config.episode,bundle.pool));
           return {taskId:task.id,...await grade(task,execution.answer,execution,local),execution};

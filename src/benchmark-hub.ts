@@ -21,19 +21,21 @@ export async function benchmarkPath(name: string, split: 'search' | 'test') {
   const catalog = JSON.parse(await readFile(join(home, 'catalog.json'), 'utf8'));
   const record = catalog.benchmarks[benchmarkName(name)];
   if (!record) throw new Error(`Unknown shared benchmark: ${name}`);
-  const view = record.views?.[record.defaultProtocol];
+  const protocol=benchmarkName(name)==='hle'?(process.env.MFLOW_HLE_PROTOCOL??record.defaultProtocol):record.defaultProtocol;
+  const view = record.views?.[protocol];
   if (!view || view.format !== 'mflow-jsonl')
     throw new Error(`${name}: shared assets are installed, but the MFlow interactive adapter is not implemented`);
   if (record.runtime === 'access-pending') throw new Error(`${name}: official dataset access is pending`);
-  if (benchmarkName(name) === 'hle' && split === 'search') throw new Error('HLE has only official test data; no search split');
+  if (benchmarkName(name) === 'hle' && split === 'search' && protocol!=='hle-full-holdout-v1') throw new Error('HLE has only official test data; no search split');
   const path = sharedPath(home, `${view.path}/${split}.jsonl`);
   await access(path);
   return path;
 }
 
-export async function extraBenchmarkIdentity(name: 'hle' | 'automationbench') {
+export async function extraBenchmarkIdentity(name: 'hle' | 'automationbench', protocol?: string) {
   const locks = JSON.parse(await readFile(new URL('../data/extended-benchmarks.lock.json', import.meta.url), 'utf8'));
-  const lock = locks[name];
+  const lock = protocol?Object.values(locks).find((l:any)=>l.protocol===protocol) as any:locks[name];
+  if(!lock)throw new Error('Unknown benchmark protocol');
   const installed = JSON.parse(await readFile(sharedPath(benchmarkHome(), `views/${lock.protocol}/manifest.json`), 'utf8'));
   if (JSON.stringify(installed) !== JSON.stringify(lock)) throw new Error(`${name}: benchmark protocol lock mismatch`);
   const { execFile } = await import('node:child_process');

@@ -41,6 +41,7 @@ export interface Bundle {
   executionVersion: string;
   dittoVersion: "0.1.1";
   pythonImage?: string;
+  webSearch?: boolean;
   strategy: Strategy;
   pool: AgentProfile[];
   model: ModelSettings;

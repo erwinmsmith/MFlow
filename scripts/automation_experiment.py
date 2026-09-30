@@ -23,12 +23,15 @@ def cost(records):
     for row in records:
         if row['status']=='known':result['knownTokens']+=row['charged']
         else:result['unknownCalls']+=1
+        if row.get('scope',{}).get('label')=='hle-judge':
+            field='judgeTokens' if row['status']=='known' else 'unknownJudgeCalls';result[field]=result.get(field,0)+(row['charged'] if row['status']=='known' else 1)
     return result
 
 def status(out):
     jobs=read(out/'jobs.json',{})
-    planned=119 if read(out/'experiment-manifest.json',{}).get('benchmark')=='math' else 200
-    report={'run':str(out),'jobs':jobs.get('jobs',{}),'methods':{}}
+    manifest=read(out/'experiment-manifest.json',{})
+    planned=manifest.get('searchCount',119 if manifest.get('benchmark')=='math' else 200)
+    report={'run':str(out),'protocol':{k:manifest[k] for k in ('benchmark','model','datasetProtocol','searchCount','testCount','judgeModel','toolProtocol') if k in manifest},'jobs':jobs.get('jobs',{}),'methods':{}}
     overrides=read(out/'method-outputs.json',{})
     recovery=read(out/'recovery.json')
     if recovery:report['recovery']=recovery
@@ -75,7 +78,7 @@ def status(out):
                 if state:report['jobs'][method].update(serviceState=state,status='running' if state=='active' else 'failed' if state=='failed' else report['jobs'][method]['status'])
             except (OSError,subprocess.SubprocessError):pass
     try:
-        with urllib.request.urlopen(os.environ.get('MFLOW_BASELINE_ENDPOINT','http://127.0.0.1:8197')+'/status',timeout=3) as response:
+        with urllib.request.urlopen(os.environ.get('MFLOW_BASELINE_ENDPOINT','http://127.0.0.1:'+str(read(out/'bridge.json',{}).get('port',8197)))+'/status',timeout=3) as response:
             transport=json.load(response)
             if Path(transport['runDirectory']).name==out.name:report['baselineTransport']=transport
     except OSError:pass
@@ -84,6 +87,8 @@ def status(out):
         report['baselineCost']={m:{'knownTokens':0,'unknownCalls':0,'phases':{}} for m in ('AFlow','DyLAN','EvoAgent','AutoAgents')}
         for row in jsonl(records):
             entry=report['baselineCost'][row['method']]
+            if row.get('kind')=='hle-judge':
+                field='unknownJudgeCalls' if row['unknownUsage'] else 'judgeTokens';entry[field]=entry.get(field,0)+(1 if row['unknownUsage'] else row['charged'])
             phase=entry['phases'].setdefault(row['phase'],{'knownTokens':0,'unknownCalls':0})
             for item in (entry,phase):
                 if row['unknownUsage']:item['unknownCalls']+=1
@@ -96,19 +101,24 @@ def status(out):
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math'],default='automationbench');p.add_argument('--run');a=p.parse_args()
-    math=a.benchmark=='math'
+    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run');a=p.parse_args()
+    math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
-    protocol='configs/'+(profile if math else 'automationbench-baselines.json')
+    protocol='configs/'+(profile if math else 'hle-baselines.json' if hle else 'automationbench-baselines.json')
     a.run=a.run or read(ROOT/protocol)['runDirectory']
     out=ROOT/a.run
     if a.status:status(out);return
     if os.environ.get('MFLOW_MODEL') not in (('deepseek-flash','qwen3.5-9b') if math else ('deepseek-flash',)):raise ValueError('Select the private benchmark model profile before launch')
-    port='8198' if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else '8197'
+    port='8199' if hle else '8198' if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else '8197'
     env={**os.environ,'MFLOW_BASELINE_PROTOCOL':protocol,'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
+    if hle:
+        config=read(ROOT/protocol);env.update(MFLOW_HLE_PROTOCOL=config['datasetProtocol'],MFLOW_HLE_JUDGE_MODEL=config['judgeModel'],MFLOW_HLE_BLOCKED_SEARCH_LOG=str(out/'blocked-web-search.jsonl'))
     manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'schedule':'sequential' if a.sequential else 'parallel','code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
+    if hle:
+        lock=next(v for v in read(ROOT/'data/extended-benchmarks.lock.json').values() if v['protocol']==config['datasetProtocol'])
+        manifest.update(datasetProtocol=lock['protocol'],searchCount=lock['splits']['search']['count'],testCount=lock['splits']['test']['count'],judgeModel=config['judgeModel'],toolProtocol=config['toolProtocol'])
     saved=read(out/'experiment-manifest.json')
     if saved and saved!=manifest:raise RuntimeError('Immutable experiment code/config changed')
     if saved and not a.resume:raise RuntimeError('Run exists; use --resume')
@@ -129,16 +139,33 @@ def main():
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         }
+    if hle:
+        commands={
+          'MFlow':[(node+['search','--benchmark','hle','--config','configs/hle-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
+                   (node+['evaluate','--benchmark','hle','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config['concurrency'])]+(['--resume'] if (test/'manifest.json').exists() else []))],
+          'AFlow':[[aflow,'baselines/automation_aflow.py']],
+          **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','1'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
+        }
     jobs=read(out/'jobs.json',{'jobs':{}});active={}
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)
     def launch(name,index):
+        if hle:
+            minimum=int(os.environ.get('MFLOW_MIN_AVAILABLE_MIB','384'))
+            while True:
+                available=next(int(line.split()[1])//1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:'))
+                if available>=minimum:break
+                jobs['jobs'][name]={'stage':index,'status':'waiting_for_memory','availableMiB':available,'requiredMiB':minimum};persist();time.sleep(10)
+        if name!='MFlow' or not hle:start_bridge()
         (out/name).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
         child=subprocess.Popen(commands[name][index],cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
-    bridge_log=(out/'bridge.log').open('a');bridge=subprocess.Popen(['node','baselines/bridge.mjs'],cwd=ROOT,env=env,stdout=bridge_log,stderr=subprocess.STDOUT);bridge_log.close()
-    try:
+    bridge=None
+    def start_bridge():
+        nonlocal bridge
+        if bridge is not None:return
+        bridge_log=(out/'bridge.log').open('a');bridge=subprocess.Popen(['node','baselines/bridge.mjs'],cwd=ROOT,env=env,stdout=bridge_log,stderr=subprocess.STDOUT);bridge_log.close()
         for attempt in range(60):
             if bridge.poll() is not None:raise RuntimeError('Bridge failed; inspect bridge.log')
             try:
@@ -148,6 +175,8 @@ def main():
                     break
             except OSError:time.sleep(1)
         else:raise RuntimeError('Bridge did not become ready')
+    try:
+        if not hle:start_bridge()
         pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
         for name in pending:jobs['jobs'].setdefault(name,{'status':'queued'})
         persist()
@@ -168,6 +197,6 @@ def main():
         if any(j['status']=='failed' for j in jobs['jobs'].values()):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
     finally:
         for child,_ in active.values():child.terminate()
-        bridge.terminate();bridge.wait(timeout=15)
+        if bridge is not None:bridge.terminate();bridge.wait(timeout=15)
 
 if __name__=='__main__':main()

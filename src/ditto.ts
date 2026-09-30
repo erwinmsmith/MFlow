@@ -24,6 +24,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { modelFetch, observableProvider, ProviderFailure, type TransportOptions } from "./provider-progress.js";
 import { AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT } from "./prompts.js";
 import { pythonExecutor } from "./python-tool.js";
+import { withTaskImages } from './data.js';
 import {
   agentOutputSchema,
   profileSchema,
@@ -36,7 +37,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.5.2/model-transport-deadline", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.6/hle-public-multimodal", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -321,7 +322,7 @@ export class DittoAgents {
       sandbox: {
         execute: chosen.some((t) => t.name === 'python'),
         tools: chosen.map((t) => t.name),
-        network: [new URL(this.model.baseUrl).origin],
+        network: [new URL(this.model.baseUrl).origin, ...(chosen.some(t=>t.name==='web_search')?['https://duckduckgo.com']:[])],
       },
     });
   }
@@ -342,7 +343,9 @@ export class DittoAgents {
       }
     };
     const runtime = this.runtime(profile?.tools ?? [], limits.timeoutMs);
-    const messages = [
+    const imageTask=(payload as {task?:TaskInput})?.task;
+    if(imageTask?.imageParts?.length)payload={...(payload as object),task:{id:imageTask.id,prompt:imageTask.prompt}};
+    const messages = withTaskImages([
       {
         role: "system" as const,
         content:
@@ -351,7 +354,7 @@ export class DittoAgents {
           JSON.stringify(z.toJSONSchema(schema)),
       },
       { role: "user" as const, content: JSON.stringify({ kind, payload }) },
-    ];
+    ],imageTask);
     const model = { provider: "mflow", model: this.model.model };
     const generation = {
       temperature: this.model.temperature,
