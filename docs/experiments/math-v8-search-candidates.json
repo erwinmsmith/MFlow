@@ -1,0 +1,1127 @@
+{
+  "selectedRound": 2,
+  "selectionBasis": "Five complete validation repeats; no test-based selection",
+  "candidates": [
+    {
+      "round": 1,
+      "strategy": {
+        "id": "s1",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b) return review.candidate_answer;\n  // Failure, missing final answer, or disagreement motivates a different method.\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  const complete=[first,review,independent].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 2,
+      "strategy": {
+        "id": "s2",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b) return review.candidate_answer;\n  // Disagreement or missing answer: run an independent derivation.\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  // Still unresolved: a checker re-examines the problem statement and constraints.\n  ctx.spawnTemplate('checker','checker','root');\n  const check=yield* ctx.runAgent('checker',[first,review,independent].filter(x=>x.candidate_answer).map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'review');\n  ctx.dormant('checker');\n  const d=ctx.answerKey(check.candidate_answer);\n  if(d && (d===a || d===b || d===c)) return check.candidate_answer;\n  const complete=[first,review,independent,check].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || check.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Re-examine the problem statement and constraints to resolve disagreement between derivations.",
+              "profile": {
+                "objective": "Determine the correct final answer by re-checking the problem statement, definitions and constraints.",
+                "capability": "Constraint and interpretation checking with counterexample search",
+                "private_context": "Focus on definitions and edge cases (e.g., sign conventions, domain restrictions, whether a stated condition is necessary or merely sufficient). Test each candidate answer against the original constraints; prefer a candidate that survives an explicit check.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 3,
+      "strategy": {
+        "id": "s3",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b) return review.candidate_answer;\n  // Failure, missing final answer, or disagreement motivates a different method.\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  const complete=[first,review,independent].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Independently verify the final boxed answer against the original problem constraints.",
+              "profile": {
+                "objective": "Verify the final boxed answer against the original problem constraints.",
+                "capability": "Constraint checking and independent verification",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "A verdict on whether the boxed answer satisfies all stated constraints, with a corrected boxed answer if it does not.",
+                "stop_condition": "A verdict is stated or a concrete unresolved obstacle is reported."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(sample,'INFER.REASONING.SAMPLE',[],()=>ctx.request(id,messages,true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 4,
+      "strategy": {
+        "id": "s4",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b){\n    ctx.spawnTemplate('checker','checker','root');\n    const check=yield* ctx.runAgent('checker','Proposed final answer: '+a+'\\n\\nFull derivation:\\n'+solution(review),'review');\n    ctx.dormant('checker');\n    const c=ctx.answerKey(check.candidate_answer);\n    if(c && c===a) return review.candidate_answer;\n    if(c) return check.candidate_answer;\n    return review.candidate_answer;\n  }\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  const complete=[first,review,independent].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Independently verify the final boxed answer against the original problem constraints.",
+              "profile": {
+                "objective": "Verify the final boxed answer against the original problem constraints.",
+                "capability": "Constraint checking and independent verification",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "A verdict on whether the boxed answer satisfies all stated constraints, with a corrected boxed answer if it does not.",
+                "stop_condition": "A verdict is stated or a concrete unresolved obstacle is reported."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(sample,'INFER.REASONING.SAMPLE',[],()=>ctx.request(id,messages,true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 5,
+      "strategy": {
+        "id": "s5",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b){\n    ctx.spawnTemplate('checker','checker','root');\n    const check=yield* ctx.runAgent('checker','Proposed final answer: '+a+'\\n\\nFull derivation:\\n'+solution(review),'review');\n    ctx.dormant('checker');\n    const c=ctx.answerKey(check.candidate_answer);\n    if(c && c===a) return review.candidate_answer;\n    if(c) return check.candidate_answer;\n    return review.candidate_answer;\n  }\n  ctx.spawnTemplate('decomposer','decomposer','root');\n  const decomp=yield* ctx.runAgent('decomposer','Solve by decomposing into sub-questions.\\n\\nInitial solution:\\n'+solution(first)+'\\n\\nReview:\\n'+solution(review),'agent');\n  ctx.dormant('decomposer');\n  const d=ctx.answerKey(decomp.candidate_answer);\n  if(d && (d===a || d===b)) return decomp.candidate_answer;\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b || c===d)) return independent.candidate_answer;\n  const complete=[first,review,decomp,independent].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || review.candidate_answer || decomp.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "decomposer",
+              "description": "Decompose the problem into sub-questions, solve each, then integrate.",
+              "profile": {
+                "objective": "Solve by decomposing into sub-questions and integrating their results.",
+                "capability": "Problem decomposition and sub-question solving",
+                "private_context": "Break the problem into independent sub-questions, solve each, then combine.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'decompose',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/decompose')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Independently verify the final boxed answer against the original problem constraints.",
+              "profile": {
+                "objective": "Verify the final boxed answer against the original problem constraints.",
+                "capability": "Constraint checking and independent verification",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "A verdict on whether the boxed answer satisfies all stated constraints, with a corrected boxed answer if it does not.",
+                "stop_condition": "A verdict is stated or a concrete unresolved obstacle is reported."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(sample,'INFER.REASONING.SAMPLE',[],()=>ctx.request(id,messages,true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 6,
+      "strategy": {
+        "id": "s6",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('verifier','verifier','root');\n  const verify=yield* ctx.runAgent('verifier','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('verifier');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first)+'\\n\\nVerifier notes:\\n'+solution(verify),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b) return review.candidate_answer;\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  ctx.spawnTemplate('checker','checker','root');\n  const check=yield* ctx.runAgent('checker',[first,review,independent].filter(x=>x.candidate_answer).map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'review');\n  ctx.dormant('checker');\n  const d=ctx.answerKey(check.candidate_answer);\n  if(d && (d===a || d===b || d===c)) return check.candidate_answer;\n  const complete=[first,review,independent,check].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || check.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "verifier",
+              "description": "Independent constraint and edge-case verification of a supplied derivation using a native REFLECT node.",
+              "profile": {
+                "objective": "Verify a supplied derivation against the problem statement, definitions and constraints.",
+                "capability": "Constraint checking and edge-case verification",
+                "private_context": "Check each consequential step once. Test the final answer against the original constraints; flag any unsupported assertion or sign/domain issue. Do not re-derive the whole solution.",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.REFLECT"
+                ],
+                "reasoning": "cot",
+                "expected_output": "A concise verification report listing confirmed steps, concrete issues, and a corrected final answer if needed, ending in a boxed answer.",
+                "stop_condition": "A verification verdict with concrete issues or confirmation is stated."
+              },
+              "composition": "return loop({id:'verify',plan:function*(ctx){\n  const id=ctx.self,node=id+'/reflect';\n  const g=graph(id+'/verify').node(node,'INFER.REASONING.REFLECT',[],()=>({\n    target:{result:{role:'user',content:ctx.evidence}},\n    mode:'verify',\n    messages:ctx.textMessages(id,'','review'),\n    criteria:'Check definitions, domain restrictions, sign conventions and whether each consequential step is supported.'\n  }));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  const r=ctx.unwrap(out[node]);\n  const text=[r.assessment,r.issues&&r.issues.length?('Issues: '+r.issues.join('; ')):'',r.revisedResult?('Revised: '+r.revisedResult):''].filter(Boolean).join('\\n');\n  return ctx.publishText(id,text);\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Re-examine the problem statement and constraints to resolve disagreement between derivations.",
+              "profile": {
+                "objective": "Determine the correct final answer by re-checking the problem statement, definitions and constraints.",
+                "capability": "Constraint and interpretation checking with counterexample search",
+                "private_context": "Focus on definitions and edge cases (e.g., sign conventions, domain restrictions, whether a stated condition is necessary or merely sufficient). Test each candidate answer against the original constraints; prefer a candidate that survives an explicit check.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 7,
+      "strategy": {
+        "id": "s7",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b) return review.candidate_answer;\n  // Disagreement or missing answer: run an independent derivation.\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  // Still unresolved: a checker re-examines the problem statement and constraints.\n  ctx.spawnTemplate('checker','checker','root');\n  const check=yield* ctx.runAgent('checker',[first,review,independent].filter(x=>x.candidate_answer).map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'review');\n  ctx.dormant('checker');\n  const d=ctx.answerKey(check.candidate_answer);\n  if(d && (d===a || d===b || d===c)) return check.candidate_answer;\n  const complete=[first,review,independent,check].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || check.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Re-examine the problem statement and constraints to resolve disagreement between derivations.",
+              "profile": {
+                "objective": "Determine the correct final answer by re-checking the problem statement, definitions and constraints.",
+                "capability": "Constraint and interpretation checking with counterexample search",
+                "private_context": "Focus on definitions and edge cases (e.g., sign conventions, domain restrictions, whether a stated condition is necessary or merely sufficient). Test each candidate answer against the original constraints; prefer a candidate that survives an explicit check.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 8,
+      "strategy": {
+        "id": "s8",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b){\n    ctx.spawnTemplate('checker','checker','root');\n    const check=yield* ctx.runAgent('checker','Proposed final answer: '+a+'\\n\\nFull derivation:\\n'+solution(review),'review');\n    ctx.dormant('checker');\n    const c=ctx.answerKey(check.candidate_answer);\n    if(c && c===a) return review.candidate_answer;\n    if(c) return check.candidate_answer;\n    return review.candidate_answer;\n  }\n  ctx.spawnTemplate('decomposer','decomposer','root');\n  const decomp=yield* ctx.runAgent('decomposer','Original problem:\\n'+ctx.task.prompt+'\\n\\nInitial solution:\\n'+solution(first)+'\\n\\nReview:\\n'+solution(review),'agent');\n  ctx.dormant('decomposer');\n  const d=ctx.answerKey(decomp.candidate_answer);\n  if(d && (d===a || d===b)) return decomp.candidate_answer;\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b || c===d)) return independent.candidate_answer;\n  const complete=[first,review,decomp,independent].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || review.candidate_answer || decomp.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Independently verify the final boxed answer against the original problem constraints.",
+              "profile": {
+                "objective": "Verify the final boxed answer against the original problem constraints.",
+                "capability": "Constraint checking and independent verification",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "A verdict on whether the boxed answer satisfies all stated constraints, with a corrected boxed answer if it does not.",
+                "stop_condition": "A verdict is stated or a concrete unresolved obstacle is reported."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(sample,'INFER.REASONING.SAMPLE',[],()=>ctx.request(id,messages,true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "decomposer",
+              "description": "Split a multi-part or contested problem into independent sub-questions, solve each, then integrate the sub-solutions.",
+              "profile": {
+                "objective": "Decompose the problem into independent sub-questions, solve each, and integrate the results.",
+                "capability": "Problem decomposition and sub-solution integration",
+                "private_context": "Identify the minimal set of independent sub-questions whose answers jointly determine the final answer. Solve each sub-question separately, then combine them. Use tools for any sub-question that requires exact computation.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer, with each sub-question solved and integrated.",
+                "stop_condition": "All sub-questions are solved and integrated, or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'decompose',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/decompose')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    },
+    {
+      "round": 9,
+      "strategy": {
+        "id": "s9",
+        "composition": "function solution(output){\n  return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\\n');\n}\nreturn loop({id:'adaptive-mas',plan:function*(ctx){\n  const first=yield* ctx.runAgent('root','','agent');\n  ctx.spawnTemplate('reviewer','reviewer','root');\n  const review=yield* ctx.runAgent('reviewer','Initial solution:\\n'+solution(first),'review');\n  ctx.dormant('reviewer');\n  const a=ctx.answerKey(first.candidate_answer),b=ctx.answerKey(review.candidate_answer);\n  if(a && b && a===b){\n    // Consensus reached, but run one independent verifier to guard against shared errors.\n    ctx.spawnTemplate('verifier','verifier','root');\n    const verify=yield* ctx.runAgent('verifier','Solve independently and check the consensus answer:\\n'+solution(review),'agent');\n    ctx.dormant('verifier');\n    const v=ctx.answerKey(verify.candidate_answer);\n    if(v && v===a) return review.candidate_answer;\n    if(v) return verify.candidate_answer;\n    return review.candidate_answer;\n  }\n  // Disagreement or missing answer: run an independent derivation.\n  ctx.spawnTemplate('independent','independent','root');\n  const independent=yield* ctx.runAgent('independent','Solve independently; verify consequential calculations with available tools when useful.','agent');\n  ctx.dormant('independent');\n  const c=ctx.answerKey(independent.candidate_answer);\n  if(c && (c===a || c===b)) return independent.candidate_answer;\n  // Still unresolved: a checker re-examines the problem statement and constraints.\n  ctx.spawnTemplate('checker','checker','root');\n  const check=yield* ctx.runAgent('checker',[first,review,independent].filter(x=>x.candidate_answer).map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'review');\n  ctx.dormant('checker');\n  const d=ctx.answerKey(check.candidate_answer);\n  if(d && (d===a || d===b || d===c)) return check.candidate_answer;\n  const complete=[first,review,independent,check].filter(x=>x.candidate_answer);\n  if(!complete.length) return '';\n  if(complete.length===1) return complete[0].candidate_answer;\n  const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Derivation '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');\n  return final.candidate_answer || check.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;\n}});",
+        "organization": {
+          "initialAgents": [
+            {
+              "id": "root",
+              "objective": "Solve the task and integrate relevant evidence.",
+              "capability": "General task reasoning and evidence integration",
+              "private_context": "",
+              "tools": [],
+              "nodes": [
+                "CONTEXT.LOAD",
+                "INFER.REASONING.SAMPLE"
+              ],
+              "reasoning": "cot",
+              "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+              "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+            }
+          ],
+          "agentTemplates": [
+            {
+              "id": "solver",
+              "description": "Full mathematical derivation with context and sampling nodes.",
+              "profile": {
+                "objective": "Solve the task and integrate relevant evidence.",
+                "capability": "General task reasoning and evidence integration",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "reviewer",
+              "description": "Review a complete derivation against the original problem and revise it.",
+              "profile": {
+                "objective": "Find and correct concrete errors in the supplied derivation.",
+                "capability": "Mathematical review and revision",
+                "private_context": "",
+                "tools": [],
+                "nodes": [
+                  "INFER.REASONING.SAMPLE"
+                ],
+                "reasoning": "cot",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'revise',plan:function*(ctx){\n  const id=ctx.self,node=id+'/revise';\n  const g=graph(id+'/revise').node(node,'INFER.REASONING.SAMPLE',[],()=>\n    ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),false,'text'));\n  const out=yield* graphStep(g,null);\n  if(out[node].status!=='success') return ctx.failedAgent(id,out[node].error);\n  return ctx.publishText(id,ctx.unwrap(out[node]).message.content);\n}});"
+            },
+            {
+              "id": "independent",
+              "description": "Independent derivation with optional exact computation, enumeration or counterexample tools.",
+              "profile": {
+                "objective": "Derive a solution independently using a complementary method.",
+                "capability": "Independent mathematical reasoning and executable checks",
+                "private_context": "",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'solve',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/solve')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "checker",
+              "description": "Re-examine the problem statement and constraints to resolve disagreement between derivations.",
+              "profile": {
+                "objective": "Determine the correct final answer by re-checking the problem statement, definitions and constraints.",
+                "capability": "Constraint and interpretation checking with counterexample search",
+                "private_context": "Focus on definitions and edge cases (e.g., sign conventions, domain restrictions, whether a stated condition is necessary or merely sufficient). Test each candidate answer against the original constraints; prefer a candidate that survives an explicit check.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'check',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/check')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            },
+            {
+              "id": "verifier",
+              "description": "Independently re-derive the answer with a distinct method and check the consensus answer, guarding against shared errors between root and reviewer.",
+              "profile": {
+                "objective": "Independently verify the consensus answer by re-deriving it with a different method.",
+                "capability": "Independent verification and alternative-method derivation",
+                "private_context": "Do not assume the supplied consensus answer is correct. Re-derive the result from scratch using a method distinct from the one shown (e.g., a different parametrization, a geometric shortcut, or direct computation). If your independent result disagrees, state the exact step where the consensus derivation fails.",
+                "tools": [
+                  "arithmetic",
+                  "python"
+                ],
+                "nodes": [
+                  "CONTEXT.LOAD",
+                  "INFER.REASONING.SAMPLE",
+                  "INTERACTION.ACT.TOOL",
+                  "INTERACTION.OBSERVE"
+                ],
+                "reasoning": "react",
+                "expected_output": "Complete mathematical solution ending in a boxed final answer, with an explicit statement of whether it agrees with the consensus.",
+                "stop_condition": "A complete solution or a concrete unresolved obstacle is stated."
+              },
+              "composition": "return loop({id:'verify',plan:function*(ctx){\n  const id=ctx.self, messages=ctx.textMessages(id,ctx.evidence,ctx.prompt);\n  for(;;){\n    const load=id+'/context',sample=id+'/sample';\n    const g=graph(id+'/verify')\n      .node(load,'CONTEXT.LOAD',[],()=>({sources:messages}))\n      .node(sample,'INFER.REASONING.SAMPLE',[load],(_,out)=>ctx.request(id,\n        out[load].items.map((item,i)=>({...messages[i],content:item.content})),true,'text'));\n    const out=yield* graphStep(g,null);\n    if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);\n    const response=ctx.unwrap(out[sample]);\n    if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);\n    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});\n    for(const call of response.actionRequests){\n      const act=id+'/tool',observe=id+'/observe';\n      const tools=graph(id+'/tools')\n        .node(act,'INTERACTION.ACT.TOOL',[],()=>({call}))\n        .node(observe,'INTERACTION.OBSERVE',[act],(_,out)=>({result:out[act]}));\n      const result=yield* graphStep(tools,null);\n      messages.push({role:'tool',content:result[observe].message.content,metadata:{actionRequestId:call.id,name:call.name}});\n    }\n  }\n}});"
+            }
+          ],
+          "initialBindings": {
+            "root": "solver"
+          }
+        },
+        "prompts": {
+          "agent": "Solve the following math problem step by step. Provide a clear, detailed reasoning process and end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nProblem:",
+          "factory": "Design one autonomous agent to resolve the supplied concrete deficit. Use the original task and the parent's evidence to identify a useful, distinct method: an independent derivation, constraint check, counterexample, decomposition, or available computation as appropriate. Choose the capability and objective for this task; there is no fixed role catalogue.\nDescribe the specific evidence to return to the owner in expected_output and the condition that finishes this assignment. The original task is supplied separately at execution: private_context should contain only additional method guidance, not a copy of the task or parent solution. Keep each profile field brief. Prefer independent computation, explicit exhaustive cases, or checking constraints over repeating an assertion. Do not assume the parent answer is correct.\nSelect tools only from available_tools; use react reasoning when choosing tools. Do not promise unavailable execution or access. Use the supplied id. Return no confidence, utility or information-gain scores.",
+          "review": "You are given a math problem and an initial solution. Carefully review the initial solution for any errors in reasoning, calculation, or interpretation. If you find mistakes, correct them and provide the correct final answer. If the initial solution is correct, confirm it and restate the final answer. Always end with the final answer in the format: \\boxed{answer}. Ensure the answer is concise and matches the expected format (e.g., a number, a fraction, or a list of letters separated by commas).\n\nCheck each consequential step once. Once the answer is established, finish the response; do not repeatedly re-derive or recheck it. If an approach stalls, state the concrete obstacle instead of cycling through the same calculations.\n\nProblem and Initial Solution:",
+          "integrate": "Solve the original math problem using the supplied full derivations as evidence. Identify the exact step behind any disagreement; check it by calculation or a different argument. Correct unsupported assertions rather than voting on wording. Return a self-contained solution ending with \\boxed{answer}. Do not replace the stated problem with a remembered variant.\n\nProblem:",
+          "retrieve": "Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score."
+        }
+      }
+    }
+  ]
+}
