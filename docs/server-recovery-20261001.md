@@ -37,7 +37,7 @@ HLE's temporary network-repair stop retains its first completed search evaluatio
 ```sh
 ssh hb 'cd /home/b/project/experiments/deepseek-automation-20261001-v4/MFlow; python3 scripts/automation_experiment.py --status'
 ssh hb 'cd /home/b/project/experiments/deepseek-hle-20260930-v1/MFlow; python3 scripts/automation_experiment.py --benchmark hle --status'
-ssh hb 'cd /home/b/project/experiments/qwen-math-20260930-v2/MFlow; python3 scripts/automation_experiment.py --benchmark math --status'
+ssh hb 'cd /home/b/project/experiments/qwen-math-20260930-v2/MFlow; python3 scripts/automation_experiment.py --benchmark math --status --run runs/hb-qwen-math-20260930-v2'
 ssh hb 'systemctl --user show mflow-deepseek-automation-20261001-v4.service mflow-deepseek-hle-20260930-v1.service hb-qwen-math-20261001-resume.service --property=Id --property=ActiveState --property=SubState --property=NRestarts'
 ```
 
