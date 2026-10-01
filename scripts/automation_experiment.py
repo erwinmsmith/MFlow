@@ -179,7 +179,7 @@ def main():
     try:
         if not hle:start_bridge()
         pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
-        for name in pending:jobs['jobs'].setdefault(name,{'status':'queued'})
+        for name in pending:jobs['jobs'][name]={'status':'queued'}
         persist()
         if a.sequential:
             if pending:launch(pending.pop(0),0)
