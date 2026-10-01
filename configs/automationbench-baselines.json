@@ -8,7 +8,7 @@
   "providerOptions": {"thinking": {"type": "disabled"}},
   "episodeTokenLimit": null,
   "overallTokenCeiling": null,
-  "concurrency": 12,
+  "concurrency": 8,
   "aflow": {"maxRounds": null, "validationRounds": 5, "checkConvergence": true, "operators": ["Custom", "ScEnsemble"]},
   "seed": 42
 }

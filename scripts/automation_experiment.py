@@ -105,7 +105,8 @@ def main():
     math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
     protocol='configs/'+(profile if math else 'hle-baselines.json' if hle else 'automationbench-baselines.json')
-    a.run=a.run or read(ROOT/protocol)['runDirectory']
+    config=read(ROOT/protocol)
+    a.run=a.run or config['runDirectory']
     out=ROOT/a.run
     if a.status:status(out);return
     if os.environ.get('MFLOW_MODEL') not in (('deepseek-flash','qwen3.5-9b') if math else ('deepseek-flash',)):raise ValueError('Select the private benchmark model profile before launch')
@@ -114,7 +115,7 @@ def main():
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
     if hle:
-        config=read(ROOT/protocol);env.update(MFLOW_HLE_PROTOCOL=config['datasetProtocol'],MFLOW_HLE_JUDGE_MODEL=config['judgeModel'],MFLOW_HLE_BLOCKED_SEARCH_LOG=str(out/'blocked-web-search.jsonl'))
+        env.update(MFLOW_HLE_PROTOCOL=config['datasetProtocol'],MFLOW_HLE_JUDGE_MODEL=config['judgeModel'],MFLOW_HLE_BLOCKED_SEARCH_LOG=str(out/'blocked-web-search.jsonl'))
     manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'schedule':'sequential' if a.sequential else 'parallel','code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
     if hle:
         lock=next(v for v in read(ROOT/'data/extended-benchmarks.lock.json').values() if v['protocol']==config['datasetProtocol'])
@@ -128,7 +129,7 @@ def main():
     search=out/'MFlow/search';test=out/'MFlow/test'
     commands={
       'MFlow':[(node+['search','--benchmark','automationbench','--config','configs/automationbench-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
-               (node+['evaluate','--benchmark','automationbench','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency','24']+(['--resume'] if (test/'manifest.json').exists() else []))],
+               (node+['evaluate','--benchmark','automationbench','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config['concurrency'])]+(['--resume'] if (test/'manifest.json').exists() else []))],
       'AFlow':[[aflow,'baselines/automation_aflow.py']],
       **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','1'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }

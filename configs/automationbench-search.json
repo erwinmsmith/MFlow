@@ -2,7 +2,7 @@
   "seed": 42,
   "maxRounds": null,
   "validationRounds": 5,
-  "concurrency": 24,
+  "concurrency": 8,
   "maxOutputTokens": 393216,
   "initializations": ["single", "review", "plan-execute", "parallel-plan", "adaptive"]
 }
