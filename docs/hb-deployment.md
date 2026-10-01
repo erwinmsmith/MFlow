@@ -1,5 +1,7 @@
 # hb / Jetson deployment
 
+Active immutable snapshots and repaired service commands: [2026-10-01 recovery](server-recovery-20261001.md).
+
 Local working tree: `/Users/erwin/Downloads/codespace/AFlow`.
 Server checkout: `hb:/home/b/project/MFlow`.
 Sync local changes with `bash scripts/sync_hb.sh`; this uses SSH/rsync and npm's registry, never GitHub on hb.

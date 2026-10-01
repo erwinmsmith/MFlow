@@ -1,5 +1,7 @@
 # AutomationBench / DeepSeek Flash comparison
 
+Current deployment: [2026-10-01 recovery](server-recovery-20261001.md). The v4 snapshot resumes saved evaluations with sequential methods and 8 concurrent MFlow/AFlow episodes, retaining Qwen. The v2/v3 deployment details below describe the historical runs; use the recovery document's commands for current progress.
+
 ## Protocol
 
 All five methods use the locked `automationbench-public-simple-v1` views: 200 simple tasks for development/search, followed by all 600 public domain tasks for held-out evaluation. This is a documented cross-domain development protocol, not an official training split or private leaderboard submission. Task IDs, data hashes, source hashes and dependencies are checked before execution. Test tasks and private rubric/state never enter search, mutation or actor prompts.

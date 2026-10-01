@@ -1,5 +1,7 @@
 # HLE / DeepSeek Flash comparison
 
+Current service, network repair and progress commands: [2026-10-01 recovery](server-recovery-20261001.md). HLE retrieval currently uses the existing local proxy through an automatically reconnecting SSH relay; the Mac and proxy must remain online.
+
 ## Frozen protocol
 
 - Pinned official `cais/hle@5a81a4c7` Parquet, SHA256 `6d0ee0602e8aea6b159509577e884f48ecac7b8e3f6822a35f51335a446c726a`; official evaluator `22ed3074`.
