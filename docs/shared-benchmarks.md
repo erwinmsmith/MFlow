@@ -92,7 +92,7 @@ GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据�
   原数学种子的 boxed 默认行为保留。
 - DROP 默认搜索优化平均 F1，逐题二元成功另保留；最终报告 accuracy 和 meanF1。
   五对已知上游跨集重复题仍保留，见 [AFlow 协议](aflow-data-protocol.md)。
-- 当前执行标识 v3.6。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
+- 当前执行标识 v3.6.1。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
   静默恢复旧搜索或重解释历史结果。manifest、数据锁和镜像 ID 会阻止不兼容恢复。
 
 ## HLE 与 AutomationBench

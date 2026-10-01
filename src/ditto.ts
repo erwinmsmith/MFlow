@@ -37,7 +37,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.6/hle-public-multimodal", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.6.1/provider-limit-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -169,7 +169,7 @@ export class MeteredProvider implements ModelProvider {
       }
       // A detected generation cycle belongs to this node. Network/auth/service
       // failures remain episode-fatal, including when sibling nodes succeed.
-      if (!['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(failure.code)) this.lastFailure = failure;
+      if (!['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT'].includes(failure.code)) this.lastFailure = failure;
       throw failure;
     }
     let failure: unknown;

@@ -130,3 +130,13 @@ MFlow v8 继续使用已有 arithmetic/Python 工具和原生节点。该扩展�
 需求：提供显式关闭 maxInlineBytes/maxItems 的公共配置，或提供透明的 Artifact/reference 存储路径，保证完整内容可以由后续 INFER 使用。两种方案均需要明确定义序列化、原始消息顺序与 metadata、内存/外部存储归属、取消与错误处理。
 
 验收：默认保持兼容；显式不限时，1 MiB 以上的消息及超过默认数量的 ContextItem 不被截断、遗漏或重排；外部模型的上下文限制仍明确报错；应用不需要拆分提示词或复制 Context 实现。MFlow 的优化器已用公开 INFER 直接接收完整消息绕过无必要的 inline 转换，agent 显式使用 Context 的路径仍受包契约约束。
+
+## DITTO-007：供应商上下文容量与输出 allowance 协调（待支持）
+
+2026-10-01 通过 registry 0.1.1 的公开 `createHttpProvider` 复现：DeepSeek Flash 接收 700010 个输入 token 和 `max_tokens=393216`，HTTP 400 明确拒绝总和 1093226 超过 1048576。即使需要的实际输出只有数个 token，固定输出 allowance 也会提前阻塞尚未用满的输入窗口。AutomationBench 开发题反复工具调用后，输入达到 654109 token，下一次调用即遭 HTTP 400；未保存的原拒绝详情不能据此断言完全相同原因。
+
+需要通用 provider 能力：公开模型的 context/output 容量、完整请求的 token 计数（包括工具与图片），可显式选择按剩余真实容量协调输出 allowance；保存原请求与有效 allowance、供应商拒绝 code/message/request ID。不能截断输入或把估算值当作确切 token 数，也不能静默改变模型/推理模式。
+
+验收：输入仍完整且顺序不变；输入未满但输入+请求输出 allowance 越界时，可在 opt-in 模式正常生成短回答；输入本身超界时返回明确模型容量错误；所有请求与重试的 usage 可追溯。工具、多模态、取消与无法确定容量的 provider 均 fail closed。该能力不依赖 MAS/spawn。
+
+MFlow 当前仅通过公开 fetch 注入保存错误详情，将明确的模型容量错误作为节点执行失败供现有策略恢复；评分保留实际世界状态与失败成本。不会在应用中另写 tokenizer、SSE 或自适应 Provider；无人工 Context 截断，其他 HTTP/认证/服务错误仍中止相应实验。

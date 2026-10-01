@@ -4,8 +4,17 @@ import type { ModelProvider, SampleOutput } from '@codesoul-co/ditto/worker/infe
 
 // Ditto/caller AbortSignal owns the deadline, including time queued for local inference.
 const modelDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-export const modelFetch: typeof globalThis.fetch = (input, init) =>
-  globalThis.fetch(input, { ...init, dispatcher: modelDispatcher } as RequestInit);
+export const modelFetch: typeof globalThis.fetch = async (input, init) => {
+  const response = await globalThis.fetch(input, { ...init, dispatcher: modelDispatcher } as RequestInit);
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined) as { error?: { message?: string; code?: string } } | undefined;
+    const detail = body?.error?.message ?? response.statusText;
+    const contextLimit = response.status === 400 && (body?.error?.code === 'context_length_exceeded' ||
+      /(?:maximum|max) context length|context (?:length|window).*(?:exceed|limit)|exceed.*context/i.test(detail));
+    throw new ProviderFailure(contextLimit ? 'MODEL_CONTEXT_LIMIT' : 'PROVIDER_HTTP_ERROR', `HTTP ${response.status}: ${detail}`);
+  }
+  return response;
+};
 
 export class ProviderFailure extends Error {
   constructor(readonly code: string, message: string, cause?: unknown) {

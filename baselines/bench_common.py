@@ -32,7 +32,7 @@ def call(messages,tools=True):
         try:detail=json.loads(error).get('error',error)
         except (ValueError,AttributeError):detail=error
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
-        if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT')):raise ModelOutputFailure(error) from None
+        if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT','MODEL_CONTEXT_LIMIT')):raise ModelOutputFailure(error) from None
         raise TransportFailure(error) from None
     if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']

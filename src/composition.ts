@@ -354,7 +354,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           const output = result[node.id] as any;
           if (node.type.startsWith('INFER.')) {
             const providerError = agents.provider.nodeFailures.get(node.id);
-            if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(providerError.code))
+            if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT'].includes(providerError.code))
               result[node.id] = { status: 'error', error: { code: providerError.code, message: providerError.message } };
             else if (output?.status !== 'success') {
               if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(output?.error?.code))

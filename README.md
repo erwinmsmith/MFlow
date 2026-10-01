@@ -80,7 +80,7 @@ npm run mflow -- benchmarks path --name HumanEval+ --split test
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
 默认搜索按任务选择数学、阅读理解、Python 代码、学术问答或 API 工作流提示词和输出契约；
-DROP 按平均 F1 优化。当前执行标识 v3.6，旧运行需使用其保存的 runtime 与原评分环境。
+DROP 按平均 F1 优化。当前执行标识 v3.6.1，旧运行需使用其保存的 runtime 与原评分环境。
 
 HLE 的图片传递、工具检索规则、judge 与五框架完整比较见 [HLE 实验协议](docs/hle-experiment.md)。其 200 search / 2300 test 为自定义 holdout，不能当作官方 2500 题全量 test 成绩。
 

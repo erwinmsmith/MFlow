@@ -56,7 +56,7 @@ test('disagreement dynamically derives a different graph with executable tools a
   assert.notDeepEqual(result.agents[1].nodes,result.agents[2].nodes);
 });
 
-for(const fault of ['DEGENERATE_OUTPUT','INVALID_MODEL_OUTPUT','INCOMPLETE_MODEL_OUTPUT','length']){
+for(const fault of ['DEGENERATE_OUTPUT','INVALID_MODEL_OUTPUT','INCOMPLETE_MODEL_OUTPUT','MODEL_CONTEXT_LIMIT','length']){
   test(`${fault} stays local to the failed agent without rerunning the original solve`,async()=>{
     const calls:string[]=[];
     const result=await execute({async invoke(input){

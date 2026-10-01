@@ -25,6 +25,26 @@ test('local provider options reach the published Ditto transport', async () => {
   } finally { globalThis.fetch = previous; }
 });
 
+test('public provider retains HTTP rejection details needed for recovery', async () => {
+  const previous = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({error:{message:'maximum context length exceeded: fixture'}}), {status:400});
+    const provider = httpProvider({model:'deepseek-flash',baseUrl:'https://api.deepseek.com',temperature:0,seed:42}, 'fixture-key');
+    await assert.rejects(provider.invoke({model:{model:'deepseek-flash'},messages:[{role:'user',content:'fixture'}]},
+      {signal:AbortSignal.timeout(1000)}), (error:unknown) => {
+        assert.ok(error instanceof ProviderFailure); assert.equal(error.code,'MODEL_CONTEXT_LIMIT');
+        assert.match(error.message,/HTTP 400: maximum context length exceeded: fixture/); return true;
+      });
+    for (const [status,message] of [[400,'Unsupported option'],[401,'Invalid authentication']] as const) {
+      globalThis.fetch = async () => new Response(JSON.stringify({error:{message}}), {status});
+      await assert.rejects(provider.invoke({model:{model:'deepseek-flash'},messages:[{role:'user',content:'fixture'}]},
+        {signal:AbortSignal.timeout(1000)}), (error:unknown) => {
+          assert.ok(error instanceof ProviderFailure); assert.equal(error.code,'PROVIDER_HTTP_ERROR'); return true;
+        });
+    }
+  } finally { globalThis.fetch = previous; }
+});
+
 test('model transport waits for headers/body while preserving caller cancellation', async () => {
   const short = new Agent({ headersTimeout: 50, bodyTimeout: 50 });
   const server = createServer((request, response) => {

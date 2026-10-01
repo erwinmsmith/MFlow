@@ -23,7 +23,7 @@ class AdapterTests(unittest.TestCase):
         import urllib.error
         token=common.SCOPE.set(('AFlow','search','fixture'))
         try:
-            for message,kind in [('[INVALID_MODEL_OUTPUT] malformed action JSON',common.ModelOutputFailure),('{"code":"INVALID_MODEL_OUTPUT","message":"duplicate action ID"}',common.ModelOutputFailure),('[DEGENERATE_OUTPUT] repeated output',common.ModelOutputFailure),('Model provider returned HTTP 402',common.TransportFailure)]:
+            for message,kind in [('[INVALID_MODEL_OUTPUT] malformed action JSON',common.ModelOutputFailure),('{"code":"INVALID_MODEL_OUTPUT","message":"duplicate action ID"}',common.ModelOutputFailure),('[DEGENERATE_OUTPUT] repeated output',common.ModelOutputFailure),('[MODEL_CONTEXT_LIMIT] HTTP 400: maximum context length exceeded',common.ModelOutputFailure),('Model provider returned HTTP 402',common.TransportFailure)]:
                 error=urllib.error.HTTPError('http://fixture',502,'fixture',{},io.BytesIO(json.dumps({'error':message}).encode()))
                 with patch.object(common.urllib.request,'urlopen',side_effect=error):
                     with self.assertRaises(kind):common.call([{'role':'user','content':'fixture'}])
