@@ -1,5 +1,7 @@
 # HLE / DeepSeek Flash comparison
 
+2026-10-02: the active comparison moved to [local parallel execution](local-deepseek-20261002.md), using local web retrieval without the hb SSH relay. Server deployment details below describe the previous run.
+
 Current service, network repair and progress commands: [2026-10-01 recovery](server-recovery-20261001.md). HLE retrieval currently uses the existing local proxy through an automatically reconnecting SSH relay; the Mac and proxy must remain online.
 
 ## Frozen protocol

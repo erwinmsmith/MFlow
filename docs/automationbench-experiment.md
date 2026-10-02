@@ -1,5 +1,7 @@
 # AutomationBench / DeepSeek Flash comparison
 
+2026-10-02: DeepSeek comparisons moved to [local parallel snapshots](local-deepseek-20261002.md) after hb became unreachable. Use that document for the active progress commands; server snapshots below remain historical records.
+
 Current deployment: [2026-10-01 recovery](server-recovery-20261001.md). The v4 snapshot resumes saved evaluations with sequential methods and 8 concurrent MFlow/AFlow episodes, retaining Qwen. The v2/v3 deployment details below describe the historical runs; use the recovery document's commands for current progress.
 
 ## Protocol

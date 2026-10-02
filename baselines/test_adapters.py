@@ -113,16 +113,28 @@ class AdapterTests(unittest.TestCase):
         import importlib.util
         spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
         runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
-        calls=[];live=set();peak=0
+        calls=[];live=set();peak=0;failed=set();tick=0
+        def clock():
+            nonlocal tick
+            tick+=61;return tick
         class Child:
             def __init__(self,command,**kwargs):
                 nonlocal peak
                 self.bridge='baselines/bridge.mjs' in command;self.pid=len(calls)+1
+                self.command=command
                 calls.append((command,kwargs['env']))
                 if not self.bridge:live.add(self.pid);peak=max(peak,len(live))
             def poll(self):
                 if self.bridge:return None
-                live.discard(self.pid);return 0
+                live.discard(self.pid)
+                kind='MFlow' if 'search' in self.command else 'AFlow' if 'baselines/automation_aflow.py' in self.command else None
+                if kind and kind not in failed:
+                    failed.add(kind)
+                    if kind=='MFlow':
+                        out=Path(self.command[self.command.index('--out')+1]);out.mkdir(parents=True,exist_ok=True)
+                        (out/'manifest.json').write_text('{}')
+                    return 1
+                return 0
             def terminate(self):live.discard(self.pid)
             def wait(self,**kwargs):return 0
         with tempfile.TemporaryDirectory() as directory:
@@ -131,10 +143,15 @@ class AdapterTests(unittest.TestCase):
             (root/'configs/automationbench-search.json').write_text('{"concurrency":8,"validationRounds":5}')
             (root/'package-lock.json').write_text('{}')
             args=['experiment','--run','runs/local','--concurrency','12','--legacy-concurrency','2','--port','8297']
-            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',args),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner.urllib.request,'urlopen',return_value=io.StringIO('{"runDirectory":"runs/local"}')):
+            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',args),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner.time,'monotonic',side_effect=clock),patch.object(runner.urllib.request,'urlopen',side_effect=lambda *a,**kw:io.StringIO('{"runDirectory":"runs/local","released":1}')) as send:
                 runner.main()
                 with patch.object(sys,'argv',args+['--resume','--concurrency','13']),self.assertRaisesRegex(RuntimeError,'Immutable experiment'):runner.main()
             self.assertEqual(peak,5)
+            resets=[c.args[0] for c in send.call_args_list if isinstance(c.args[0],common.urllib.request.Request)]
+            self.assertEqual(len(resets),1);self.assertEqual(json.loads(resets[0].data),{'method':'AFlow'})
+            searches=[c for c,_ in calls if 'search' in c]
+            self.assertEqual(len(searches),2)
+            self.assertNotIn('--resume',searches[0]);self.assertIn('--resume',searches[1])
             self.assertEqual({e['MFLOW_BASELINE_ENDPOINT'] for _,e in calls},{'http://127.0.0.1:8297'})
             self.assertEqual({e['MFLOW_BASELINE_PROTOCOL'] for _,e in calls},{str(root/'runs/local/baseline-config.json')})
             protocol=json.loads((root/'runs/local/baseline-config.json').read_text())
@@ -153,6 +170,21 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual((len(search),len(test)),(200,2300))
         self.assertFalse({t['id'] for t in search}&{t['id'] for t in test})
         self.assertEqual(sum(bool(t.get('images')) for t in search+test),342)
+
+    def test_native_retry_cannot_turn_transport_outage_into_scored_answer(self):
+        import automation_run as runner
+        from tenacity import retry,stop_after_attempt,wait_none
+        token=common.SCOPE.set(('AutoAgents','pilot','fixture'))
+        try:
+            with patch.object(common.urllib.request,'urlopen',side_effect=common.urllib.error.URLError('connection lost')) as send:
+                solve=retry(stop=stop_after_attempt(3),wait=wait_none())(lambda _:common.call([]))
+                with tempfile.TemporaryDirectory() as directory,patch.object(runner,'RUNS',Path(directory)),patch.object(runner,'method',types.SimpleNamespace(solve=solve)),patch.object(runner,'benchmark_rpc',return_value={'checkpoint':False}) as rpc:
+                    (Path(directory)/'AutoAgents/pilot').mkdir(parents=True)
+                    with self.assertRaises(common.TransportFailure):runner.episode('AutoAgents','pilot',{'id':'fixture','prompt':'fixture'})
+                    self.assertEqual(send.call_count,1)
+                    self.assertEqual(rpc.call_count,1)
+                    self.assertFalse((Path(directory)/'AutoAgents/pilot/results.jsonl').exists())
+        finally:common.SCOPE.reset(token)
 
     def test_hle_retrieval_filters_answer_repositories_and_verbatim_queries(self):
         from search_provider import hle_rules

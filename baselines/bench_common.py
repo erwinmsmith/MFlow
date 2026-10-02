@@ -9,24 +9,16 @@ RUNS=ROOT/os.environ.get('MFLOW_BASELINE_RUN_DIRECTORY',PROTOCOL['runDirectory']
 SCOPE=contextvars.ContextVar('scope')
 class BudgetStop(BaseException):
     def __init__(self,reason):self.reason=reason
-class TransportFailure(RuntimeError):pass
+# Native retry/format handlers catch Exception; infrastructure must escape them.
+class TransportFailure(BaseException):pass
 class ModelOutputFailure(RuntimeError):pass
 
 def endpoint():return os.environ.get('MFLOW_BASELINE_ENDPOINT',f"http://127.0.0.1:{os.environ.get('MFLOW_BASELINE_PORT','8197')}")
 
-def execute_python(code):
-    method,phase,task_id=SCOPE.get()
-    req=urllib.request.Request(endpoint()+'/python',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'code':code}).encode(),headers={'Content-Type':'application/json'})
+def bridge_request(route,body):
+    req=urllib.request.Request(endpoint()+'/'+route,data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
     try:
         with urllib.request.urlopen(req,timeout=None) as response:return json.load(response)
-    except urllib.error.HTTPError as e:raise TransportFailure(e.read().decode()) from None
-
-def call(messages,tools=True):
-    method,phase,task_id=SCOPE.get()
-    body=json.dumps(dict(method=method,phase=phase,taskId=task_id,messages=messages,tools=tools)).encode()
-    req=urllib.request.Request(endpoint()+'/sample',data=body,headers={'Content-Type':'application/json'})
-    try:
-        with urllib.request.urlopen(req,timeout=None) as response:result=json.load(response)
     except urllib.error.HTTPError as e:
         error=e.read().decode()
         try:detail=json.loads(error).get('error',error)
@@ -34,6 +26,15 @@ def call(messages,tools=True):
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
         if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT','MODEL_CONTEXT_LIMIT')):raise ModelOutputFailure(error) from None
         raise TransportFailure(error) from None
+    except (urllib.error.URLError,TimeoutError,ConnectionError) as error:raise TransportFailure(str(error)) from None
+
+def execute_python(code):
+    method,phase,task_id=SCOPE.get()
+    return bridge_request('python',dict(method=method,phase=phase,taskId=task_id,code=code))
+
+def call(messages,tools=True):
+    method,phase,task_id=SCOPE.get()
+    result=bridge_request('sample',dict(method=method,phase=phase,taskId=task_id,messages=messages,tools=tools))
     if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']
 
@@ -42,8 +43,7 @@ def search_web(query):
     if len(query)>600 or len(query.split())>75:
         query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}],tools=False).strip()
     method,phase,task_id=SCOPE.get()
-    req=urllib.request.Request(endpoint()+'/search',data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'query':query}).encode(),headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=None) as response:return json.dumps(json.load(response)['results'])
+    return json.dumps(bridge_request('search',dict(method=method,phase=phase,taskId=task_id,query=query))['results'])
 
 def tasks(split):
     if PROTOCOL.get('benchmark') in ('automationbench','hle'):
@@ -83,10 +83,7 @@ def save_row(out,row):
 
 def benchmark_rpc(route,task,**fields):
     method,phase,task_id=SCOPE.get()
-    req=urllib.request.Request(endpoint()+'/'+route,data=json.dumps({'method':method,'phase':phase,'taskId':task_id,'benchmarkTaskId':task['id'],**fields}).encode(),headers={'Content-Type':'application/json'})
-    try:
-        with urllib.request.urlopen(req,timeout=None) as response:return json.load(response)
-    except urllib.error.HTTPError as e:raise TransportFailure(e.read().decode()) from None
+    return bridge_request(route,dict(method=method,phase=phase,taskId=task_id,benchmarkTaskId=task['id'],**fields))
 
 def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""

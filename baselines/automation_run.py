@@ -62,7 +62,7 @@ def main():
                 task=pending.pop(future)
                 try:
                     row=future.result();rows.append(row);print(json.dumps({k:row[k] for k in ('taskId','score','partialCredit','tokens')}),flush=True)
-                except Exception as error:
+                except (TransportFailure,Exception) as error:
                     failed=True;save_row(out/'errors.jsonl',{'taskId':task['id'],'error':repr(error)})
                 if not failed:submit()
                 status('incomplete' if failed else 'running')

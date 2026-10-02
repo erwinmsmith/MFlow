@@ -159,7 +159,7 @@ def main():
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
-    jobs=read(out/'jobs.json',{'jobs':{}});active={}
+    jobs=read(out/'jobs.json',{'jobs':{}});active={};retrying={}
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)
     def launch(name,index):
@@ -172,7 +172,9 @@ def main():
         if name!='MFlow' or not hle:start_bridge()
         (out/name).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
-        child=subprocess.Popen(commands[name][index],cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
+        command=commands[name][index]
+        if name=='MFlow' and ((search if index==0 else test)/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
+        child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
     bridge=None
     def start_bridge():
@@ -197,14 +199,24 @@ def main():
             if pending:launch(pending.pop(0),0)
         else:
             for name in pending:launch(name,0)
-        while active:
+        while active or retrying:
+            for name,(index,at) in list(retrying.items()):
+                if time.monotonic()>=at:
+                    if name!='MFlow':
+                        request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps({'method':name}).encode(),headers={'Content-Type':'application/json'})
+                        with urllib.request.urlopen(request,timeout=30) as response:json.load(response)
+                    del retrying[name];launch(name,index)
             for name,(child,index) in list(active.items()):
                 code=child.poll()
                 if code is None:continue
                 del active[name]
                 if code==0 and index+1<len(commands[name]):launch(name,index+1)
                 else:
-                    jobs['jobs'][name].update(status='completed' if code==0 else 'failed',exitCode=code,finishedAt=time.time());persist()
+                    jobs['jobs'][name].update(status='completed' if code==0 else 'failed',exitCode=code,finishedAt=time.time())
+                    if code!=0 and not a.sequential:
+                        retrying[name]=(index,time.monotonic()+60)
+                        jobs['jobs'][name].update(status='retrying',nextAttemptAt=time.time()+60)
+                    persist()
                     if a.sequential and pending:launch(pending.pop(0),0)
             time.sleep(2)
         if any(j['status']=='failed' for j in jobs['jobs'].values()):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')

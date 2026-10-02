@@ -47,7 +47,7 @@ const staticSeeds=[
         review=await self.custom(input=problem+'\\nPrevious execution:\\n'+answer['response'],instruction=prompt_custom.REVIEW)
         return review['response'],0\n`},
 ].map(s=>({...s,organization:{},prompts:'EXECUTE = '+JSON.stringify(instruction)+'\nPLAN = '+JSON.stringify(hle?'Select subject-specific methods, exact assumptions and decisive checks for the academic question. Do not guess its answer.':'Plan entity lookups, API dependencies and exact postconditions. Inspect if useful; do not make writes. Return a concise actionable plan.')+'\nREVIEW = '+JSON.stringify(hle?'Check the candidate against the original question and image. Diagnose the decisive error or uncertainty; use a complementary method or external evidence if useful. Return Explanation, Answer and calibrated Confidence.':'Inspect actual current state against the original task. Repair missing or incorrect effects. Preserve successful writes and never duplicate records or sends.')+'\n'}));
-const provider={async invoke(input,options){
+const ledgerProvider={async invoke(input,options){
   const {method,phase,taskId,kind}=input.metadata,id=randomUUID();
   const estimate=Buffer.byteLength(JSON.stringify(input),'utf8')+input.generation.maxTokens+1024;
   append('requests.jsonl',{id,method,phase,taskId,estimate,at:new Date().toISOString()});
@@ -62,6 +62,12 @@ const provider={async invoke(input,options){
     append('responses.jsonl',{id,method,phase,taskId,message:response?.message??null,inputHash:createHash('sha256').update(JSON.stringify(input.messages)).digest('hex')});
   }
 }};
+// Reuse MFlow's transient retry policy; each attempt still settles in the ledger.
+const provider={async invoke(input,options){
+  const result=await new MeteredProvider(ledgerProvider).invoke(input,options);
+  if(input.metadata.optimizerCallId)optimizerFailures.delete(input.metadata.optimizerCallId);
+  return result;
+}};
 const tools=[createBenchmarkWebTool(),...(image?[arithmeticTool,createPythonTool(image)]:[])];
 const runtime=createDitto({...(image?{sandboxExecutor:pythonExecutor()}:{}),sandbox:{execute:!!image,tools:tools.map(t=>t.name),network:['https://duckduckgo.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools})]});
 const plan=graph('baseline-original-prompt').node('sample','INFER.REASONING.SAMPLE',[],x=>x);
@@ -69,9 +75,17 @@ const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   try{
     if(req.url==='/status'){res.end(JSON.stringify({spent,active,pythonImage:image,overallTokenCeiling:null,episodeTokenLimit:null,maxOutputTokens:config.maxOutputTokens,runDirectory:config.runDirectory}));return;}
-    if(req.method!=='POST'||!['/sample','/search','/python','/start','/finish','/bootstrap','/propose','/freeze'].includes(req.url))throw new Error('Unknown endpoint');
+    if(req.method!=='POST'||!['/sample','/search','/python','/start','/finish','/bootstrap','/propose','/freeze','/reset-method'].includes(req.url))throw new Error('Unknown endpoint');
     let raw='';for await(const chunk of req)raw+=chunk;
     const body=JSON.parse(raw);
+    if(req.url==='/reset-method'){
+      if(!allowed.has(body.method))throw new Error('Invalid method');
+      let released=0;
+      for(const [key,session] of sessions)if(JSON.parse(key)[0]===body.method){
+        await session.runtime.close();session.env?.close();sessions.delete(key);released++;
+      }
+      res.end(JSON.stringify({released}));return;
+    }
     if(['/bootstrap','/propose','/freeze'].includes(req.url)){
       if(!automation&&!hle)throw new Error('Static benchmark controller unavailable');
       if(req.url==='/bootstrap'){
@@ -118,7 +132,7 @@ const server=createServer(async(req,res)=>{
       const task=lookup.get(body.benchmarkTaskId);if(!task||checkpoint.taskId!==task.id)throw new Error('Checkpoint task mismatch');
       if(hle){
         if(!checkpoint.grade){
-          const scoped={invoke(input,options){return provider.invoke({...input,metadata:{...input.metadata,method:body.method,phase:body.phase,taskId:body.taskId}},options);}};
+          const scoped={invoke(input,options){return ledgerProvider.invoke({...input,metadata:{...input.metadata,method:body.method,phase:body.phase,taskId:body.taskId}},options);}};
           const agents=new DittoAgents(new MeteredProvider(scoped),{model:config.model,baseUrl:process.env.MFLOW_BASE_URL,temperature:config.temperature,seed:config.seed},[]);
           const graded=await gradeHLE(task,checkpoint.answer,agents);checkpoint.grade={...graded,partialCredit:graded.score};
           writeFileSync(path+'.tmp',JSON.stringify(checkpoint));const {renameSync}=await import('node:fs');renameSync(path+'.tmp',path);
