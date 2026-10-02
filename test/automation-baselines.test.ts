@@ -159,6 +159,10 @@ with patch.object(a,'call',respond):
  asyncio.run(agent.sc_ensemble(solutions=['one','two'],problem='synthetic task'))
  asyncio.run(agent.custom(input='synthetic task',instruction='Execute.'))
 assert stages==[False,False,True],stages
+import runpy
+with patch.object(a,'main') as entry:
+ runpy.run_path(str(a.ROOT/'baselines/automation_aflow.py'),run_name='__main__')
+ entry.assert_called_once()
 print('NATIVE_STATIC_OK')
 ` ,JSON.stringify(init.seeds[0]),join(dir,'AFlow'),JSON.stringify(task)],{env,maxBuffer:1024*1024,timeout:60000});
     assert.ok(result.stdout.includes('NATIVE_STATIC_OK'));assert.equal(calls,7);

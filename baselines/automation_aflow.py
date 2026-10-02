@@ -142,4 +142,7 @@ def main():
     output=args.test_out or RUNS/'AFlow/test'
     (output/'summary.json').write_text(json.dumps({'method':'AFlow','count':len(tasks('test')),'passRate':result['score'],'meanPartialCredit':result['meanPartialCredit'],'tokens':result['tokens'],'selectedRound':number,'purpose':'observation-only' if args.test_round else 'final-selected-by-search'},indent=2)+'\n')
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    # The controller imports this module too. Share one stage ContextVar for search and final test.
+    from automation_aflow import main
+    main()

@@ -11,11 +11,13 @@ These are concurrent task counts, not token, round or context budgets. Native gr
 
 ## Snapshots and provenance
 
-The complete local runs live below `/Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v3/`, with separate `automationbench/MFlow` and `hle/MFlow` snapshots. Each has its own registry-installed Node dependencies, private `.env`, output and bridge. Data stays in the shared `codespace/Benchmarks`; Python environments are reused, and copied upstream baseline source files are hash-verified. No Ditto checkout or linked runtime is used.
+The complete local runs live below `/Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/`, with separate `automationbench/MFlow` and `hle/MFlow` snapshots. Each has its own registry-installed Node dependencies, private `.env`, output and bridge. Data stays in the shared `codespace/Benchmarks`; Python environments are reused, and copied upstream baseline source files are hash-verified. No Ditto checkout or linked runtime is used.
 
 Server checkpoints could not be downloaded. Local quality results therefore start afresh, and must not be merged with server evaluations. Old server data/results remain intact. A local one-shot launchd job, `io.mflow.hb-deepseek-retire.20261002`, retries SSH until it can stop only the old DeepSeek AutomationBench/HLE services; it does not stop Qwen. Its receipt is `/Users/erwin/Library/Logs/MFlow/hb-deepseek-retire-20261002.log`. Until that receipt confirms shutdown, the old server's execution state remains unknown.
 
-Local v1 is an archived startup attempt. It exposed transient connection failures that native AutoAgents retry handlers could wrap and score as task errors. Preserve its rows, unknown-usage requests and costs as startup overhead; do not combine its quality rows with v2. No test task was used to make these repairs. Local v2 is also archived: task-specific prompts and stage tool permissions changed before any held-out testing. Keep its development rows/costs separately; v3 starts fresh rather than mixing configurations.
+Local v1 is an archived startup attempt. It exposed transient connection failures that native AutoAgents retry handlers could wrap and score as task errors. Preserve its rows, unknown-usage requests and costs as startup overhead; do not combine its quality rows with v2. No test task was used to make these repairs. Local v2 is also archived: task-specific prompts and stage tool permissions changed before any held-out testing. Keep its development rows/costs separately; v4 starts fresh rather than mixing configurations.
+
+Local v3 is retained as startup overhead after fixing a duplicate Python module/context binding affecting final AFlow stage permissions; no test task ran.
 
 ## Runtime repairs and supervision
 
@@ -29,18 +31,18 @@ macOS denied launchd access to Downloads. Experiment supervisors instead run as 
 ## Progress
 
 ```sh
-cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v3/automationbench/MFlow
-python3 scripts/automation_experiment.py --benchmark automationbench --status --run runs/automationbench-deepseek-flash-local-20261002-v3
+cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/automationbench/MFlow
+python3 scripts/automation_experiment.py --benchmark automationbench --status --run runs/automationbench-deepseek-flash-local-20261002-v4
 
-cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v3/hle/MFlow
-python3 scripts/automation_experiment.py --benchmark hle --status --run runs/hle-deepseek-flash-local-20261002-v3
+cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/hle/MFlow
+python3 scripts/automation_experiment.py --benchmark hle --status --run runs/hle-deepseek-flash-local-20261002-v4
 ```
 
 The corresponding start commands, run from those frozen directories with the private `.env` exported, are:
 
 ```sh
-python3 scripts/automation_experiment.py --benchmark automationbench --run runs/automationbench-deepseek-flash-local-20261002-v3 --concurrency 16 --legacy-concurrency 2 --port 8297 --resume
-python3 scripts/automation_experiment.py --benchmark hle --run runs/hle-deepseek-flash-local-20261002-v3 --concurrency 4 --legacy-concurrency 1 --port 8299 --resume
+python3 scripts/automation_experiment.py --benchmark automationbench --run runs/automationbench-deepseek-flash-local-20261002-v4 --concurrency 16 --legacy-concurrency 2 --port 8297 --resume
+python3 scripts/automation_experiment.py --benchmark hle --run runs/hle-deepseek-flash-local-20261002-v4 --concurrency 4 --legacy-concurrency 1 --port 8299 --resume
 ```
 
 Do not launch a second supervisor while the recorded one is active. `jobs.json` distinguishes running, retrying and completed methods. Per-task results, model progress and usage records remain in the run directory. Search scores are provisional; report frozen full-test results separately.
