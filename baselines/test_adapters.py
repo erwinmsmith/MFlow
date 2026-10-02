@@ -109,6 +109,44 @@ class AdapterTests(unittest.TestCase):
                 self.assertTrue(invoke.call_args.kwargs['tools'])
         finally:os.chdir(original)
 
+    def test_parallel_local_runner_freezes_output_ports_and_concurrency(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
+        runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+        calls=[];live=set();peak=0
+        class Child:
+            def __init__(self,command,**kwargs):
+                nonlocal peak
+                self.bridge='baselines/bridge.mjs' in command;self.pid=len(calls)+1
+                calls.append((command,kwargs['env']))
+                if not self.bridge:live.add(self.pid);peak=max(peak,len(live))
+            def poll(self):
+                if self.bridge:return None
+                live.discard(self.pid);return 0
+            def terminate(self):live.discard(self.pid)
+            def wait(self,**kwargs):return 0
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'configs').mkdir()
+            (root/'configs/automationbench-baselines.json').write_text('{"runDirectory":"runs/old","concurrency":8}')
+            (root/'configs/automationbench-search.json').write_text('{"concurrency":8,"validationRounds":5}')
+            (root/'package-lock.json').write_text('{}')
+            args=['experiment','--run','runs/local','--concurrency','12','--legacy-concurrency','2','--port','8297']
+            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',args),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner.urllib.request,'urlopen',return_value=io.StringIO('{"runDirectory":"runs/local"}')):
+                runner.main()
+                with patch.object(sys,'argv',args+['--resume','--concurrency','13']),self.assertRaisesRegex(RuntimeError,'Immutable experiment'):runner.main()
+            self.assertEqual(peak,5)
+            self.assertEqual({e['MFLOW_BASELINE_ENDPOINT'] for _,e in calls},{'http://127.0.0.1:8297'})
+            self.assertEqual({e['MFLOW_BASELINE_PROTOCOL'] for _,e in calls},{str(root/'runs/local/baseline-config.json')})
+            protocol=json.loads((root/'runs/local/baseline-config.json').read_text())
+            self.assertEqual((protocol['runDirectory'],protocol['concurrency']),('runs/local',12))
+            self.assertEqual(json.loads((root/'runs/local/search-config.json').read_text()),{'concurrency':12,'validationRounds':5})
+            legacy=[c for c,_ in calls if 'baselines/automation_run.py' in c]
+            self.assertEqual(len(legacy),6)
+            self.assertTrue(all(c[-2:]==['--concurrency','2'] for c in legacy))
+            self.assertEqual({j['status'] for j in json.loads((root/'runs/local/jobs.json').read_text())['jobs'].values()},{'completed'})
+        with patch.object(runner.Path,'exists',return_value=False),patch.object(runner.subprocess,'check_output',return_value='Pages free: 512.\nPages inactive: 256.\nPages speculative: 128.\nPages purgeable: 64.\nPages wired down: 1000.\n'),patch.object(runner.os,'sysconf',return_value=16384):
+            self.assertEqual(runner.available_memory_mib(),15)
+
     def test_hle_shared_jsonl_preserves_unicode_question_separators(self):
         with patch.dict(common.PROTOCOL,{'benchmark':'hle','datasetProtocol':'hle-full-holdout-v1'}):
             search,test=common.tasks('search'),common.tasks('test')

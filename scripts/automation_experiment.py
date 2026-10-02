@@ -18,6 +18,15 @@ def jsonl(path):
         for line in stream:
             if line.endswith('\n') and line.strip():yield json.loads(line)
 
+def available_memory_mib():
+    path=Path('/proc/meminfo')
+    if path.exists():return next(int(line.split()[1])//1024 for line in path.read_text().splitlines() if line.startswith('MemAvailable:'))
+    # macOS reports free and reclaimable pages rather than Linux MemAvailable.
+    output=subprocess.check_output(['vm_stat'],text=True)
+    pages=sum(int(line.split(':')[1].strip().rstrip('.')) for line in output.splitlines()
+              if line.split(':')[0] in ('Pages free','Pages inactive','Pages speculative','Pages purgeable'))
+    return pages*os.sysconf('SC_PAGE_SIZE')//(1024*1024)
+
 def cost(records):
     result={'knownTokens':0,'unknownCalls':0}
     for row in records:
@@ -101,7 +110,12 @@ def status(out):
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run')
+    p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
+    p.add_argument('--legacy-concurrency',type=int,default=1,help='Isolated worker processes per native legacy method')
+    p.add_argument('--port',type=int,help='Independent Ditto baseline bridge port');a=p.parse_args()
+    if a.concurrency is not None and a.concurrency<1 or a.legacy_concurrency<1:p.error('Concurrency must be positive')
+    if a.port is not None and not 1<=a.port<=65535:p.error('Invalid bridge port')
     math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
     protocol='configs/'+(profile if math else 'hle-baselines.json' if hle else 'automationbench-baselines.json')
@@ -110,13 +124,17 @@ def main():
     out=ROOT/a.run
     if a.status:status(out);return
     if os.environ.get('MFLOW_MODEL') not in (('deepseek-flash','qwen3.5-9b') if math else ('deepseek-flash',)):raise ValueError('Select the private benchmark model profile before launch')
-    port='8199' if hle else '8198' if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else '8197'
-    env={**os.environ,'MFLOW_BASELINE_PROTOCOL':protocol,'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
+    search_file='configs/'+('hb-aflow-search.json' if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 'hb-deepseek-aflow-search.json') if math else f'configs/{a.benchmark}-search.json'
+    search_config=read(ROOT/search_file,{})
+    if a.concurrency is not None:config['concurrency']=search_config['concurrency']=a.concurrency
+    config['runDirectory']=a.run
+    port=str(a.port or (8199 if hle else 8198 if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 8197))
+    env={**os.environ,'MFLOW_BASELINE_PROTOCOL':str(out/'baseline-config.json'),'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
     if hle:
         env.update(MFLOW_HLE_PROTOCOL=config['datasetProtocol'],MFLOW_HLE_JUDGE_MODEL=config['judgeModel'],MFLOW_HLE_BLOCKED_SEARCH_LOG=str(out/'blocked-web-search.jsonl'))
-    manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'schedule':'sequential' if a.sequential else 'parallel','code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
+    manifest={'model':env['MFLOW_MODEL'],'benchmark':a.benchmark,'schedule':'sequential' if a.sequential else 'parallel','baselineConfig':config,'searchConfig':search_config,'bridgePort':int(port),'legacyConcurrency':a.legacy_concurrency,'code':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['src','dist/src','baselines','scripts','configs','benchmark-hub','data'] for p in (ROOT/folder).glob('*') if p.is_file() and p.suffix in {'.ts','.js','.mjs','.py','.json','.sh'}},'dependencies':hashlib.sha256((ROOT/'package-lock.json').read_bytes()).hexdigest()}
     if hle:
         lock=next(v for v in read(ROOT/'data/extended-benchmarks.lock.json').values() if v['protocol']==config['datasetProtocol'])
         manifest.update(datasetProtocol=lock['protocol'],searchCount=lock['splits']['search']['count'],testCount=lock['splits']['test']['count'],judgeModel=config['judgeModel'],toolProtocol=config['toolProtocol'])
@@ -124,29 +142,23 @@ def main():
     if saved and saved!=manifest:raise RuntimeError('Immutable experiment code/config changed')
     if saved and not a.resume:raise RuntimeError('Run exists; use --resume')
     (out/'experiment-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (out/'baseline-config.json').write_text(json.dumps(config,indent=2)+'\n')
+    (out/'search-config.json').write_text(json.dumps(search_config,indent=2)+'\n')
+    (out/'bridge.json').write_text(json.dumps({'port':int(port)})+'\n')
     legacy=str(ROOT.parent/'MFlow-baselines/.venv-legacy/bin/python');aflow=str(ROOT.parent/'MFlow-baselines/.venv-aflow/bin/python')
     node=['node','--env-file-if-exists=.env','dist/src/cli.js']
     search=out/'MFlow/search';test=out/'MFlow/test'
     commands={
-      'MFlow':[(node+['search','--benchmark','automationbench','--config','configs/automationbench-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
-               (node+['evaluate','--benchmark','automationbench','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config['concurrency'])]+(['--resume'] if (test/'manifest.json').exists() else []))],
+      'MFlow':[(node+['search','--benchmark',a.benchmark,'--config',str(out/'search-config.json'),'--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
+               (node+['evaluate','--benchmark',a.benchmark,'--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config.get('concurrency',4 if env['MFLOW_MODEL']=='qwen3.5-9b' else 24))]+(['--resume'] if (test/'manifest.json').exists() else []))],
       'AFlow':[[aflow,'baselines/automation_aflow.py']],
-      **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','1'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
+      **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency',str(a.legacy_concurrency)] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }
     if math:
-        commands={
-          'MFlow':[(node+['search','--benchmark','math','--config','configs/hb-aflow-search.json' if env['MFLOW_MODEL']=='qwen3.5-9b' else 'configs/hb-deepseek-aflow-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
-                   (node+['evaluate','--benchmark','math','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency','4' if env['MFLOW_MODEL']=='qwen3.5-9b' else '24']+(['--resume'] if (test/'manifest.json').exists() else []))],
+        commands.update({
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
-        }
-    if hle:
-        commands={
-          'MFlow':[(node+['search','--benchmark','hle','--config','configs/hle-search.json','--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
-                   (node+['evaluate','--benchmark','hle','--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config['concurrency'])]+(['--resume'] if (test/'manifest.json').exists() else []))],
-          'AFlow':[[aflow,'baselines/automation_aflow.py']],
-          **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency','1'] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
-        }
+        })
     jobs=read(out/'jobs.json',{'jobs':{}});active={}
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)
@@ -154,7 +166,7 @@ def main():
         if hle:
             minimum=int(os.environ.get('MFLOW_MIN_AVAILABLE_MIB','384'))
             while True:
-                available=next(int(line.split()[1])//1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:'))
+                available=available_memory_mib()
                 if available>=minimum:break
                 jobs['jobs'][name]={'stage':index,'status':'waiting_for_memory','availableMiB':available,'requiredMiB':minimum};persist();time.sleep(10)
         if name!='MFlow' or not hle:start_bridge()
