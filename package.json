@@ -15,7 +15,7 @@
     "mflow": "node --env-file-if-exists=.env dist/src/cli.js"
   },
   "dependencies": {
-    "@codesoul-co/ditto": "0.1.1",
+    "@codesoul-co/ditto": "0.1.2",
     "undici": "7.30.0",
     "zod": "4.1.12"
   },

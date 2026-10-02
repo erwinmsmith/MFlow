@@ -8,7 +8,7 @@ import { openAutomation, checkAutomation } from '../dist/src/benchmark-environme
 import { benchmarkPath } from '../dist/src/benchmark-hub.js';
 import { readTasks, actorInput, withTaskImages } from '../dist/src/data.js';
 import { automationInstruction, hleInstruction } from '../dist/src/aflow-seed.js';
-import { modelFetch, observableProvider } from '../dist/src/provider-progress.js';
+import { modelFetch, observableProvider, ProviderFailure } from '../dist/src/provider-progress.js';
 import { createPythonTool, pythonImage, pythonExecutor, createBenchmarkWebTool } from '../dist/src/python-tool.js';
 import { DittoAgents, MeteredProvider, arithmeticTool } from '../dist/src/ditto.js';
 import { gradeHLE } from '../dist/src/hle-grading.js';
@@ -21,7 +21,7 @@ const append=(file,row)=>appendFileSync(resolve(out,file),JSON.stringify(row)+'\
 const readRows=file=>existsSync(file)?readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse):[];
 let spent=readRows(resolve(out,'usage.jsonl')).reduce((n,r)=>n+r.charged,0),active=0;
 const optimizerFailures=new Map();
-const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(resolve(out,'requests',p.id+'.json'),JSON.stringify(p));}});
+const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,idleTimeoutMs:process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS?Number(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS):undefined,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(resolve(out,'requests',p.id+'.json'),JSON.stringify(p));}});
 const automation=config.benchmark==='automationbench',hle=config.benchmark==='hle',dataset=hle?'HLE':'AutomationBench',instruction=hle?hleInstruction:automationInstruction,sessions=new Map(),lookup=new Map();
 const image=automation?undefined:await pythonImage(config.aflowPythonImage);
 if(hle)process.env.MFLOW_HLE_PROTOCOL=config.datasetProtocol;
@@ -69,7 +69,7 @@ const provider={async invoke(input,options){
   return result;
 }};
 const tools=[createBenchmarkWebTool(),...(image?[arithmeticTool,createPythonTool(image)]:[])];
-const runtime=createDitto({...(image?{sandboxExecutor:pythonExecutor()}:{}),sandbox:{execute:!!image,tools:tools.map(t=>t.name),network:['https://duckduckgo.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools})]});
+const runtime=createDitto({...(image?{sandboxExecutor:pythonExecutor()}:{}),sandbox:{execute:!!image,tools:tools.map(t=>t.name),network:['https://www.bing.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools})]});
 const plan=graph('baseline-original-prompt').node('sample','INFER.REASONING.SAMPLE',[],x=>x);
 const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
@@ -126,7 +126,7 @@ const server=createServer(async(req,res)=>{
       const key=scopeKey(body);
       if(existsSync(statePath(body))){const checkpoint=JSON.parse(readFileSync(statePath(body),'utf8'));if(checkpoint.taskId!==task.id)throw new Error('Checkpoint task mismatch');res.end(JSON.stringify({checkpoint:true,answer:checkpoint.answer??''}));return;}
       if(sessions.has(key))throw new Error('Task already running');
-      if(hle){const input=await actorInput(task),scopedTools=tools.map(t=>t.name==='web_search'?createBenchmarkWebTool(input):t),local=createDitto({sandboxExecutor:pythonExecutor(),sandbox:{execute:true,tools:scopedTools.map(t=>t.name),network:['https://duckduckgo.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:scopedTools})]});sessions.set(key,{task,input,runtime:local,tools:scopedTools,observations:[]});res.end(JSON.stringify({checkpoint:false}));return;}
+      if(hle){const input=await actorInput(task),scopedTools=tools.map(t=>t.name==='web_search'?createBenchmarkWebTool(input):t),local=createDitto({sandboxExecutor:pythonExecutor(),sandbox:{execute:true,tools:scopedTools.map(t=>t.name),network:['https://www.bing.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:scopedTools})]});sessions.set(key,{task,input,runtime:local,tools:scopedTools,observations:[]});res.end(JSON.stringify({checkpoint:false}));return;}
       const env=await openAutomation(task),local=createDitto({sandbox:{tools:env.tools.map(t=>t.name)},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:env.tools})]});
       sessions.set(key,{env,runtime:local,tools:env.tools,observations:[]});res.end(JSON.stringify({checkpoint:false}));return;
     }
@@ -153,7 +153,7 @@ const server=createServer(async(req,res)=>{
       const session=sessions.get(scopeKey(body));
       const result=automation?await session.runtime.invoke('INTERACTION.ACT.TOOL',{call:{id:randomUUID(),name:'api_search',arguments:{query:body.query,top_k:8}}}):await (hle?session.runtime:runtime).invoke('INTERACTION.ACT.TOOL',{call:{id:randomUUID(),name:'web_search',arguments:{query:body.query,limit:8}}});
       append('search.jsonl',{method:body.method,phase:body.phase,taskId:body.taskId,query:body.query,result,at:new Date().toISOString()});
-      if(result.status!=='success')throw new Error(result.error?.message??'Web search failed');
+      if(result.status!=='success')throw new ProviderFailure('MODEL_TOOL_ERROR',result.error?.message??'Web search failed');
       res.end(JSON.stringify(automation?{results:result.content}:result.structuredContent));return;
     }
     const input={model:{provider:'baseline',model:config.model},messages:body.messages,generation:{temperature:config.temperature,maxTokens:config.maxOutputTokens},metadata:{method:body.method,phase:body.phase,taskId:body.taskId}};
@@ -167,17 +167,17 @@ const server=createServer(async(req,res)=>{
       input.constraints={maxSteps:Number.MAX_SAFE_INTEGER,maxActionCalls:Number.MAX_SAFE_INTEGER,maxTotalTokens:Number.MAX_SAFE_INTEGER,timeoutMs:config.providerTimeoutMs};
       const result=await runReactFlow(session.runtime,input,{timeoutMs:config.providerTimeoutMs});
       session.observations.push(...result.observations);
-      if(result.status!=='completed')throw new Error('Incomplete Ditto tool loop: '+JSON.stringify({stopReason:result.stopReason,error:result.error}));
+      if(result.status!=='completed')throw new ProviderFailure(result.stopReason==='max_tokens'?'INCOMPLETE_MODEL_OUTPUT':(result.error?.code??'MODEL_TOOL_ERROR'),'Incomplete Ditto tool loop: '+JSON.stringify({stopReason:result.stopReason,error:result.error}));
       res.end(JSON.stringify({message:result.result,finishReason:'stop'}));return;
     }
     const result=await runtime.run(plan,input);
-    if(result.sample.status!=='success')throw new Error(result.sample.error?.message??'Ditto sample failed');
+    if(result.sample.status!=='success')throw new ProviderFailure(result.sample.error?.code??'INVALID_MODEL_OUTPUT',result.sample.error?.message??'Ditto sample failed');
     res.end(JSON.stringify(result.sample.output));
   }catch(error){res.statusCode=502;res.end(JSON.stringify({error:String(error)}));}
 });
 server.requestTimeout=0;server.timeout=0;
 server.listen(port,'127.0.0.1',()=>{
-  writeFileSync(resolve(out,'bridge.json'),JSON.stringify({pid:process.pid,port:server.address().port,ditto:'0.1.1',pythonImage:image,...config},null,2));
+  writeFileSync(resolve(out,'bridge.json'),JSON.stringify({pid:process.pid,port:server.address().port,ditto:'0.1.2',pythonImage:image,...config},null,2));
   console.log(`Baseline bridge listening on 127.0.0.1:${port}`);
 });
 process.on('SIGTERM',()=>server.close(()=>process.exit(0)));

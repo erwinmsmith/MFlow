@@ -278,7 +278,7 @@ export async function runAFlowSearch(options: {
         result = await evaluation(input.round, input.repeat, candidate(input.strategy));
       } else if (req.url === '/freeze' || req.url === '/checkpoint-round') {
         const strategy = candidate(input.strategy);
-        const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1', pythonImage: image, webSearch, strategy,
+        const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.2', pythonImage: image, webSearch, strategy,
           pool: strategy.organization!.initialAgents, model: options.model, config: runtimeConfig,
           searchDataHash: digest(tasks), selectionTaskIds: tasks.map((t) => t.id),
           selectionPromptHashes: tasks.map((t) => digest(promptKey(t))),

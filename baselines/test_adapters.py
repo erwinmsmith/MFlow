@@ -61,10 +61,20 @@ class AdapterTests(unittest.TestCase):
         import urllib.error
         token=common.SCOPE.set(('AFlow','search','fixture'))
         try:
-            for message,kind in [('[INVALID_MODEL_OUTPUT] malformed action JSON',common.ModelOutputFailure),('{"code":"INVALID_MODEL_OUTPUT","message":"duplicate action ID"}',common.ModelOutputFailure),('[DEGENERATE_OUTPUT] repeated output',common.ModelOutputFailure),('[MODEL_CONTEXT_LIMIT] HTTP 400: maximum context length exceeded',common.ModelOutputFailure),('Model provider returned HTTP 402',common.TransportFailure)]:
+            for message,kind in [('[INVALID_MODEL_OUTPUT] malformed action JSON',common.ModelOutputFailure),('{"code":"INVALID_MODEL_OUTPUT","message":"duplicate action ID"}',common.ModelOutputFailure),('[DEGENERATE_OUTPUT] repeated output',common.ModelOutputFailure),('[MODEL_CONTEXT_LIMIT] HTTP 400: maximum context length exceeded',common.ModelOutputFailure),('[INCOMPLETE_MODEL_OUTPUT] max_tokens',common.ModelOutputFailure),('[MODEL_TOOL_ERROR] invalid query',common.ModelOutputFailure),('Model provider returned HTTP 402',common.TransportFailure)]:
                 error=urllib.error.HTTPError('http://fixture',502,'fixture',{},io.BytesIO(json.dumps({'error':message}).encode()))
                 with patch.object(common.urllib.request,'urlopen',side_effect=error):
                     with self.assertRaises(kind):common.call([{'role':'user','content':'fixture'}])
+        finally:common.SCOPE.reset(token)
+
+    def test_output_ceiling_and_invalid_rewritten_query_do_not_restart_task(self):
+        token=common.SCOPE.set(('AutoAgents','pilot','fixture'))
+        try:
+            with patch.object(common,'bridge_request',return_value={'finishReason':'length'}):
+                with self.assertRaises(common.ModelOutputFailure):common.call([])
+            with patch.object(common,'call',return_value='too long '*100),patch.object(common,'bridge_request') as send:
+                with self.assertRaises(common.ModelOutputFailure):common.search_web('word '*100)
+                send.assert_not_called()
         finally:common.SCOPE.reset(token)
 
     def test_replacement_episode_uses_fresh_scope_and_shared_ledger(self):

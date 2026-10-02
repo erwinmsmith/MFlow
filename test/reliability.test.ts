@@ -85,3 +85,22 @@ test('auth failures and user cancellation do not trigger paid transport retries'
   await assert.rejects(meter.invoke(input, { signal: controller.signal }));
   assert.equal(attempts, 1);
 });
+
+test('tool argument cycles are observed independently without treating reasoning as answer text', async () => {
+  const progress: import('../src/provider-progress.js').ProviderProgress[] = [];
+  const transport=observableProvider({ async invoke(){throw new Error('stream required');}, async *stream(){
+    yield {type:'reasoning_delta' as const,delta:'private fixture reasoning'};
+    yield {type:'action_delta' as const,index:0,name:'python',delta:'print(1)\n'.repeat(3000)};
+  } },{stream:true,onProgress:async p=>{progress.push(p);}});
+  await assert.rejects(transport.invoke(input,{signal:AbortSignal.timeout(1000)}),{code:'DEGENERATE_OUTPUT'});
+  assert.equal(progress.at(-1)?.textChars,0);
+  assert.ok(progress.at(-1)!.actionChars!>0);assert.ok(progress.at(-1)!.lastGenerationAt);
+  assert.ok(!JSON.stringify(progress).includes('private fixture reasoning'));
+});
+
+test('invalid web arguments become a correctable tool observation', async () => {
+  const {createBenchmarkWebTool}=await import('../src/python-tool.js');
+  const tool=createBenchmarkWebTool();
+  const result=await tool.execute({query:'too many words '.repeat(100)},{} as WorkerContext<unknown,unknown>);
+  assert.equal(result.status,'failed');assert.equal(result.error?.code,'WEB_SEARCH_ARGUMENTS');
+});

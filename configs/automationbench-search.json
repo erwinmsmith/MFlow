@@ -4,5 +4,11 @@
   "validationRounds": 5,
   "concurrency": 8,
   "maxOutputTokens": 393216,
-  "initializations": ["single", "review", "plan-execute", "parallel-plan", "adaptive"]
+  "initializations": [
+    "adaptive",
+    "review",
+    "parallel-plan",
+    "plan-execute",
+    "single"
+  ]
 }

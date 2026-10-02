@@ -140,3 +140,9 @@ MFlow v8 继续使用已有 arithmetic/Python 工具和原生节点。该扩展�
 验收：输入仍完整且顺序不变；输入未满但输入+请求输出 allowance 越界时，可在 opt-in 模式正常生成短回答；输入本身超界时返回明确模型容量错误；所有请求与重试的 usage 可追溯。工具、多模态、取消与无法确定容量的 provider 均 fail closed。该能力不依赖 MAS/spawn。
 
 MFlow 当前仅通过公开 fetch 注入保存错误详情，将明确的模型容量错误作为节点执行失败供现有策略恢复；评分保留实际世界状态与失败成本。不会在应用中另写 tokenizer、SSE 或自适应 Provider；无人工 Context 截断，其他 HTTP/认证/服务错误仍中止相应实验。
+
+## 2026-10-02：DITTO-004 生成进度已由发布包补齐
+
+当前依赖升级至 registry `@codesoul-co/ditto@0.1.2`（npm tarball `https://registry.npmjs.org/@codesoul-co/ditto/-/ditto-0.1.2.tgz`，Ditto dev 提交 `c8ac380`，main 发布提交 `b6eb649`）。三种 HTTP 协议公开 `reasoning_delta` / `action_delta`；可选 `idleTimeoutMs` 依据实际生成增量刷新，空 SSE 心跳不算生成。MFlow 仅消费这些公共事件，分别记录文本/参数/推理字符数，推理内容不落进度日志；持续生成不受该空闲保护影响。SDK 459 项检查通过。
+
+DITTO-004 剩余通用需求仍为供应商请求 ID、解析失败/取消时已知 usage 及具体字段路径。未知用量保留为未知，不能将预留额度当作实际 token。未实现供应商解析器或复制 Ditto 执行基础设施。

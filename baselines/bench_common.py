@@ -24,7 +24,7 @@ def bridge_request(route,body):
         try:detail=json.loads(error).get('error',error)
         except (ValueError,AttributeError):detail=error
         if any(x in error for x in ['GLOBAL_BUDGET','SEARCH_BUDGET','EPISODE_BUDGET']):raise BudgetStop(error)
-        if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT','MODEL_CONTEXT_LIMIT')):raise ModelOutputFailure(error) from None
+        if any(f'[{code}]' in detail or f'"code":"{code}"' in detail for code in ('INVALID_MODEL_OUTPUT','DEGENERATE_OUTPUT','INCOMPLETE_MODEL_OUTPUT','MODEL_CONTEXT_LIMIT','MODEL_TOOL_ERROR','MODEL_ERROR','UNDECLARED_ACTION')):raise ModelOutputFailure(error) from None
         raise TransportFailure(error) from None
     except (urllib.error.URLError,TimeoutError,ConnectionError) as error:raise TransportFailure(str(error)) from None
 
@@ -35,13 +35,16 @@ def execute_python(code):
 def call(messages,tools=True):
     method,phase,task_id=SCOPE.get()
     result=bridge_request('sample',dict(method=method,phase=phase,taskId=task_id,messages=messages,tools=tools))
-    if result['finishReason']=='length':raise TransportFailure('Provider context/output ceiling reached; response is incomplete')
+    if result['finishReason']=='length':raise ModelOutputFailure('[INCOMPLETE_MODEL_OUTPUT] Provider context/output ceiling reached; response is incomplete')
     return result['message']['content']
 
 def search_web(query):
     query=' '.join(query.split())
     if len(query)>600 or len(query.split())>75:
-        query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}],tools=False).strip()
+        query=call([{'role':'system','content':'Convert this search request to one concise search query, under 500 characters and 60 words. Return only the query; do not answer it.'},{'role':'user','content':query}],tools=False)
+        query=' '.join(query.split())
+    if not query or len(query)>600 or len(query.split())>75:
+        raise ModelOutputFailure('[MODEL_TOOL_ERROR] Search query must be nonempty and at most 600 characters / 75 words')
     method,phase,task_id=SCOPE.get()
     return json.dumps(bridge_request('search',dict(method=method,phase=phase,taskId=task_id,query=query))['results'])
 

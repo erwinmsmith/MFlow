@@ -60,7 +60,7 @@ if __name__=='__main__':
     if check and (rule:=check(query=query)):
         log_blocked(sys.argv[4],query,rule);rows=[]
     else:
-        rows=DDGS(timeout=30).text(query,max_results=int(sys.argv[2]),backend='duckduckgo')
+        rows=DDGS(proxy=os.environ.get('MFLOW_SEARCH_PROXY') or None,timeout=30).text(query,max_results=int(sys.argv[2]),backend='bing')
         if check:
             allowed=[]
             for row in rows:

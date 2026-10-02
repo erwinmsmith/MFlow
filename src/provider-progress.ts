@@ -26,6 +26,7 @@ export interface ProviderProgress {
   id: string; kind: string; state: 'started' | 'streaming' | 'completed' | 'failed';
   startedAt: string; updatedAt: string; textChars: number; nonWhitespaceChars: number;
   lastTextAt?: string; finishReason?: string; usage?: SampleOutput['usage']; error?: string; code?: string;
+  actionChars?: number; reasoningChars?: number; lastGenerationAt?: string; method?: string; phase?: string; taskId?: string;
   agentId?: string; nodeId?: string; outputHead?: string; outputTail?: string;
 }
 export interface TransportOptions {
@@ -40,7 +41,7 @@ export function repeatedOutput(tail: string): boolean {
   let previous = tail.lastIndexOf(anchor, tail.length - 129);
   while (previous >= 0) {
     const period = tail.length - 128 - previous;
-    if (period > 8192) break;
+    if (period > 32768) break;
     const span = Math.max(8192, period * 8);
     if (tail.length >= span + period) {
       let matches = true;
@@ -60,10 +61,12 @@ export function observableProvider(provider: ModelProvider, options: TransportOp
   return { async invoke(input, callOptions) {
     const progress: ProviderProgress = { id: randomUUID(), kind: String(input.metadata?.kind ?? 'inference'),
       state: 'started', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), textChars: 0, nonWhitespaceChars: 0,
-      agentId: input.metadata?.agentId as string | undefined, nodeId: input.metadata?.nodeId as string | undefined };
+      agentId: input.metadata?.agentId as string | undefined, nodeId: input.metadata?.nodeId as string | undefined,
+      method: input.metadata?.method as string | undefined, phase: input.metadata?.phase as string | undefined, taskId: input.metadata?.taskId as string | undefined };
     const cancellation = new AbortController();
     const signal = AbortSignal.any([callOptions.signal, cancellation.signal]);
-    let head = '', tail = '', checkedAt = 0;
+    let head = '', tail = '';
+    const channels = new Map<string, { tail: string; chars: number; checkedAt: number }>();
     const publish = async () => { progress.updatedAt = new Date().toISOString(); await options.onProgress?.({ ...progress }); };
     await publish();
     try {
@@ -72,19 +75,28 @@ export function observableProvider(provider: ModelProvider, options: TransportOp
         if (!provider.stream) throw new ProviderFailure('STREAM_UNAVAILABLE', 'Published provider has no stream interface');
         for await (const event of provider.stream(input, { ...callOptions, signal })) {
           if (event.type === 'result') { result = event.output; continue; }
-          progress.state = 'streaming'; progress.textChars += event.delta.length;
-          progress.nonWhitespaceChars += event.delta.replace(/\s/g, '').length;
-          head = (head + event.delta).slice(0, 1024);
-          tail = (tail + event.delta).slice(-131072);
-          if (progress.textChars - checkedAt >= 4096) {
-            checkedAt = progress.textChars;
-            if (repeatedOutput(tail)) {
-              const error = new ProviderFailure('DEGENERATE_OUTPUT', 'Provider repeated an exact output cycle without progress');
-              cancellation.abort(error);
-              throw error;
+          if (!event.delta.length) continue;
+          progress.state = 'streaming';
+          progress.lastGenerationAt = new Date().toISOString();
+          if (event.type === 'text_delta') {
+            progress.textChars += event.delta.length;
+            progress.nonWhitespaceChars += event.delta.replace(/\s/g, '').length;
+            head = (head + event.delta).slice(0, 1024);
+            tail = (tail + event.delta).slice(-2048);
+            progress.lastTextAt = progress.lastGenerationAt;
+          } else if (event.type === 'action_delta') progress.actionChars = (progress.actionChars ?? 0) + event.delta.length;
+          else progress.reasoningChars = (progress.reasoningChars ?? 0) + event.delta.length;
+          const key = event.type === 'action_delta' ? `action:${event.index}` : event.type;
+          const channel = channels.get(key) ?? { tail: '', chars: 0, checkedAt: 0 };
+          channel.tail = (channel.tail + event.delta).slice(-524288); channel.chars += event.delta.length;
+          channels.set(key, channel);
+          if (channel.chars - channel.checkedAt >= 4096) {
+            channel.checkedAt = channel.chars;
+            if (repeatedOutput(channel.tail)) {
+              const error = new ProviderFailure('DEGENERATE_OUTPUT', `Provider repeated an exact ${event.type} cycle without progress`);
+              cancellation.abort(error); throw error;
             }
           }
-          progress.lastTextAt = new Date().toISOString();
           if (Date.now() - lastSaved >= 2000) { await publish(); lastSaved = Date.now(); }
         }
         if (!result) throw new ProviderFailure('INCOMPLETE_MODEL_OUTPUT', 'Stream ended without a final result');

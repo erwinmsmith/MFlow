@@ -31,7 +31,7 @@ export const textSolver = `return loop({id:'solve',plan:function*(ctx){
     if(out[sample].status!=='success') return ctx.failedAgent(id,out[sample].error);
     const response=ctx.unwrap(out[sample]);
     if(!response.actionRequests?.length) return ctx.publishText(id,response.message.content);
-    messages.push({...response.message,metadata:{actionRequests:response.actionRequests}});
+    messages.push({...response.message,metadata:{...response.message.metadata,actionRequests:response.actionRequests}});
     for(const call of response.actionRequests){
       const act=id+'/tool',observe=id+'/observe';
       const tools=graph(id+'/tools')
@@ -66,7 +66,7 @@ Only API observations and the user's request are evidence. Grading references an
 export const hleInstruction = `Solve the original expert-level academic question, including any supplied image. Respect its exact definitions, assumptions, units and requested precision; for multiple choice give the option letter.
 Choose a subject-appropriate method. Separate established facts from speculation, and check the decisive step with an independent argument or exact computation when useful. Inspect supplied images directly; do not pretend to see labels or details that are not present.
 Available external tools are arithmetic, isolated Python and web_search. Use web results as cited evidence, verify their relevance, and do not seek benchmark answer keys or author rationales. State a concrete blocker if the evidence is insufficient; do not repeatedly cycle through the same conjecture or computation.
-Use focused subject queries and primary sources, not the whole question. Each additional reasoning step or tool call should resolve a named uncertainty; when a route fails, change method or report that uncertainty. Do not expand repeated speculative reasoning into a longer answer. A short justified answer is preferable to unsupported elaboration.
+Use focused subject queries and primary sources, not the whole question. Tool actions must be actual structured calls, never prose such as "I will search". After a failed tool call, inspect its error and change the query or computation; do not infer that all tools are unavailable. Python has no internet: retrieve evidence with web_search and compute with Python. Repeatedly announcing or reconsidering the same action is not progress; execute the decisive check or state the unresolved gap. Each additional reasoning step or tool call should resolve a named uncertainty; when a route fails, change method or report that uncertainty. Do not expand repeated speculative reasoning into a longer answer. A short justified answer is preferable to unsupported elaboration.
 For final solution responses, return these sections (framework control, role-design and operator-format stages must instead follow their requested schema exactly): Explanation: your reasoning; Answer: the precise final answer, without extra alternatives; Confidence: your estimated probability of correctness from 0% to 100%. Confidence reflects evidence, not the number of agents that agree.`;
 export const textOrganization = organizationSchema.parse({
   initialAgents: [profile], initialBindings: { root: 'solver' },
@@ -139,7 +139,7 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
     profile.expected_output = contract;
     profile.stop_condition = 'A complete answer or a concrete unresolved obstacle is stated.';
   }
-  if (workflow) for (const template of organization.agentTemplates!) {
+  if (workflow || academic) for (const template of organization.agentTemplates!) {
     // All agents use the same task world. Review may inspect or repair concrete effects.
     template.composition = textSolver;
     template.description = `${template.id}: workflow execution and state verification`;
@@ -166,7 +166,8 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
   ctx.spawnTemplate('reviewer','reviewer','root');
   const review=yield* ctx.runAgent('reviewer','Initial candidate:\\n'+solution(first),'review');
   ctx.dormant('reviewer');
-  if(first.candidate_answer && first.candidate_answer.trim()===review.candidate_answer.trim()) return review.candidate_answer;
+  function answer(text){return ${academic ? String.raw`(text.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nConfidence:|$)/i)?.[1] ?? '').trim().replace(/\s+/g,' ')` : "text.trim()"};}
+  if(answer(first.candidate_answer) && answer(first.candidate_answer)===answer(review.candidate_answer)) return review.candidate_answer;
   ctx.spawnTemplate('independent','independent','root');
   const independent=yield* ctx.runAgent('independent','Solve independently from the original task.','agent');
   ctx.dormant('independent');
@@ -214,24 +215,36 @@ export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], name
   }});`;
   const adaptive = structuredClone(seed);
   adaptive.prompts.factory = `Design a task-local subagent for this ${academic?'academic question':'workflow'}. Return JSON {profile,composition} only.
-profile has id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. Available tools: ${academic?'arithmetic, python, web_search':'api_search, api_fetch, base64_encode'}. Available nodes: ${compositionNodes.join(', ')}.
+profile has exactly id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. reasoning must be one of cot, long-cot, react, tot, got, self-consistency. private_context contains brief method instructions, never a solved answer, long derivation or copy of the task. Do not solve the question during design. Available tools: ${academic?'arithmetic, python, web_search':'api_search, api_fetch, base64_encode'}. Available nodes: ${compositionNodes.join(', ')}.
 composition is JavaScript source returning a public Ditto loop({id,plan:function*(ctx){...}}); the generator returns an AgentOutput object, never a string. Use ctx.self for node IDs; ctx.task contains only id/prompt, ctx.evidence the assignment.
 Build graph/loop structure and reasoning appropriate to this task's ${academic?'subject, uncertainties and competing approaches':'concrete API dependencies'}. It may delegate recursively with ctx.spawn(profile,parentId,composition) and yield* ctx.runAgent. Tools execute only through native INTERACTION.ACT.TOOL and INTERACTION.OBSERVE; no imports/process/network/eval.
 For SAMPLE use ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),true,'text'); ctx.unwrap checks node success. Preserve assistant actionRequests metadata and tool actionRequestId. ctx.publishText(id,text,'raw') returns AgentOutput.
-This complete tool-using program illustrates the public contract; adapt its structure and profile when the task calls for a specialist: ${seed.organization.agentTemplates![0].composition}
-${academic?hleInstruction:automationInstruction}`;
+Return valid JSON with exactly profile and composition; JSON-escape the full source string. Use the supplied loop/graph/graphStep helpers; never redefine them. End with the closing quote and braces of the JSON object.
+This valid JSON example illustrates the interface. Adapt the profile and graph to the task; keep program logic executable rather than embedding a long answer in it:
+${JSON.stringify({profile:{id:'specialist',...seed.organization.agentTemplates![0].profile,private_context:'Choose a method and use actual tools for decisive checks; preserve observed evidence.'},composition:seed.organization.agentTemplates![0].composition})}`;
   adaptive.composition = `return loop({id:'adaptive-factory',plan:function*(ctx){
     const node='root/factory';
     let messages=ctx.textMessages('root',${JSON.stringify(academic?'Design a subject-specific subagent and internal graph suited to this question; it may reason, compute or research and should resolve the decisive uncertainty.':'Design a distinct subagent to execute this task; choose its actual internal graph and capability.')},'factory'),design;
     for(let attempt=0;attempt<3;attempt++){
       const g=graph('factory').node(node,'INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
-      const result=yield* graphStep(g,null),response=ctx.unwrap(result[node]);
-      try{design=JSON.parse(response.message.content);ctx.spawn(design.profile,'root',design.composition);break;}
-      catch(error){if(attempt===2){ctx.failedAgent('root',String(error));return '';}messages.push(response.message,{role:'user',content:'Repair the JSON/profile/program interface only; preserve the intended specialist and method. Error: '+String(error)});}
+      const result=yield* graphStep(g,null);
+      if(result[node].status!=='success'){ctx.failedAgent('root',result[node].error);break;}
+      const response=ctx.unwrap(result[node]);
+      try{const proposal=JSON.parse(response.message.content);ctx.spawn(proposal.profile,'root',proposal.composition);design=proposal;break;}
+      catch(error){if(attempt===2){ctx.failedAgent('root',String(error));break;}messages.push(response.message,{role:'user',content:'Repair the JSON/profile/program interface only; preserve the intended specialist and method. Error: '+String(error)});}
     }
-    const executed=yield* ctx.runAgent(design.profile.id,${JSON.stringify(executeAssignment)});
-    ctx.dormant(design.profile.id);
-    return executed.candidate_answer;
+    const id=design?.profile.id || 'root';
+    const executed=yield* ctx.runAgent(id,${JSON.stringify(executeAssignment)});
+    if(id!=='root')ctx.dormant(id);
+    ctx.spawnTemplate('reviewer','reviewer','root');
+    const review=yield* ctx.runAgent('reviewer',{candidate:executed,instruction:${JSON.stringify(academic ? 'Verify the decisive step using independent evidence or computation when useful. Correct concrete errors; do not restate speculation as fact.' : 'Inspect actual effects against the original task. Repair only missing or incorrect effects; preserve successful writes and never duplicate records.') }},'review');
+    ctx.dormant('reviewer');
+    ${academic ? String.raw`function answer(text){return (text.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nConfidence:|$)/i)?.[1] ?? '').trim().replace(/\s+/g,' ');}
+    if(executed.candidate_answer && review.candidate_answer && (!answer(executed.candidate_answer) || answer(executed.candidate_answer)!==answer(review.candidate_answer))){
+      const final=yield* ctx.runAgent('root',{candidate:executed,review,instruction:'Resolve the concrete disagreement by a decisive check, not majority agreement.'},'integrate');
+      return final.candidate_answer || review.candidate_answer;
+    }` : ''}
+    return review.candidate_answer || executed.candidate_answer;
   }});`;
   const all = [{name:'single',...seed,composition:single}, {name:'review',...seed},
     {name:'plan-execute',...seed,organization:planned,composition:planExecute},

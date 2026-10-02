@@ -30,13 +30,14 @@ test('multiple MAS roots preserve distinct graphs; a factory creates an executab
   let n=0;
   const agents=new DittoAgents(new MeteredProvider({async invoke(input){
     n++;const factory=input.metadata?.nodeId==='root/factory';
-    if(!factory)assert.ok(JSON.stringify(input.messages).includes('NEW-CAPABILITY-MARKER'));
+    if(factory){assert.equal(input.messages[0].role,'system');assert.match(String(input.messages[0].content),/Do not solve the question during design/);assert.ok(String(input.messages[1].content).startsWith('{"task":'));}
+    if(input.metadata?.agentId===profile.id)assert.ok(JSON.stringify(input.messages).includes('NEW-CAPABILITY-MARKER'));
     return {message:{role:'assistant',content:factory?JSON.stringify({profile,composition:program}):'Task completed by new program'},finishReason:'stop',usage:{totalTokens:10}};
   }}),model,automationTools.map(name=>({name,description:'Offline fixture',inputSchema:{type:'object',properties:{}},effects:['read'] as ['read'],validate:()=>{},execute:async()=>({status:'success' as const,content:''})})));
   const before=JSON.stringify(seed.organization);
   const runtime=new OrganizationRuntime(agents,limitsSchema.parse({maxTokens:100000}));
   const result=await runtime.run({...initialStrategy,...seed},{id:'isolated-task',prompt:'A public workflow request'});
-  assert.equal(result.answer,'Task completed by new program');assert.equal(n,2);
+  assert.equal(result.answer,'Task completed by new program');assert.equal(n,3);
   assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='RUN_PROGRAM'&&e.agentId===profile.id));
   assert.ok(result.orchestration!.graphs.some(g=>g.nodes.some(node=>node.id===profile.id+'/new-specialist-node')));
   assert.equal(result.orchestration!.programs![0].composition,program);
@@ -142,7 +143,7 @@ test('full HLE holdout is disjoint; question images reach newly derived native a
       return {message:{role:'assistant',content:factory?JSON.stringify({profile,composition:template.composition}):'Explanation: fixture only\nAnswer: candidate\nConfidence: 20%'},finishReason:'stop',usage:{totalTokens:10}};
     }}),model,hleTools);
     const execution=await new OrganizationRuntime(agents,limitsSchema.parse({maxTokens:Number.MAX_SAFE_INTEGER})).run({...initialStrategy,...seed},input);
-    assert.equal(calls,2);assert.ok(execution.agents.some(a=>a.id===profile.id));
+    assert.equal(calls,3);assert.ok(execution.agents.some(a=>a.id===profile.id));
     const log=JSON.stringify(execution);assert.ok(log.includes('benchmark-asset:'));assert.ok(!log.includes(input.imageParts![0].image_url.url));
     const altered={...task,images:task.images!.map(i=>({...i,sha256:'0'.repeat(64)}))};
     await assert.rejects(actorInput(altered),/checksum mismatch/);
@@ -195,4 +196,19 @@ test('HLE baseline public bridge carries images and checkpoints actor/judge resu
     const ledger=(await readFile(join(out,'usage.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
     assert.equal(ledger.filter(r=>r.kind==='hle-judge').length,1);assert.ok(ledger.every(r=>!r.unknownUsage));
   } finally {child.kill();await new Promise<void>(r=>child.exitCode!==null?r():child.once('exit',()=>r()));await new Promise<void>(r=>mock.close(()=>r()));await rm(dir,{recursive:true,force:true});}
+});
+
+test('HLE review compares final answers and recovers a failed factory through native agents', async () => {
+  const task={id:'fixture',prompt:'Synthetic task, no private reference.'};
+  for(const name of ['review','adaptive']){
+    const seed=benchmarkSeeds([{benchmark:'hle',metric:'hle'}],[name])[0];let calls=0;
+    const provider=new MeteredProvider({async invoke(request){
+      calls++;
+      if(request.metadata?.nodeId==='root/factory')throw Object.assign(new Error('fixture invalid output'),{code:'INVALID_MODEL_OUTPUT'});
+      return {message:{role:'assistant' as const,content:`Explanation: distinct derivation ${calls}\nAnswer: 42\nConfidence: ${calls+20}%`},finishReason:'stop' as const,usage:{totalTokens:10}};
+    }});
+    const result=await new OrganizationRuntime(new DittoAgents(provider,model,hleTools),limitsSchema.parse({maxTokens:100000})).run({...initialStrategy,...seed},task);
+    assert.equal(calls,name==='review'?2:3);assert.match(result.answer,/Answer: 42/);
+    assert.equal(result.agents.filter(a=>a.id==='independent').length,0);
+  }
 });

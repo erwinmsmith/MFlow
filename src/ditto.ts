@@ -37,7 +37,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.6.1/provider-limit-recovery", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.7/generation-progress", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -158,7 +158,7 @@ export class MeteredProvider implements ModelProvider {
         error instanceof Error ? error.message : String(error), error);
       this.nodeFailures.set(nodeId, failure);
       const cause = failure.cause as { code?: string; cause?: { code?: string } } | undefined;
-      const transient = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT'].includes(
+      const transient = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT'].includes(
         String(cause?.code ?? cause?.cause?.code ?? failure.code)) ||
         (failure.code === 'PROVIDER_FAILURE' && /^(?:\[PROVIDER_FAILURE\] )?terminated$/.test(failure.message));
       if (transient && attempt < 2 && !options.signal.aborted) {
@@ -213,6 +213,7 @@ export function httpProvider(
     apiKey: key,
     // The per-call Limits deadline below owns cancellation. Avoid a hidden 30s HTTP cutoff.
     timeoutMs: 2147483647,
+    ...(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS ? { idleTimeoutMs: Number(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS) } : {}),
     fetch: modelFetch,
     ...(deepseek ? {
       maxTokensField: "max_tokens" as const,
@@ -322,7 +323,7 @@ export class DittoAgents {
       sandbox: {
         execute: chosen.some((t) => t.name === 'python'),
         tools: chosen.map((t) => t.name),
-        network: [new URL(this.model.baseUrl).origin, ...(chosen.some(t=>t.name==='web_search')?['https://duckduckgo.com']:[])],
+        network: [new URL(this.model.baseUrl).origin, ...(chosen.some(t=>t.name==='web_search')?['https://www.bing.com']:[])],
       },
     });
   }

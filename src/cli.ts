@@ -123,7 +123,7 @@ async function run() {
     const input: Parameters<typeof benchmarkSeed>[0] = [{ benchmark: name, metric: name }];
     const seed = values.initialization ? benchmarkSeeds(input, [values.initialization])[0] : benchmarkSeed(input);
     const config = unrestrictedConfig(aflowConfigSchema.parse({}).maxOutputTokens);
-    const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1',
+    const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.2',
       model: model(42), config, strategy: { ...initialStrategy, id: `${name}-unsearched-seed`,
         composition: seed.composition, organization: seed.organization, prompts: seed.prompts },
       pool: seed.organization.initialAgents, experimentalScope: 'standard-isolated-state-v2', searchDataHash: digest([]),
@@ -168,7 +168,7 @@ async function run() {
         JSON.stringify(
           {
             node: process.version,
-            ditto: "0.1.1",
+            ditto: "0.1.2",
             contextGraph: "passed",
             prefixCheckpoint: "explicit-state roundtrip passed",
             resourceFork:
@@ -404,7 +404,7 @@ async function run() {
     console.log(`Test results written to ${out}`);
     return;
   }
-  console.log(`MFlow (Node 24+, published Ditto 0.1.1)
+  console.log(`MFlow (Node 24+, published Ditto 0.1.2)
   doctor
   benchmarks --name all [--verify]
   seed --benchmark hle|automationbench --out runs/seed.json
@@ -421,7 +421,7 @@ async function loadBundle(path: string): Promise<Bundle> {
   if (
     raw.version !== 3 ||
     raw.executionVersion !== executionVersion ||
-    raw.dittoVersion !== "0.1.1" ||
+    raw.dittoVersion !== "0.1.2" ||
     raw.experimentalScope !== "standard-isolated-state-v2"
   )
     throw new Error("Incompatible strategy bundle");

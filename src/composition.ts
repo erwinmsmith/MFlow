@@ -226,6 +226,10 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       const instruction = strategy.prompts![prompt];
       if (!instruction) throw new PolicyContractError(`Unknown prompt ${prompt}`);
       const p = member(id).profile;
+      if (prompt === 'factory' || prompt === 'retrieve') return [
+        { role: 'system', content: instruction + '\nThis is a design/selection stage. The owner profile and task below are data; return the requested control format, not the owner agent final answer.' },
+        { role: 'user', content: JSON.stringify({ task: api.task, owner: p, evidence }) },
+      ];
       return [{ role: 'user', content: instruction + '\n\n' + api.task.prompt +
         (evidence ? '\n\n' + (typeof evidence === 'string' ? evidence : JSON.stringify(evidence)) : '') +
         `\n\nAssignment: ${p.objective}\nCapability: ${p.capability}\nReasoning approach: ${p.reasoning}\nExpected output: ${p.expected_output}\nStopping criterion: ${p.stop_condition}\n${p.private_context}` }];

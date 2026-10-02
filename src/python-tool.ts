@@ -55,10 +55,15 @@ export function createPythonTool(image: string): RegisteredTool {
 
 /** External search provider; execution and permissions remain public Ditto tools. */
 export function createBenchmarkWebTool(task?: TaskInput) {
-  return createWebSearchTool({provider:{origin:'https://duckduckgo.com',async search({query,limit},options){
+  const tool = createWebSearchTool({provider:{origin:'https://www.bing.com',async search({query,limit},options){
     const {stdout}=await promisify(execFile)(resolve(process.cwd(),'../MFlow-baselines/.venv-legacy/bin/python'),
       [new URL('../../baselines/search_provider.py',import.meta.url).pathname,query,String(limit),...(task?[task.prompt,task.id]:[])],
       {signal:options?.signal,maxBuffer:8*1024*1024});
     return JSON.parse(stdout);
   }}});
+  return { ...tool, validate() {}, async execute(args, context) {
+    try { tool.validate(args); }
+    catch { return { status: 'failed' as const, content: 'Use a nonempty single-line query of at most 600 characters and 75 words, and an integer limit from 1 to 20. Correct the arguments and retry.', error: { code: 'WEB_SEARCH_ARGUMENTS', message: 'Invalid web search arguments' } }; }
+    return tool.execute(args, context);
+  } } satisfies RegisteredTool;
 }

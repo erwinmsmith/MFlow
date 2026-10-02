@@ -1,6 +1,6 @@
 # Local DeepSeek comparisons — 2026-10-02
 
-AutomationBench and HLE run locally after hb stopped accepting SSH connections. Both use DeepSeek Flash and published Ditto 0.1.1. The five methods run concurrently in each comparison; every method completes search/development before its final full held-out test. MFlow and AFlow additionally test each fully validated round in an independent observer process. Native search/selection/convergence, data partitions and execution protection are retained.
+AutomationBench and HLE run locally after hb stopped accepting SSH connections. Both use DeepSeek Flash and published Ditto 0.1.2. The five methods run concurrently in each comparison; every method completes search/development before its final full held-out test. MFlow and AFlow additionally test each fully validated round in an independent observer process. Native search/selection/convergence, data partitions and execution protection are retained.
 
 | Benchmark | MFlow episodes | AFlow episodes | Workers per DyLAN / EvoAgent / AutoAgents | Ditto bridge | Full split |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -11,11 +11,11 @@ These are concurrent task counts, not token, round or context budgets. Native gr
 
 ## Snapshots and provenance
 
-The complete local runs live below `/Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/`, with separate `automationbench/MFlow` and `hle/MFlow` snapshots. Each has its own registry-installed Node dependencies, private `.env`, output and bridge. Data stays in the shared `codespace/Benchmarks`; Python environments are reused, and copied upstream baseline source files are hash-verified. No Ditto checkout or linked runtime is used.
+The complete local runs live below `/Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v5/`, with separate `automationbench/MFlow` and `hle/MFlow` snapshots. Each has its own registry-installed Node dependencies, private `.env`, output and bridge. Data stays in the shared `codespace/Benchmarks`; Python environments are reused, and copied upstream baseline source files are hash-verified. No Ditto checkout or linked runtime is used.
 
 Server checkpoints could not be downloaded. Local quality results therefore start afresh, and must not be merged with server evaluations. Old server data/results remain intact. A local one-shot launchd job, `io.mflow.hb-deepseek-retire.20261002`, retries SSH until it can stop only the old DeepSeek AutomationBench/HLE services; it does not stop Qwen. Its receipt is `/Users/erwin/Library/Logs/MFlow/hb-deepseek-retire-20261002.log`. Until that receipt confirms shutdown, the old server's execution state remains unknown.
 
-Local v1 is an archived startup attempt. It exposed transient connection failures that native AutoAgents retry handlers could wrap and score as task errors. Preserve its rows, unknown-usage requests and costs as startup overhead; do not combine its quality rows with v2. No test task was used to make these repairs. Local v2 is also archived: task-specific prompts and stage tool permissions changed before any held-out testing. Keep its development rows/costs separately; v4 starts fresh rather than mixing configurations.
+Local v1 is an archived startup attempt. It exposed transient connection failures that native AutoAgents retry handlers could wrap and score as task errors. Preserve its rows, unknown-usage requests and costs as startup overhead; do not combine its quality rows with v2. No test task was used to make these repairs. Local v2 is also archived: task-specific prompts and stage tool permissions changed before any held-out testing. Keep its development rows/costs separately; v5 starts fresh rather than mixing configurations.
 
 Local v3 is retained as startup overhead after fixing a duplicate Python module/context binding affecting final AFlow stage permissions; no test task ran.
 
@@ -31,18 +31,18 @@ macOS denied launchd access to Downloads. Experiment supervisors instead run as 
 ## Progress
 
 ```sh
-cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/automationbench/MFlow
-python3 scripts/automation_experiment.py --benchmark automationbench --status --run runs/automationbench-deepseek-flash-local-20261002-v4
+cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v5/automationbench/MFlow
+python3 scripts/automation_experiment.py --benchmark automationbench --status --run runs/automationbench-deepseek-flash-local-20261002-v5
 
-cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v4/hle/MFlow
-python3 scripts/automation_experiment.py --benchmark hle --status --run runs/hle-deepseek-flash-local-20261002-v4
+cd /Users/erwin/Downloads/codespace/experiments/deepseek-local-20261002-v5/hle/MFlow
+python3 scripts/automation_experiment.py --benchmark hle --status --run runs/hle-deepseek-flash-local-20261002-v5
 ```
 
 The corresponding start commands, run from those frozen directories with the private `.env` exported, are:
 
 ```sh
-python3 scripts/automation_experiment.py --benchmark automationbench --run runs/automationbench-deepseek-flash-local-20261002-v4 --concurrency 16 --legacy-concurrency 2 --port 8297 --resume
-python3 scripts/automation_experiment.py --benchmark hle --run runs/hle-deepseek-flash-local-20261002-v4 --concurrency 4 --legacy-concurrency 1 --port 8299 --resume
+python3 scripts/automation_experiment.py --benchmark automationbench --run runs/automationbench-deepseek-flash-local-20261002-v5 --concurrency 16 --legacy-concurrency 2 --port 8297 --resume
+python3 scripts/automation_experiment.py --benchmark hle --run runs/hle-deepseek-flash-local-20261002-v5 --concurrency 4 --legacy-concurrency 1 --port 8299 --resume
 ```
 
 Do not launch a second supervisor while the recorded one is active. `jobs.json` distinguishes running, retrying and completed methods. Per-task results, model progress and usage records remain in the run directory. Search scores are provisional; report frozen full-test results separately.
@@ -74,4 +74,16 @@ The historical MATH runner also exports full-validation candidates and supports 
 
 All use the published Ditto provider/tool interfaces. MFlow also retains existing task-specific DROP, GSM8K, MATH and Python-code answer contracts. The five-method comparison runner supports MATH, AutomationBench and HLE; this does not claim complete baseline integrations for the other managed datasets.
 
-Verified in this revision: Node suite **116 passed, 3 skipped**, native adapter suite **21 passed**. Run `npm test` and `../MFlow-baselines/.venv-legacy/bin/python baselines/test_adapters.py`. They cover native stage execution, published-package tool worlds, transport failures, candidate integrity, round queue draining/restart, final-test isolation and search-selection independence. Full paid results remain pending while experiments run; a live process or a scripted provider is not a passing benchmark result.
+Verified in this revision: Node suite **119 passed, 3 skipped**, native adapter suite **22 passed**. Run `npm test` and `../MFlow-baselines/.venv-legacy/bin/python baselines/test_adapters.py`. They cover native stage execution, published-package tool worlds, transport failures, candidate integrity, round queue draining/restart, final-test isolation and search-selection independence. Full paid results remain pending while experiments run; a live process or a scripted provider is not a passing benchmark result.
+
+## v5 repair and relaunch (2026-10-02)
+
+v4 was stopped and archived before any held-out test row existed. Its search results and costs remain separate. The first repair diagnostic also exposed a conflicting factory prompt; its interrupted HLE MFlow attempt and all request usage remain startup overhead under `runs/diagnostic-20261002`. Diagnostic tasks come only from the locked search splits.
+
+- Registry Ditto **0.1.2** exposes text, action-argument and reasoning progress. The private profiles set `MFLOW_PROVIDER_IDLE_TIMEOUT_MS=180000`: actual generation refreshes this idle timer; empty heartbeats do not. There is no total response-duration or new token allowance. Transient idle/socket failures retry the same request up to twice, retaining every attempt's known/unknown cost. Exact repeated cycles are detected independently for text and each action; private reasoning content is not written to progress logs.
+- External web search uses Bing through `MFLOW_SEARCH_PROXY`. All five methods use the same public Ditto tool and the same official HLE blocklist / verbatim-question filter. Invalid arguments return a correctable observation. Model output ceilings, invalid queries and malformed responses are quality failures, not automatic whole-task infrastructure retries.
+- Factory requests carry a separate design-stage system contract and a complete valid JSON/program example. Parent execution instructions are supplied as data. Generated profiles describe methods rather than solve inside `private_context`. A failed factory can fall back to native agents, retaining its failure evidence.
+- The adaptive root now executes the generated specialist, checks its result with a tool-capable reviewer and resolves concrete HLE answer disagreements. Review compares `Answer:` fields instead of whole explanations. API reviewers inspect existing effects and preserve successful writes. All five initialization structures remain fully evaluated; the adaptive structure runs first.
+- Engineering checks are not accuracy evidence. Smoke failures caused by model degeneration remain scored failures; they are not discarded or described as a passing benchmark. Full held-out comparisons determine whether MFlow exceeds the baselines.
+
+The server synchronization attempt still fails before SSH key exchange. These runs use independent local snapshots; no claim is made that hb's current source or old DeepSeek processes have been verified. The Qwen service is untouched.

@@ -6,11 +6,11 @@ test("production imports use only published Ditto entrypoints and locked registr
   const lock = JSON.parse(await readFile("package-lock.json", "utf8"));
   assert.equal(
     lock.packages["node_modules/@codesoul-co/ditto"].version,
-    "0.1.1",
+    "0.1.2",
   );
   assert.equal(
     lock.packages["node_modules/@codesoul-co/ditto"].resolved,
-    "https://registry.npmjs.org/@codesoul-co/ditto/-/ditto-0.1.1.tgz",
+    "https://registry.npmjs.org/@codesoul-co/ditto/-/ditto-0.1.2.tgz",
   );
   assert.ok(lock.packages["node_modules/@codesoul-co/ditto"].integrity);
   const allowed = new Set([

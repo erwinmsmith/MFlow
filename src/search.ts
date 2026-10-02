@@ -39,7 +39,7 @@ export interface SearchNode {
 export interface Bundle {
   version: 3;
   executionVersion: string;
-  dittoVersion: "0.1.1";
+  dittoVersion: "0.1.2";
   pythonImage?: string;
   webSearch?: boolean;
   strategy: Strategy;
@@ -166,7 +166,7 @@ export class Search {
       config: this.config,
       model: this.runtime.agents.model,
       pool: this.runtime.pool,
-      ditto: "0.1.1",
+      ditto: "0.1.2",
       searchDataHash: digest(tasks),
       confirmationDataHash: digest(confirmation),
     });
@@ -518,7 +518,7 @@ export class Search {
     const bundle: Bundle = {
       version: 3,
       executionVersion: this.runtime.agents.resourceVersion,
-      dittoVersion: "0.1.1",
+      dittoVersion: "0.1.2",
       strategy: incumbent.strategy,
       pool: structuredClone([...this.runtime.pool]),
       model: this.runtime.agents.model,
