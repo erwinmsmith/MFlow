@@ -52,11 +52,21 @@ def status(out):
         entry.update({k:controller[k] for k in ('round','phase','stopReason','seedRound') if k in controller})
         frozen=read(folder/('search/summary.json' if method=='MFlow' else 'frozen.json'),{})
         entry['frozen']={k:v for k,v in frozen.items() if k in ('round','selectedRound','validationAccuracy','validationScore','stopReason')}
+        if method in ('MFlow','AFlow'):
+            entry['roundTests']=[]
+            for candidate in sorted((folder/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1])):
+                directory=folder/'round-tests'/candidate.stem
+                summary=read(directory/'summary.json',{})
+                rows=list(jsonl(directory/('test.jsonl' if method=='MFlow' else 'results.jsonl'))) if (directory/('test.jsonl' if method=='MFlow' else 'results.jsonl')).exists() else []
+                entry['roundTests'].append({'round':int(candidate.stem.split('-')[-1]),'status':'completed' if summary else jobs.get('jobs',{}).get(f'{method}/round-tests/{candidate.stem}',{}).get('status','queued'),
+                    'completed':summary.get('count',len(rows)),'accuracy':summary.get('accuracy',summary.get('passRate',sum(r['score'] for r in rows)/len(rows) if rows else None)),
+                    'output':str(directory),'purpose':'observation-only'})
         if method=='MFlow':
             entry['cost']={}
             for phase in ('search','test'):
                 files=(folder/phase).glob('round-*/pass-*/*.usage.json') if phase=='search' else (folder/phase/'task-usage').glob('*.json')
                 entry['cost'][phase]=cost(r for path in files for r in read(path,[]))
+            entry['cost']['roundTests']=cost(r for path in (folder/'round-tests').glob('round-*/task-usage/*.json') for r in read(path,[]))
             entry['cost']['optimizer']=cost(r for path in (folder/'search/optimizer-calls').glob('*.json') for r in read(path,{}).get('records',[]))
             passes=sorted((folder/'search').glob('round-*/pass-*'),key=lambda p:(int(p.parent.name.split('-')[-1]),int(p.name.split('-')[-1])))
             if passes:
@@ -99,6 +109,10 @@ def status(out):
             if row.get('kind')=='hle-judge':
                 field='unknownJudgeCalls' if row['unknownUsage'] else 'judgeTokens';entry[field]=entry.get(field,0)+(1 if row['unknownUsage'] else row['charged'])
             phase=entry['phases'].setdefault(row['phase'],{'knownTokens':0,'unknownCalls':0})
+            if row.get('taskId','').startswith('observe-round/'):
+                observed=entry.setdefault('roundTests',{'knownTokens':0,'unknownCalls':0})
+                if row['unknownUsage']:observed['unknownCalls']+=1
+                else:observed['knownTokens']+=row['charged']
             for item in (entry,phase):
                 if row['unknownUsage']:item['unknownCalls']+=1
                 else:item['knownTokens']+=row['charged']
@@ -170,13 +184,34 @@ def main():
                 if available>=minimum:break
                 jobs['jobs'][name]={'stage':index,'status':'waiting_for_memory','availableMiB':available,'requiredMiB':minimum};persist();time.sleep(10)
         if name!='MFlow' or not hle:start_bridge()
-        (out/name).mkdir(parents=True,exist_ok=True)
+        (out/name if '/round-tests/' not in name else (out/name).parent).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
         command=commands[name][index]
         if name=='MFlow' and ((search if index==0 else test)/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
+        if name.startswith('MFlow/round-tests/') and (out/name/'manifest.json').exists():command=command+['--resume']
         child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
     bridge=None
+    def round_tests():
+        # One full held-out round at a time per method; search continues independently.
+        # No observer output is ever read by either optimizer.
+        pending_rounds=False
+        for method in ('MFlow','AFlow'):
+            prefix=method+'/round-tests/'
+            if any(name.startswith(prefix) for name in (*active,*retrying)):continue
+            candidates=sorted((out/method/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1]))
+            for candidate in candidates:
+                name=prefix+candidate.stem
+                if (out/name/'summary.json').exists() or jobs['jobs'].get(name,{}).get('status')=='completed':continue
+                pending_rounds=True
+                if available_memory_mib()<int(os.environ.get('MFLOW_MIN_AVAILABLE_MIB','384')):break
+                if method=='MFlow':
+                    commands[name]=[node+['evaluate','--benchmark',a.benchmark,'--bundle',str(candidate),'--out',str(out/name),'--concurrency',str(config.get('concurrency',4))]]
+                else:
+                    commands[name]=[[aflow,*(['baselines/aflow.py','--phase','search-test'] if math else ['baselines/automation_aflow.py']),'--test-round',candidate.stem.split('-')[-1],'--test-out',str(out/name)]]
+                # The evaluator creates its own output directory/immutable manifest.
+                launch(name,0);break
+        return pending_rounds
     def start_bridge():
         nonlocal bridge
         if bridge is not None:return
@@ -199,12 +234,21 @@ def main():
             if pending:launch(pending.pop(0),0)
         else:
             for name in pending:launch(name,0)
-        while active or retrying:
+        observers_pending=round_tests()
+        while active or retrying or observers_pending:
+            if bridge is not None and bridge.poll() is not None:
+                bridge=None;start_bridge()
             for name,(index,at) in list(retrying.items()):
                 if time.monotonic()>=at:
-                    if name!='MFlow':
-                        request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps({'method':name}).encode(),headers={'Content-Type':'application/json'})
-                        with urllib.request.urlopen(request,timeout=30) as response:json.load(response)
+                    if not name.startswith('MFlow'):
+                        reset={'method':name.split('/')[0]}
+                        if name.startswith('AFlow/round-tests/'):reset.update(phase='test',taskPrefix='observe-round/'+name.split('/')[-1]+'/')
+                        elif name=='AFlow':reset.update(taskPrefix='round_' if math else 'round-')
+                        request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps(reset).encode(),headers={'Content-Type':'application/json'})
+                        try:
+                            with urllib.request.urlopen(request,timeout=30) as response:json.load(response)
+                        except OSError as error:
+                            retrying[name]=(index,time.monotonic()+60);jobs['jobs'][name].update(error=str(error),nextAttemptAt=time.time()+60);persist();continue
                     del retrying[name];launch(name,index)
             for name,(child,index) in list(active.items()):
                 code=child.poll()
@@ -218,6 +262,7 @@ def main():
                         jobs['jobs'][name].update(status='retrying',nextAttemptAt=time.time()+60)
                     persist()
                     if a.sequential and pending:launch(pending.pop(0),0)
+            observers_pending=round_tests()
             time.sleep(2)
         if any(j['status']=='failed' for j in jobs['jobs'].values()):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
     finally:

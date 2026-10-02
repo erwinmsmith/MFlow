@@ -32,6 +32,31 @@ with tempfile.TemporaryDirectory() as root:
 `]);
 });
 
+test('legacy MATH round observer verifies its frozen candidate without entering optimization',async t=>{
+  const python=resolve('../MFlow-baselines/.venv-aflow/bin/python');
+  try{await access(python);}catch{t.skip('Native AFlow environment required');return;}
+  await promisify(execFile)(python,['-c',`
+import sys,tempfile,json,hashlib,asyncio
+from pathlib import Path
+from unittest.mock import patch,AsyncMock
+sys.path.insert(0,str(Path('baselines').resolve()))
+import bench_common as common
+with tempfile.TemporaryDirectory() as tmp:
+ root=Path(tmp);common.RUNS=root
+ sys.argv=['aflow.py','--phase','search-test','--test-round','1','--test-out',str(root/'observed')]
+ import aflow
+ source=common.SOURCES/'AFlow/workspace/MATH/workflows/round_1'
+ candidate=root/'AFlow/round-candidates/round-1.json';candidate.parent.mkdir(parents=True)
+ candidate.write_text(json.dumps({'round':1,'files':{n:hashlib.sha256((source/n).read_bytes()).hexdigest() for n in ('graph.py','prompt.py')}}))
+ with patch.object(aflow,'freeze_run'),patch.object(aflow,'test',new_callable=AsyncMock) as test,patch.object(aflow.optimizer,'optimize',side_effect=AssertionError('test entered search')):
+  asyncio.run(aflow.main());assert test.await_args.args[0]==1
+  candidate.write_text(json.dumps({'round':1,'files':{'graph.py':'changed'}}))
+  try:asyncio.run(aflow.main())
+  except RuntimeError as error:assert 'Frozen round workflow changed' in str(error)
+  else:raise AssertionError('changed candidate accepted')
+`],{maxBuffer:1024*1024});
+});
+
 test('remote progress separates known usage and methods while the journal is being appended',async()=>{
   await promisify(execFile)('python3',['-c',`
 import contextlib,io,json,tempfile
@@ -122,6 +147,18 @@ except ValueError:pass
 else:raise AssertionError('Host imports permitted')
 AsyncLLM.__call__=lambda self,prompt:a.sample(prompt,self.sys_msg)
 row=a.episode(1,0,'search',json.loads(sys.argv[3]));assert row['score']==1,row
+from unittest.mock import patch
+from scripts.async_llm import LLMConfig
+agent=a.load(1)(name='fixture',llm_config=LLMConfig({'model':'fixture','key':'fixture','base_url':'http://unused'}),dataset='AutomationBench')
+stages=[]
+def respond(messages,tools=True):
+ stages.append(tools)
+ return '<solution_letter>A</solution_letter><thought>Observed state</thought>' if 'solution_letter' in str(messages) else '<response>Plan</response>'
+with patch.object(a,'call',respond):
+ asyncio.run(agent.custom(input='synthetic task',instruction='[PLAN ONLY] Plan dependencies.'))
+ asyncio.run(agent.sc_ensemble(solutions=['one','two'],problem='synthetic task'))
+ asyncio.run(agent.custom(input='synthetic task',instruction='Execute.'))
+assert stages==[False,False,True],stages
 print('NATIVE_STATIC_OK')
 ` ,JSON.stringify(init.seeds[0]),join(dir,'AFlow'),JSON.stringify(task)],{env,maxBuffer:1024*1024,timeout:60000});
     assert.ok(result.stdout.includes('NATIVE_STATIC_OK'));assert.equal(calls,7);
@@ -146,6 +183,7 @@ test('native AFlow measures every MAS initialization, optimizes from eligible ro
     else if(req.url==='/evaluate'){evaluated.push(input.round);result={score:input.round===3?1:.5,meanTokens:10,tokens:10,organizationSummary:{nodeCalls:{'INFER.REASONING.SAMPLE':1}},failures:[]};}
     else if(req.url==='/propose'){proposals++;assert.ok(input.prompt.includes('plan-execute')||input.prompt.includes("id:'single'"));result={...seeds[0],modification:'An offline local prompt change'};}
     else if(req.url==='/freeze'){frozen=input.round;result={frozen:true};}
+    else if(req.url==='/checkpoint-round'){assert.ok(evaluated.includes(input.round));result={exported:true};}
     else throw new Error('Unexpected fixture route');
     res.setHeader('Content-Type','application/json');res.end(JSON.stringify(result));
   });

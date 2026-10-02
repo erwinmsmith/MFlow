@@ -181,7 +181,11 @@ def main():
             return result['score'], result['meanTokens'], result['tokens']
         Evaluator.graph_evaluate = graph_evaluate
         try:
-            return await original_evaluate(optimizer, directory, validation_n, data, initial)
+            score = await original_evaluate(optimizer, directory, validation_n, data, initial)
+            # One-way export only. The observer owns test data, scores and failures.
+            await asyncio.to_thread(rpc, 'checkpoint-round', {'round': number, 'score': score,
+                'strategy': json.loads((Path(directory) / 'strategy.json').read_text())})
+            return score
         except Exception:
             # A technical failure is not zero accuracy or a partially eligible parent.
             data[:] = [r for r in data if r['round'] != number]

@@ -46,7 +46,7 @@ const staticSeeds=[
   {name:'review',composition:staticClass+`        answer=await self.custom(input=problem,instruction=prompt_custom.EXECUTE)
         review=await self.custom(input=problem+'\\nPrevious execution:\\n'+answer['response'],instruction=prompt_custom.REVIEW)
         return review['response'],0\n`},
-].map(s=>({...s,organization:{},prompts:'EXECUTE = '+JSON.stringify(instruction)+'\nPLAN = '+JSON.stringify(hle?'Select subject-specific methods, exact assumptions and decisive checks for the academic question. Do not guess its answer.':'Plan entity lookups, API dependencies and exact postconditions. Inspect if useful; do not make writes. Return a concise actionable plan.')+'\nREVIEW = '+JSON.stringify(hle?'Check the candidate against the original question and image. Diagnose the decisive error or uncertainty; use a complementary method or external evidence if useful. Return Explanation, Answer and calibrated Confidence.':'Inspect actual current state against the original task. Repair missing or incorrect effects. Preserve successful writes and never duplicate records or sends.')+'\n'}));
+].map(s=>({...s,organization:{},prompts:'EXECUTE = '+JSON.stringify(instruction)+'\nPLAN = '+JSON.stringify(hle?'[PLAN ONLY] Select subject-specific methods, exact assumptions and decisive checks for the academic question. Do not guess its answer.':'[PLAN ONLY] Plan entity lookups, API dependencies and exact postconditions. Inspect if useful; do not make writes. Return a concise actionable plan.')+'\nREVIEW = '+JSON.stringify(hle?'Check the candidate against the original question and image. Diagnose the decisive error or uncertainty; use a complementary method or external evidence if useful. Return Explanation, Answer and calibrated Confidence.':'Inspect actual current state against the original task. Repair missing or incorrect effects. Preserve successful writes and never duplicate records or sends.')+'\n'}));
 const ledgerProvider={async invoke(input,options){
   const {method,phase,taskId,kind}=input.metadata,id=randomUUID();
   const estimate=Buffer.byteLength(JSON.stringify(input),'utf8')+input.generation.maxTokens+1024;
@@ -75,27 +75,33 @@ const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   try{
     if(req.url==='/status'){res.end(JSON.stringify({spent,active,pythonImage:image,overallTokenCeiling:null,episodeTokenLimit:null,maxOutputTokens:config.maxOutputTokens,runDirectory:config.runDirectory}));return;}
-    if(req.method!=='POST'||!['/sample','/search','/python','/start','/finish','/bootstrap','/propose','/freeze','/reset-method'].includes(req.url))throw new Error('Unknown endpoint');
+    if(req.method!=='POST'||!['/sample','/search','/python','/start','/finish','/bootstrap','/propose','/freeze','/checkpoint-round','/reset-method'].includes(req.url))throw new Error('Unknown endpoint');
     let raw='';for await(const chunk of req)raw+=chunk;
     const body=JSON.parse(raw);
     if(req.url==='/reset-method'){
       if(!allowed.has(body.method))throw new Error('Invalid method');
       let released=0;
-      for(const [key,session] of sessions)if(JSON.parse(key)[0]===body.method){
+      for(const [key,session] of sessions)if(JSON.parse(key)[0]===body.method &&
+          (body.phase===undefined||JSON.parse(key)[1]===body.phase) &&
+          (body.taskPrefix===undefined||JSON.parse(key)[2].startsWith(body.taskPrefix))){
         await session.runtime.close();session.env?.close();sessions.delete(key);released++;
       }
       res.end(JSON.stringify({released}));return;
     }
-    if(['/bootstrap','/propose','/freeze'].includes(req.url)){
+    if(['/bootstrap','/propose','/freeze','/checkpoint-round'].includes(req.url)){
       if(!automation&&!hle)throw new Error('Static benchmark controller unavailable');
       if(req.url==='/bootstrap'){
         res.end(JSON.stringify({mode:'aflow-static',dataset,questionType:hle?'expert academic reasoning with question images':'API workflow automation',config:{seed:config.seed,maxRounds:null,validationRounds:config.aflow.validationRounds,concurrency:config.concurrency},...staticSeeds[0],seeds:staticSeeds,
-          interface:instruction+'\nOptimize a static Python AFlow Workflow using original operator.Custom(self.llm) and operator.ScEnsemble(self.llm). Custom calls have the same native Ditto tools as every compared actor. Programmer may be used only for HLE; its code runs through public Ditto isolated Python. No imports, filesystem, eval, subprocess, SDK or network calls in generated Workflow code. Plan/rank stages should not execute; solution/review stages may use tools. Question images are supplied automatically to actor calls. Return the Python Workflow class and prompt constants without Markdown. Preserve native single-modification, parent-feedback and experience optimization. No test data is available. Operator interfaces: await Custom(input, instruction) returns {response:string}; await ScEnsemble(solutions:list[str], problem:str) returns {response:string}; HLE-only await Programmer(problem, analysis) returns {code:string,output:string}. Workflow __call__ returns (answer_string,0); actual cost is measured by Ditto.'}));return;
+          interface:instruction+'\nOptimize a static Python AFlow Workflow using original operator.Custom(self.llm) and operator.ScEnsemble(self.llm). Custom calls have the same native Ditto tools as every compared actor. Programmer may be used only for HLE; its code runs through public Ditto isolated Python. No imports, filesystem, eval, subprocess, SDK or network calls in generated Workflow code. ScEnsemble ranks without tools. Prefix Custom planning-only instructions with [PLAN ONLY] to disable tools in that call; solution/review stages may use tools. Question images are supplied automatically to actor calls. Return the Python Workflow class and prompt constants without Markdown. Preserve native single-modification, parent-feedback and experience optimization. No test data is available. Operator interfaces: await Custom(input, instruction) returns {response:string}; await ScEnsemble(solutions:list[str], problem:str) returns {response:string}; HLE-only await Programmer(problem, analysis) returns {code:string,output:string}. Workflow __call__ returns (answer_string,0); actual cost is measured by Ditto.'}));return;
       }
       if(!Number.isSafeInteger(body.round)||body.round<1)throw new Error('Invalid round');
-      if(req.url==='/freeze'){
+      if(req.url==='/freeze'||req.url==='/checkpoint-round'){
         const files=Object.fromEntries(['graph.py','prompt.py'].map(name=>[name,createHash('sha256').update(readFileSync(resolve(out,'AFlow/workspace/'+dataset+'/workflows/round_'+body.round,name))).digest('hex')]));
-        writeFileSync(resolve(out,'AFlow/frozen.json'),JSON.stringify({round:body.round,validationScore:body.score,stopReason:body.stopReason,strategy:body.strategy,files,frozenBeforeTest:true},null,2));res.end(JSON.stringify({frozen:true}));return;
+        const path=resolve(out,'AFlow',req.url==='/freeze'?'frozen.json':`round-candidates/round-${body.round}.json`);
+        mkdirSync(resolve(path,'..'),{recursive:true});
+        writeFileSync(path+'.tmp',JSON.stringify({round:body.round,validationScore:body.score,stopReason:body.stopReason,strategy:body.strategy,files,frozenBeforeTest:true},null,2));
+        const {renameSync}=await import('node:fs');renameSync(path+'.tmp',path);
+        res.end(JSON.stringify({frozen:true}));return;
       }
       const optimizerCallId=randomUUID();
       const input={model:{provider:'baseline',model:config.model,providerOptions:{response_format:{type:'json_object'}}},messages:[{role:'system',content:'Return JSON with exactly three nonempty string fields: modification, graph, prompt. graph is the complete Python Workflow class; prompt defines Python constants. No Markdown fences.'},{role:'user',content:body.prompt}],generation:{temperature:config.temperature,maxTokens:config.maxOutputTokens},metadata:{method:'AFlow',phase:'search',taskId:'optimizer-round-'+body.round,optimizerCallId}};
@@ -153,6 +159,7 @@ const server=createServer(async(req,res)=>{
     const input={model:{provider:'baseline',model:config.model},messages:body.messages,generation:{temperature:config.temperature,maxTokens:config.maxOutputTokens},metadata:{method:body.method,phase:body.phase,taskId:body.taskId}};
     const session=sessions.get(scopeKey(body));
     if(hle)input.messages=withTaskImages(input.messages,session?.input);
+    if(session&&body.tools===false)input.messages=[{role:'system',content:instruction+'\nThis is a control/design stage. Do not execute actions or claim new effects. Preserve the requested control schema instead of the final-answer format. Design complementary task-specific roles using the capabilities listed above.'},...input.messages];
     if((automation||hle)&&body.tools!==false&&!session)throw new Error('Start the task before execution');
     if(session&&body.tools!==false){
       input.messages=[{role:'system',content:instruction+'\nRespect the current framework stage: planning, ranking, role design and retention checks should produce their required format without writes. Execution/refinement stages may execute and repair. Shared preceding tool observations:\n'+JSON.stringify(session.observations)},...input.messages];

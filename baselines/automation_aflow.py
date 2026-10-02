@@ -1,16 +1,19 @@
 """Official AFlow static workflows; reuse the native search/checkpoint controller."""
 import asyncio
+import argparse
 import ast
 import hashlib
 import importlib.util
 import json
 import os
+import contextvars
 import runpy
 import sys
 from pathlib import Path
 from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, endpoint, tasks, call, benchmark_rpc, usage, save_row, freeze_run, TransportFailure
 
 DATASET='HLE' if PROTOCOL.get('benchmark')=='hle' else 'AutomationBench'
+EXECUTION_TOOLS=contextvars.ContextVar('aflow_execution_tools',default=True)
 
 def prepare(out,source):
     target=out/f'workspace/{DATASET}/workflows/template'
@@ -19,13 +22,35 @@ def prepare(out,source):
         text=(source/'workspace/MATH/workflows/template'/name).read_text().replace('workspace.MATH','workspace.'+DATASET)
         if name=='op_prompt.py':
             text=text.replace('math problem','academic question' if DATASET=='HLE' else 'business workflow').replace('\\boxed{answer}','Explanation: reasoning; Answer: precise answer; Confidence: 0-100%' if DATASET=='HLE' else 'Final Summary: completed effects').replace('mathematical','academic' if DATASET=='HLE' else 'workflow')
+            text=text.replace('Carefully evaluate these solutions and identify the answer that appears most frequently across them. This consistency in answers is crucial for determining the most reliable solution.',
+                'Select the solution best supported by the original question, exact assumptions and decisive evidence. Agreement is useful only when independently justified; do not prefer a shared error.' if DATASET=='HLE' else
+                'Select the report best supported by actual API observations and the requested postconditions. Shared wording is not proof of completed effects. Identify unsupported claims, missing effects and duplicates. This selection stage must not execute writes.')
         (target/name).write_text(text)
-    sys.path.insert(0,str(out))
+    activate(out,source)
+    freeze_run(out,'AFlow','search-test')
+
+def activate(out,source):
+    sys.path.insert(0,str(source));sys.path.insert(0,str(out))
+    from importlib import import_module
+    module=import_module(f'workspace.{DATASET}.workflows.template.operator')
+    # Preserve native operators; only control whether this stage may execute tools.
+    if not getattr(module,'_mflow_stages',False):
+        original=module.Custom.__call__
+        async def custom(self,input,instruction):
+            token=EXECUTION_TOOLS.set(not instruction.startswith('[PLAN ONLY]'))
+            try:return await original(self,input,instruction)
+            finally:EXECUTION_TOOLS.reset(token)
+        module.Custom.__call__=custom
+        ensemble=module.ScEnsemble.__call__
+        async def select(self,*args,**kwargs):
+            token=EXECUTION_TOOLS.set(False)
+            try:return await ensemble(self,*args,**kwargs)
+            finally:EXECUTION_TOOLS.reset(token)
+        module.ScEnsemble.__call__=select
+        module._mflow_stages=True
     if DATASET=='HLE':
         from repairs import install_aflow_python
-        from importlib import import_module
-        install_aflow_python(import_module('workspace.HLE.workflows.template.operator'))
-    freeze_run(out,'AFlow','search-test')
+        install_aflow_python(module)
 
 def write_static(directory,graph,prompts,number):
     forbidden={'open','exec','eval','compile','__import__','getattr','setattr','globals','locals','vars','input','breakpoint'}
@@ -44,7 +69,7 @@ def write_static(directory,graph,prompts,number):
     (directory/'__init__.py').write_text('')
 
 async def sample(prompt,system):
-    return await asyncio.to_thread(call,([{'role':'system','content':system}] if system else [])+[{'role':'user','content':prompt}])
+    return await asyncio.to_thread(call,([{'role':'system','content':system}] if system else [])+[{'role':'user','content':prompt}],tools=EXECUTION_TOOLS.get())
 
 def load(number):
     path=RUNS/f'AFlow/workspace/{DATASET}/workflows/round_{number}/graph.py'
@@ -53,8 +78,9 @@ def load(number):
     return module.Workflow
 
 def episode(number,repeat,phase,task):
-    execution=f'round-{number}/pass-{repeat}/{task["id"]}'
-    SCOPE.set(('AFlow',phase,execution));folder=RUNS/'AFlow'/phase/f'round-{number}'/f'pass-{repeat}';folder.mkdir(parents=True,exist_ok=True)
+    execution=os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE','')+f'round-{number}/pass-{repeat}/{task["id"]}'
+    output=Path(os.environ['MFLOW_AFLOW_TEST_OUT']) if phase=='test' and os.environ.get('MFLOW_AFLOW_TEST_OUT') else RUNS/'AFlow'/phase
+    SCOPE.set(('AFlow',phase,execution));folder=output/f'round-{number}'/f'pass-{repeat}';folder.mkdir(parents=True,exist_ok=True)
     path=folder/(hashlib.sha256(task['id'].encode()).hexdigest()+'.json')
     if path.exists():return json.loads(path.read_text())
     from scripts.async_llm import LLMConfig
@@ -76,12 +102,12 @@ def episode(number,repeat,phase,task):
         sys.settrace(guard)
         try:answer,_=asyncio.run(agent(task['prompt']))
         except TransportFailure:raise
-        except Exception as error:save_row(RUNS/'AFlow'/phase/'errors.jsonl',{'taskId':task['id'],'round':number,'repeat':repeat,'error':repr(error)})
+        except Exception as error:save_row(output/'errors.jsonl',{'taskId':task['id'],'round':number,'repeat':repeat,'error':repr(error)})
         finally:sys.settrace(None)
     scored=benchmark_rpc('finish',task,answer=answer)
     row={'taskId':task['id'],'round':number,'repeat':repeat,**scored,'answer':answer,'tokens':usage('AFlow',phase,execution)}
     path.with_suffix('.tmp').write_text(json.dumps(row)+'\n');path.with_suffix('.tmp').replace(path)
-    save_row(RUNS/'AFlow'/phase/'results.jsonl',row);print(json.dumps({k:row[k] for k in ('taskId','round','repeat','score','tokens')}),flush=True)
+    save_row(output/'results.jsonl',row);print(json.dumps({k:row[k] for k in ('taskId','round','repeat','score','tokens')}),flush=True)
     return row
 
 async def evaluate_static(number,repeat,strategy,concurrency,phase='search'):
@@ -94,16 +120,26 @@ async def evaluate_static(number,repeat,strategy,concurrency,phase='search'):
             'failures':[{'taskId':r['taskId'],'question':t['prompt'],'prediction':r['answer'],'partialCredit':r['partialCredit'],**({'referenceAnswer':t['answer']} if DATASET=='HLE' and phase=='search' else {})} for r,t in zip(results,rows) if not r['score']]}
 
 def main():
-    sys.argv=['scripts/aflow_strategy.py',endpoint(),str(SOURCES/'AFlow'),str(RUNS/'AFlow')]
-    SCOPE.set(('AFlow','search','optimizer'))
-    runpy.run_path(str(ROOT/'scripts/aflow_strategy.py'),run_name='__main__')
-    frozen=json.loads((RUNS/'AFlow/frozen.json').read_text());number=frozen['round']
+    parser=argparse.ArgumentParser();parser.add_argument('--test-round',type=int);parser.add_argument('--test-out',type=Path);args=parser.parse_args()
+    if (args.test_round is None)!=(args.test_out is None):parser.error('--test-round and --test-out must be supplied together')
+    if args.test_round is not None and args.test_round<1:parser.error('Invalid round')
+    if args.test_round is None:
+        sys.argv=['scripts/aflow_strategy.py',endpoint(),str(SOURCES/'AFlow'),str(RUNS/'AFlow')]
+        SCOPE.set(('AFlow','search','optimizer'))
+        runpy.run_path(str(ROOT/'scripts/aflow_strategy.py'),run_name='__main__')
+    else:
+        activate(RUNS/'AFlow',SOURCES/'AFlow')
+        os.environ['MFLOW_AFLOW_TEST_OUT']=str(args.test_out)
+        os.environ['MFLOW_BASELINE_EXECUTION_NAMESPACE']='observe-round/'
+        freeze_run(args.test_out,'AFlow','round-test')
+    frozen=json.loads((RUNS/'AFlow'/('frozen.json' if args.test_round is None else f'round-candidates/round-{args.test_round}.json')).read_text());number=frozen['round']
     for name,digest in frozen['files'].items():
         path=RUNS/f'AFlow/workspace/{DATASET}/workflows/round_{number}'/name
         if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:raise RuntimeError('Frozen AFlow workflow changed')
     from scripts.async_llm import AsyncLLM
     AsyncLLM.__call__=lambda self,prompt:sample(prompt,self.sys_msg)
     result=asyncio.run(evaluate_static(number,0,{},PROTOCOL['concurrency'],phase='test'))
-    (RUNS/'AFlow/test/summary.json').write_text(json.dumps({'method':'AFlow','count':len(tasks('test')),'passRate':result['score'],'meanPartialCredit':result['meanPartialCredit'],'tokens':result['tokens'],'selectedRound':number},indent=2)+'\n')
+    output=args.test_out or RUNS/'AFlow/test'
+    (output/'summary.json').write_text(json.dumps({'method':'AFlow','count':len(tasks('test')),'passRate':result['score'],'meanPartialCredit':result['meanPartialCredit'],'tokens':result['tokens'],'selectedRound':number,'purpose':'observation-only' if args.test_round else 'final-selected-by-search'},indent=2)+'\n')
 
 if __name__=='__main__':main()

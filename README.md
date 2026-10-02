@@ -70,7 +70,7 @@ npm run mflow -- prepare --input data/example.jsonl --out data/prepared --seed 4
 AutomationBench 的五框架比较、多初始 MAS 搜索、推理时生成新 subagent 与远程进度查询见
 [实验协议](docs/automationbench-experiment.md)。
 
-DeepSeek 的 AutomationBench/HLE 已转为本地并行实验，快照与查询命令见 [2026-10-02 本地运行记录](docs/local-deepseek-20261002.md)；历史 hb 状态见 [2026-10-01 运行记录](docs/server-recovery-20261001.md)。
+DeepSeek 的 AutomationBench/HLE 已转为本地并行实验；MFlow/AFlow 每轮完整验证后会独立执行全量 test，最终还会测试仅由搜索集选定的轮次。逐轮 test 不参与优化或停止判断。快照与查询命令见 [2026-10-02 本地运行记录](docs/local-deepseek-20261002.md)；历史 hb 状态见 [2026-10-01 运行记录](docs/server-recovery-20261001.md)。
 
 ```sh
 npm run mflow -- benchmarks list

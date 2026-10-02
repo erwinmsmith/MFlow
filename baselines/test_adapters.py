@@ -19,6 +19,44 @@ from repairs import parse_roles, validate_workflow, validate_role_plan, install_
 
 
 class AdapterTests(unittest.TestCase):
+    def test_round_observers_drain_every_candidate_without_mixing_final_tests(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
+        runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+        calls=[]
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'configs').mkdir()
+            (root/'configs/automationbench-baselines.json').write_text('{"runDirectory":"runs/check","concurrency":2}')
+            (root/'configs/automationbench-search.json').write_text('{"validationRounds":5}')
+            (root/'package-lock.json').write_text('{}')
+            class Child:
+                def __init__(self,command,**kwargs):
+                    self.command=command;self.pid=len(calls)+1;self.polls=0;calls.append(command)
+                    self.bridge='baselines/bridge.mjs' in command
+                    if '--out' in command and 'evaluate' in command:
+                        output=Path(command[command.index('--out')+1]);assert not output.exists(),output
+                        output.mkdir(parents=True);(output/'manifest.json').write_text('{}')
+                def poll(self):
+                    self.polls+=1
+                    if self.bridge:return 1 if self.pid==1 and self.polls==2 else None
+                    if 'search' in self.command:
+                        for method in ('MFlow','AFlow'):
+                            folder=root/'runs/check'/method/('search/round-candidates' if method=='MFlow' else 'round-candidates');folder.mkdir(parents=True,exist_ok=True)
+                            for number in (1,2):(folder/f'round-{number}.json').write_text('{}')
+                            (folder/'round-3.json.tmp').write_text('{}')
+                    return 0
+                def terminate(self):pass
+                def wait(self,**kwargs):return 0
+            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',['experiment']),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner,'available_memory_mib',return_value=2000),patch.object(runner.urllib.request,'urlopen',side_effect=lambda *a,**k:io.StringIO('{"runDirectory":"runs/check"}')):
+                runner.main()
+            observed=[c for c in calls if '--test-round' in c or any('round-candidates/round-' in a for a in c)]
+            self.assertEqual(len(observed),4)
+            self.assertEqual([c[c.index('--test-round')+1] for c in observed if '--test-round' in c],['1','2'])
+            jobs=json.loads((root/'runs/check/jobs.json').read_text())['jobs']
+            self.assertEqual(len(jobs),9);self.assertTrue(all(j['status']=='completed' for j in jobs.values()))
+            self.assertEqual(len([c for c in calls if 'evaluate' in c]),3) # Two observations plus fresh final test.
+            self.assertEqual(sum('baselines/bridge.mjs' in c for c in calls),2)
+
     def test_bad_model_output_is_quality_failure_and_http_outage_stops(self):
         import urllib.error
         token=common.SCOPE.set(('AFlow','search','fixture'))
@@ -148,7 +186,7 @@ class AdapterTests(unittest.TestCase):
                 with patch.object(sys,'argv',args+['--resume','--concurrency','13']),self.assertRaisesRegex(RuntimeError,'Immutable experiment'):runner.main()
             self.assertEqual(peak,5)
             resets=[c.args[0] for c in send.call_args_list if isinstance(c.args[0],common.urllib.request.Request)]
-            self.assertEqual(len(resets),1);self.assertEqual(json.loads(resets[0].data),{'method':'AFlow'})
+            self.assertEqual(len(resets),1);self.assertEqual(json.loads(resets[0].data),{'method':'AFlow','taskPrefix':'round-'})
             searches=[c for c,_ in calls if 'search' in c]
             self.assertEqual(len(searches),2)
             self.assertNotIn('--resume',searches[0]);self.assertIn('--resume',searches[1])

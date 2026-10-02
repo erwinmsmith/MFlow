@@ -1,4 +1,4 @@
-"""Call the official SPP collaboration_func; adapt only MATH final-answer formatting."""
+"""Call the official SPP collaboration_func with task-specific roles and answer contracts."""
 import sys
 from bench_common import SOURCES, PROTOCOL, call
 class EvoAgent:
@@ -7,6 +7,12 @@ class EvoAgent:
         os.environ['task']='logic';sys.path.insert(0,str(SOURCES/'EvoAgent/spp'))
         import util_func as official
         from langchain.prompts import PromptTemplate
+        context=('Create complementary API discovery, entity resolution, dependency execution or effect-audit expertise for the actual unresolved task. All experts share one task world: preserve successful writes and inspect current state before repairs.' if PROTOCOL.get('benchmark')=='automationbench' else
+                 'Create expertise specific to the academic subject and unresolved assumption. Prefer independent methods, exact computation, counterexamples or source verification over repeated generic review. Inspect supplied images when relevant.' if PROTOCOL.get('benchmark')=='hle' else
+                 'Create complementary mathematical expertise for a concrete gap: derivation, exact computation, case analysis or counterexample checking.')
+        for name in ['meta_agent_prompt','check_agent_prompt']:
+            old=getattr(official,name)
+            setattr(official,name,PromptTemplate(input_variables=old.input_variables,template=context+'\n'+old.template))
         for name in ['multi_agent_prompt','refine_agent_prompt']:
             old=getattr(official,name)
             output='Final Summary: completed API effects, checked postconditions and concrete remaining blockers' if PROTOCOL.get('benchmark')=='automationbench' else 'Explanation: reasoning; Answer: precise answer or option letter; Confidence: 0-100%' if PROTOCOL.get('benchmark')=='hle' else r'Final Answer: \boxed{{your final answer}}'

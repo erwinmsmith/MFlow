@@ -148,6 +148,10 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.deepEqual(records.map((r: {score: number}) => r.score), [1, 1, 0, 0]);
     const bundle = JSON.parse(await readFile(join(options.out, 'best.json'), 'utf8'));
     assert.equal(bundle.strategy.id, 's1');
+    const observed = JSON.parse(await readFile(join(options.out, 'round-candidates/round-2.json'), 'utf8'));
+    assert.equal(observed.strategy.id, 's2');
+    assert.deepEqual(observed.selectionTaskIds, bundle.selectionTaskIds);
+    assert.ok(!JSON.stringify(observed).includes('HIDDEN-LABEL'));
     assert.deepEqual(bundle.pool, initialOrganization.initialAgents);
     assert.deepEqual(bundle.strategy.organization, initialOrganization);
     const library = JSON.parse(await readFile(join(options.out, 'agent-library.json'), 'utf8'));
@@ -165,7 +169,12 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(parentContext.execution.length, 2);
     assert.equal(parentContext.execution[0].evaluated, 4);
     assert.equal(bundle.config.prefixCache, false);
+    // Observer telemetry is deliberately poisoned; it must not alter final selection.
+    const observedOut=join(dir,'round-tests/round-2');
+    await (await import('node:fs/promises')).mkdir(observedOut,{recursive:true});
+    await writeFile(join(observedOut,'summary.json'),JSON.stringify({accuracy:1,testAnswer:'HELD-OUT-MARKER'}));
     await runAFlowSearch({ ...options, resume: true });
+    assert.equal(JSON.parse(await readFile(join(options.out,'best.json'),'utf8')).strategy.id,'s1');
     assert.equal(agents, 32); assert.equal(proposals, 1);
     // Reconstruct a crash after usage settlement but before the last task row commit.
     const checkpointPath = join(options.out, 'controller.json');

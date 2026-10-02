@@ -3,7 +3,9 @@ import argparse, asyncio, hashlib, json, os, random, sys, time
 from pathlib import Path
 from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, BudgetStop, call, tasks, grade, save_row, usage, freeze_run
 from repairs import validate_workflow, install_aflow_python
-p=argparse.ArgumentParser();p.add_argument('--phase',choices=['pilot','search-test'],required=True);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--phase',choices=['pilot','search-test'],required=True);p.add_argument('--test-round',type=int);p.add_argument('--test-out',type=Path);args=p.parse_args()
+if (args.test_round is None)!=(args.test_out is None) or args.test_round is not None and args.test_round<1:p.error('Supply a positive --test-round with --test-out')
+test_out=args.test_out or RUNS/'AFlow/test'
 source=SOURCES/'AFlow';sys.path.insert(0,str(source));os.chdir(source)
 from scripts.async_llm import AsyncLLM, LLMConfig
 from scripts.optimizer import Optimizer
@@ -38,6 +40,15 @@ async def formatted(self,prompt,formatter):
 AsyncLLM.call_with_format=formatted
 native=PROTOCOL['aflow']
 optimizer=Optimizer(dataset='MATH',question_type='math',opt_llm_config=config,exec_llm_config=config,operators=native['operators'],sample=4,check_convergence=native['checkConvergence'],optimized_path='workspace',initial_round=1,max_rounds=native['maxRounds'],validation_rounds=native['validationRounds'])
+native_evaluate=optimizer.evaluation_utils.evaluate_graph
+async def export_round(optimizer,directory,validation_n,data,initial=False):
+    score=await native_evaluate(optimizer,directory,validation_n,data,initial)
+    number=optimizer.round if initial else optimizer.round+1
+    files={n:hashlib.sha256(Path(directory,n).read_bytes()).hexdigest() for n in ['graph.py','prompt.py']}
+    folder=RUNS/'AFlow/round-candidates';folder.mkdir(parents=True,exist_ok=True)
+    path=folder/f'round-{number}.json';path.with_suffix('.tmp').write_text(json.dumps({'round':number,'validationScore':score,'files':files,'frozenBeforeTest':True})+'\n');path.with_suffix('.tmp').replace(path)
+    return score
+optimizer.evaluation_utils.evaluate_graph=export_round
 phase='pilot' if args.phase=='pilot' else 'search'
 recovered_initial={}
 async def load_data(self,specific_indices=None):
@@ -54,7 +65,7 @@ async def evaluate(self,problem,agent):
         row=recovered_initial[problem['id']]
         self.charged=getattr(self,'charged',0)+row['tokens']
         return problem['problem'],row['answer'],problem['solution'],row['score'],float(self.charged)
-    execution_id=round_name+'/'+problem['id']
+    execution_id=('observe-round/' if args.test_round else '')+round_name+'/'+problem['id']
     token=SCOPE.set(('AFlow',phase,execution_id));status='completed';output='';started=time.monotonic()
     try:
         try:output,_=await self._generate_output(agent,problem['problem'])
@@ -64,7 +75,7 @@ async def evaluate(self,problem,agent):
         except Exception as e:
             status='execution_error: '+repr(e)
         score=grade(problem['task'],str(output));charged=usage('AFlow',phase,execution_id)
-        save_row(RUNS/'AFlow'/phase/'results.jsonl',{'taskId':problem['id'],'round':round_name,'score':score,'answer':output,'tokens':charged,'status':status,'seconds':time.monotonic()-started})
+        save_row((test_out if phase=='test' else RUNS/'AFlow'/phase)/'results.jsonl',{'taskId':problem['id'],'round':round_name,'score':score,'answer':output,'tokens':charged,'status':status,'seconds':time.monotonic()-started})
         if score==0 and phase=='search':self.log_mismatch(problem['problem'],problem['solution'],output,output)
         print(json.dumps({'phase':phase,'round':round_name,'taskId':problem['id'],'score':score,'tokens':charged}),flush=True)
         self.charged=getattr(self,'charged',0)+charged
@@ -74,6 +85,13 @@ MATHBenchmark.evaluate_problem=evaluate
 async def main():
     global phase
     workflows='workspace/MATH/workflows'
+    if args.test_round is not None:
+        freeze_run(test_out,'AFlow','round-test')
+        frozen=json.loads((RUNS/f'AFlow/round-candidates/round-{args.test_round}.json').read_text())
+        for name,digest in frozen['files'].items():
+            if hashlib.sha256(Path(workflows,f'round_{args.test_round}',name).read_bytes()).hexdigest()!=digest:raise RuntimeError('Frozen round workflow changed')
+        await test(args.test_round,RUNS/'AFlow',workflows)
+        return
     freeze_run(RUNS/'AFlow'/args.phase,'AFlow',args.phase)
     if args.phase=='pilot':
         cls=optimizer.graph_utils.load_graph(1,workflows);agent=cls(name='MATH',llm_config=config,dataset='MATH')
@@ -109,14 +127,14 @@ async def main():
 async def test(number,out,workflows):
     global phase
     phase='test';cls=optimizer.graph_utils.load_graph(number,workflows);agent=cls(name='MATH',llm_config=config,dataset='MATH')
-    bench=MATHBenchmark('MATH','unused',str(out/'test'/f'round_{number}'))
-    results=out/'test/results.jsonl'
+    bench=MATHBenchmark('MATH','unused',str(test_out/f'round_{number}'))
+    results=test_out/'results.jsonl'
     done={r['taskId'] for r in map(json.loads,results.read_text().splitlines())} if results.exists() else set()
     for row in await bench.load_data():
         if row['id'] not in done:await bench.evaluate_problem(row,agent)
-    rows=[json.loads(s) for s in (out/'test/results.jsonl').read_text().splitlines()]
+    rows=[json.loads(s) for s in results.read_text().splitlines()]
     assert len(rows)==486 and len({r['taskId'] for r in rows})==486
-    (out/'test/summary.json').write_text(json.dumps({'method':'AFlow','count':486,'correct':sum(r['score'] for r in rows),'tokens':sum(r['tokens'] for r in rows),'selectedRound':number},indent=2)+'\n')
+    (test_out/'summary.json').write_text(json.dumps({'method':'AFlow','count':486,'correct':sum(r['score'] for r in rows),'passRate':sum(r['score'] for r in rows)/486,'tokens':sum(r['tokens'] for r in rows),'selectedRound':number,'purpose':'observation-only' if args.test_round else 'final-selected-by-search'},indent=2)+'\n')
 if __name__=='__main__':
     import runpy
     from bench_common import TransportFailure

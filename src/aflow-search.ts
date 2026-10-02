@@ -276,7 +276,7 @@ export async function runAFlowSearch(options: {
         if (!Number.isInteger(input.round) || input.round < 1 || !Number.isInteger(input.repeat) || input.repeat < 0 || input.repeat >= config.validationRounds)
           throw new Error('Invalid round/pass');
         result = await evaluation(input.round, input.repeat, candidate(input.strategy));
-      } else if (req.url === '/freeze') {
+      } else if (req.url === '/freeze' || req.url === '/checkpoint-round') {
         const strategy = candidate(input.strategy);
         const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.1', pythonImage: image, webSearch, strategy,
           pool: strategy.organization!.initialAgents, model: options.model, config: runtimeConfig,
@@ -284,6 +284,11 @@ export async function runAFlowSearch(options: {
           selectionPromptHashes: tasks.map((t) => digest(promptKey(t))),
           selectionGroups: [...new Set(tasks.map((t) => t.group ?? t.id))],
           experimentalScope: 'standard-isolated-state-v2' };
+        if (req.url === '/checkpoint-round') {
+          if (!Number.isInteger(input.round) || input.round < 1) throw new Error('Invalid completed round');
+          await save(join(out, 'round-candidates', `round-${input.round}.json`), bundle);
+          result = { exported: true };
+        } else {
         await save(join(out, 'best.json'), bundle);
         await save(join(out, 'agent-library.json'), { templates: strategy.organization!.agentTemplates, initialBindings: strategy.organization!.initialBindings, selectedRound: input.round, strategyHash: digest(strategy), frozenBeforeTest: true });
         await save(join(out, 'organization.json'), { organization: strategy.organization, composition: strategy.composition,
@@ -292,6 +297,7 @@ export async function runAFlowSearch(options: {
           ...(tasks[0].metric === 'drop' ? { validationMeanF1: input.score } : { validationAccuracy: input.score }),
           validationRounds: config.validationRounds, protocol: manifest.protocol, stopReason: input.stopReason, frozenBeforeTest: true });
         result = { frozen: true };
+        }
       } else throw new Error('Unknown route');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(result));
