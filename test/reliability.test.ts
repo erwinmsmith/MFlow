@@ -104,3 +104,11 @@ test('invalid web arguments become a correctable tool observation', async () => 
   const result=await tool.execute({query:'too many words '.repeat(100)},{} as WorkerContext<unknown,unknown>);
   assert.equal(result.status,'failed');assert.equal(result.error?.code,'WEB_SEARCH_ARGUMENTS');
 });
+
+
+test('HTTP gateway failures retry the current model turn instead of losing the task world', async () => {
+  let attempts=0;
+  const meter=new MeteredProvider({async invoke(){if(++attempts===1)throw new ProviderFailure('PROVIDER_HTTP_ERROR','HTTP 502: Bad Gateway');return response('5');}});
+  assert.equal((await meter.invoke(input,{signal:AbortSignal.timeout(5000)})).finishReason,'stop');
+  assert.equal(attempts,2);assert.deepEqual(meter.records.map(r=>r.status),['unknown','known']);assert.equal(meter.lastFailure,undefined);
+});
