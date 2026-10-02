@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory() as root:
   main()
  jobs=json.loads((Path(root)/'jobs.json').read_text())['jobs']
  assert len(jobs)==5 and all(r['status']=='completed' for r in jobs.values())
- assert len(calls)==10
+ assert len(calls)==7
 `]);
 });
 

@@ -47,7 +47,7 @@ class AdapterTests(unittest.TestCase):
                     return 0
                 def terminate(self):pass
                 def wait(self,**kwargs):return 0
-            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',['experiment']),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner,'available_memory_mib',return_value=2000),patch.object(runner.urllib.request,'urlopen',side_effect=lambda *a,**k:io.StringIO('{"runDirectory":"runs/check"}')):
+            with patch.object(runner,'ROOT',root),patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':directory}),patch.object(sys,'argv',['experiment','--execution-root',str(root)]),patch.object(runner.subprocess,'Popen',Child),patch.object(runner.time,'sleep'),patch.object(runner,'available_memory_mib',return_value=2000),patch.object(runner.urllib.request,'urlopen',side_effect=lambda *a,**k:io.StringIO('{"runDirectory":"runs/check"}')):
                 runner.main()
             observed=[c for c in calls if '--test-round' in c or any('round-candidates/round-' in a for a in c)]
             self.assertEqual(len(observed),4)
@@ -56,6 +56,13 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(len(jobs),9);self.assertTrue(all(j['status']=='completed' for j in jobs.values()))
             self.assertEqual(len([c for c in calls if 'evaluate' in c]),3) # Two observations plus fresh final test.
             self.assertEqual(sum('baselines/bridge.mjs' in c for c in calls),2)
+            legacy=[c for c in calls if 'baselines/automation_run.py' in c]
+            self.assertEqual(len(legacy),3)
+            self.assertEqual({c[c.index('baselines/automation_run.py')+1] for c in legacy},{'DyLAN','EvoAgent','AutoAgents'})
+            self.assertTrue(all(c[c.index('--phase')+1]=='test' for c in legacy))
+            receipt=json.loads((root/'runs/check/scheduler.json').read_text())
+            self.assertEqual(receipt['executionRoot'],str(root.resolve()))
+            self.assertEqual(receipt['phases']['DyLAN'],['test'])
 
     def test_bad_model_output_is_quality_failure_and_http_outage_stops(self):
         import urllib.error
@@ -206,7 +213,7 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual((protocol['runDirectory'],protocol['concurrency']),('runs/local',12))
             self.assertEqual(json.loads((root/'runs/local/search-config.json').read_text()),{'concurrency':12,'validationRounds':5})
             legacy=[c for c,_ in calls if 'baselines/automation_run.py' in c]
-            self.assertEqual(len(legacy),6)
+            self.assertEqual(len(legacy),3)
             self.assertTrue(all(c[-2:]==['--concurrency','2'] for c in legacy))
             self.assertEqual({j['status'] for j in json.loads((root/'runs/local/jobs.json').read_text())['jobs'].values()},{'completed'})
         with patch.object(runner.Path,'exists',return_value=False),patch.object(runner.subprocess,'check_output',return_value='Pages free: 512.\nPages inactive: 256.\nPages speculative: 128.\nPages purgeable: 64.\nPages wired down: 1000.\n'),patch.object(runner.os,'sysconf',return_value=16384):

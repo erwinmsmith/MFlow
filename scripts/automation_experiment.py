@@ -124,12 +124,15 @@ def status(out):
     print(json.dumps(report,ensure_ascii=False,indent=2))
 
 def main():
+    global ROOT
     p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run')
+    p.add_argument('--execution-root',type=Path,help='Use an existing immutable actor snapshot with this separately recorded scheduler')
     p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
     p.add_argument('--legacy-concurrency',type=int,default=1,help='Isolated worker processes per native legacy method')
     p.add_argument('--port',type=int,help='Independent Ditto baseline bridge port');a=p.parse_args()
     if a.concurrency is not None and a.concurrency<1 or a.legacy_concurrency<1:p.error('Concurrency must be positive')
     if a.port is not None and not 1<=a.port<=65535:p.error('Invalid bridge port')
+    if a.execution_root is not None:ROOT=a.execution_root.resolve()
     math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
     protocol='configs/'+(profile if math else 'hle-baselines.json' if hle else 'automationbench-baselines.json')
@@ -166,13 +169,19 @@ def main():
       'MFlow':[(node+['search','--benchmark',a.benchmark,'--config',str(out/'search-config.json'),'--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
                (node+['evaluate','--benchmark',a.benchmark,'--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config.get('concurrency',4 if env['MFLOW_MODEL']=='qwen3.5-9b' else 24))]+(['--resume'] if (test/'manifest.json').exists() else []))],
       'AFlow':[[aflow,'baselines/automation_aflow.py']],
-      **{m:[[legacy,'baselines/automation_run.py',m,'--phase',phase,'--concurrency',str(a.legacy_concurrency)] for phase in ('pilot','test')] for m in ('DyLAN','EvoAgent','AutoAgents')},
+      **{m:[[legacy,'baselines/automation_run.py',m,'--phase','test','--concurrency',str(a.legacy_concurrency)]] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }
     if math:
         commands.update({
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
+    # Scheduling can change without replacing actor code or invalidating search checkpoints.
+    # Archive/restart the prior supervisor before switching this receipt.
+    (out/'scheduler.json').write_text(json.dumps({'path':str(Path(__file__).resolve()),
+        'sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'executionRoot':str(ROOT),
+        'phases':{'MFlow':['search','test'],'AFlow':['search','test'],
+                  **{m:['test'] for m in ('DyLAN','EvoAgent','AutoAgents')}}},indent=2)+'\n')
     jobs=read(out/'jobs.json',{'jobs':{}});active={};retrying={}
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)

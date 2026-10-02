@@ -1,6 +1,6 @@
 # Local DeepSeek comparisons — 2026-10-02
 
-AutomationBench and HLE run locally after hb stopped accepting SSH connections. Both use DeepSeek Flash and published Ditto 0.1.2. The five methods run concurrently in each comparison; every method completes search/development before its final full held-out test. MFlow and AFlow additionally test each fully validated round in an independent observer process. Native search/selection/convergence, data partitions and execution protection are retained.
+AutomationBench and HLE run locally after hb stopped accepting SSH connections. Both use DeepSeek Flash and published Ditto 0.1.2. The five methods run concurrently in each comparison; MFlow/AFlow search before their final full held-out tests; DyLAN, EvoAgent and AutoAgents run test directly. MFlow and AFlow additionally test each fully validated round in an independent observer process. Native search/selection/convergence, data partitions and execution protection are retained.
 
 | Benchmark | MFlow episodes | AFlow episodes | Workers per DyLAN / EvoAgent / AutoAgents | Ditto bridge | Full split |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -87,3 +87,11 @@ v4 was stopped and archived before any held-out test row existed. Its search res
 - Engineering checks are not accuracy evidence. Smoke failures caused by model degeneration remain scored failures; they are not discarded or described as a passing benchmark. Full held-out comparisons determine whether MFlow exceeds the baselines.
 
 The server synchronization attempt still fails before SSH key exchange. These runs use independent local snapshots; no claim is made that hb's current source or old DeepSeek processes have been verified. The Qwen service is untouched.
+
+## Direct-test correction (2026-10-02)
+
+DyLAN, EvoAgent and AutoAgents have no dataset-level search. The comparison scheduler now launches each directly with `--phase test`; pilot remains available only as an explicitly requested diagnostic. Previously collected pilot rows and costs are retained as development overhead, never test scores.
+
+For this running v5 comparison, actor snapshots and model/prompt/data settings stay frozen. A versioned external scheduler uses `--execution-root <v5 snapshot>` and records its source hash and phase plan in `scheduler.json`. The previous supervisor receipt is archived before restart. MFlow/AFlow resume their existing search checkpoints; the three direct-test methods use fresh test worlds. No actor code or search manifest is edited to bypass compatibility checks.
+
+All five methods, including each MFlow/AFlow round observer and final evaluation, use the same complete locked test split: **600 AutomationBench** tasks (`automationbench-public-simple-v1`) and **2300 HLE** tasks (`hle-full-holdout-v1`). A per-run `test-cohort.json` audit records the source-file checksum, ordered task-ID checksum, full ID list, counts and empty search/test ID intersection after checking both actual Node and Python loaders. Parallel completion order can differ; task membership and dispatch order are identical. Task-level agent creation/debate during test is inference cost, not search.
