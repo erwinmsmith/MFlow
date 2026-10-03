@@ -4,7 +4,7 @@ import { graph, loop, graphStep, ToolRegistry, type ExecutionGraph, type GraphIn
 import { z } from 'zod';
 import { EpisodeExhausted, DittoAgents } from './ditto.js';
 import { createProgramTool, toolProgramSchema, toolDependencies, toolDesignInstruction, validateToolLibrary, type ToolProgram } from './tool-program.js';
-import { digest } from './util.js';
+import { digest, snapshotGraphData } from './util.js';
 import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, type Execution, type Limits,
   type Strategy, type TaskInput } from './types.js';
 import { PolicyContractError } from './strategy-program.js';
@@ -223,7 +223,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get templates() { return structuredClone([...templates.values()]); },
     get agents() { return structuredClone([...population.values()]); },
     get outputs() { return structuredClone(outputs); },
-    get graphs() { return structuredClone(orchestration.graphs); },
+    get graphs() { return snapshotGraphData(orchestration.graphs); },
     get tools() { return structuredClone(orchestration.tools); },
     registerTool: (id: string, definition: ToolProgram) => {
       const owner = member(id), parsed = toolProgramSchema.parse(definition);
@@ -406,7 +406,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
             throw new (programs.has(owner.profile.id)?GeneratedProgramError:PolicyContractError)(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
           checked = checked.node(node.id, node.node, node.dependencies, (input, output) => {
             const value = bind(node, input, output);
-            bindings[node.id] = task.imageParts?.length ? imageLog(value,task) : structuredClone(value);
+            bindings[node.id] = task.imageParts?.length ? imageLog(value,task) : snapshotGraphData(value);
             return value;
           });
           topology.push({ id: node.id, type: node.node, dependencies: [...node.dependencies] });
@@ -433,7 +433,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           if (node.type === 'INTERACTION.ACT.TOOL') orchestration.toolCalls!.push({ agentId: node.id.split('/')[0], name: (bindings[node.id] as any).call.name, status: output?.status ?? 'error' });
           if (node.type === 'INTERACTION.OBSERVE') toolEvents.push(output);
         }
-        orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: structuredClone(result) });
+        orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: snapshotGraphData(result) });
         next = advance(result);
       }
       if (typeof next.value !== 'string') throw new PolicyContractError('MAS loop must return the final answer string');

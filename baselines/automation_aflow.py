@@ -102,6 +102,7 @@ def episode(number,repeat,phase,task):
         sys.settrace(guard)
         try:answer,_=asyncio.run(agent(task['prompt']))
         except TransportFailure:raise
+        except OSError as error:raise TransportFailure(str(error)) from None
         except Exception as error:save_row(output/'errors.jsonl',{'taskId':task['id'],'round':number,'repeat':repeat,'error':repr(error)})
         finally:sys.settrace(None)
     scored=benchmark_rpc('finish',task,answer=answer)

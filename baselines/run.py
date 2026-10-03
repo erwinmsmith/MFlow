@@ -38,6 +38,7 @@ for t in rows:
         save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])})
         if provider_limit in str(e):status='provider_output_limit'
         else:raise
+    except OSError as e:raise TransportFailure(str(e)) from None
     except Exception as e:
         status='execution_error: '+repr(e);answer=''
         save_row(out/'errors.jsonl',{'taskId':t['id'],'error':repr(e),'tokens':usage(a.method,a.phase,t['id'])})

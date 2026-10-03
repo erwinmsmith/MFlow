@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 for (const [receiptPath, module] of [
   [process.argv.includes('evaluate') ? process.env.MFLOW_EVALUATION_IO_REPAIR : undefined, 'evaluation.js'],
   [process.env.MFLOW_STATE_IO_REPAIR, 'util.js'],
+  [process.env.MFLOW_COMPOSITION_IO_REPAIR, 'composition.js'],
   [process.env.MFLOW_HLE_JUDGE_REPAIR, 'hle-grading.js'],
   [process.env.MFLOW_MODEL_OPTIONS_REPAIR, 'ditto.js'],
   [process.env.MFLOW_SEARCH_STORAGE_REPAIR, 'aflow-search.js'],

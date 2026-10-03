@@ -3,6 +3,18 @@ import { mkdir, writeFile, rename, appendFile, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { Execution } from './types.js';
 
+/** Graph data is JSON-shaped. Copy mutable containers, retain immutable strings across history snapshots. */
+export function snapshotGraphData<T>(value: T, seen = new WeakMap<object, any>()): T {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return seen.get(value);
+  const copy = Array.isArray(value) ? new Array(value.length) : {};
+  seen.set(value, copy);
+  for (const [key, item] of Object.entries(value)) Object.defineProperty(copy, key, {
+    value: snapshotGraphData(item, seen), enumerable: true, writable: true, configurable: true,
+  });
+  return copy as T;
+}
+
 /** Disk evidence only; live graph inputs/outputs remain available to the strategy. */
 export function compactExecution(execution: Execution): Execution {
   if (!execution.orchestration) return execution;
@@ -38,8 +50,24 @@ export function canonical(value: unknown): string {
     );
   return JSON.stringify(value);
 }
-export const digest = (value: unknown) =>
-  createHash("sha256").update(canonical(value)).digest("hex");
+export function digest(value: unknown): string {
+  const hash = createHash('sha256');
+  const visit = (item: unknown) => {
+    if (Array.isArray(item)) {
+      hash.update('[');
+      for (let i = 0; i < item.length; i++) { if (i) hash.update(','); if (item[i] !== undefined) visit(item[i]); }
+      hash.update(']');
+    } else if (item !== null && typeof item === 'object') {
+      hash.update('{');
+      Object.entries(item).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).forEach(([k, v], i) => {
+        if (i) hash.update(','); hash.update(JSON.stringify(k)); hash.update(':'); visit(v);
+      });
+      hash.update('}');
+    } else hash.update(JSON.stringify(item));
+  };
+  visit(value);
+  return hash.digest('hex');
+}
 const saves = new Map<string, Promise<void>>();
 export async function save(path: string, value: unknown) {
   path = resolve(path);

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { evaluateConcurrent } from '../src/evaluation.js';
-import { save, digest } from '../src/util.js';
+import { save, digest, canonical, snapshotGraphData } from '../src/util.js';
 import { taskSchema, type Evaluated, type Task, type Execution } from '../src/types.js';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -12,6 +12,23 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 const tasks = ['slow', 'wrong', 'failed', 'later'].map(id => taskSchema.parse({ id, prompt: id, answer: '1' }));
+
+test('history copies preserve values and isolation without quadratic string storage; streaming hashes remain identical', () => {
+  const shared={content:'工具 😀 \ud800',metadata:{ids:['one']}};
+  const value={z:[undefined,NaN,-0,shared],a:shared,omitted:undefined};
+  const copy=snapshotGraphData(value);
+  assert.deepEqual(copy,structuredClone(value));assert.equal(copy.a,copy.z[3]);
+  value.a.metadata.ids.push('two');assert.deepEqual(copy.a.metadata.ids,['one']);
+  for(const item of [copy,[],{},[,,,],null,'😀',42])assert.equal(digest(item),createHash('sha256').update(canonical(item)).digest('hex'));
+  execFileSync(process.execPath,['--max-old-space-size=96','--expose-gc','--input-type=module','-e',`
+    import {snapshotGraphData,digest} from './dist/src/util.js';
+    const messages=[],history=[];
+    for(let i=0;i<64;i++){messages.push({role:'tool',content:'x'.repeat(131072)+i});history.push(snapshotGraphData({messages}));}
+    if(history[0].messages.length!==1||history.at(-1).messages.length!==64)throw Error('Mutable history');
+    if(digest(history).length!==64)throw Error('Missing hash');
+    global.gc();if(process.memoryUsage().heapUsed>32*1024**2)throw Error('History duplicated immutable text');
+  `],{stdio:['ignore','pipe','pipe']});
+});
 const row = (task: Task, score: 0 | 1 = 1): Evaluated => ({ taskId: task.id, score,
   execution: { taskId: task.id, answer: String(score) } as Execution });
 

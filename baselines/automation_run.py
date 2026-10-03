@@ -30,6 +30,7 @@ def episode(name, phase, task):
             with (out/(task['id'].replace('/','-')+'.log')).open('a') as stream,contextlib.redirect_stdout(stream),contextlib.redirect_stderr(stream):
                 answer=method.solve(task['prompt'])
         except TransportFailure:raise
+        except OSError as error:raise TransportFailure(str(error)) from None
         except Exception as error:
             status='execution_error';save_row(out/'errors.jsonl',{'taskId':task['id'],'error':repr(error)})
     grade=benchmark_rpc('finish',task,answer=answer)

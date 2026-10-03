@@ -214,7 +214,7 @@ def main():
       'MFlow':[(node+['search','--benchmark',a.benchmark,'--config',str(out/'search-config.json'),'--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
                (node+['evaluate','--benchmark',a.benchmark,'--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config.get('concurrency',4 if env['MFLOW_MODEL']=='qwen3.5-9b' else 24))]+(['--resume'] if (test/'manifest.json').exists() else []))],
       'AFlow':[[aflow,aflow_adapter]],
-      **{m:[[legacy,'baselines/automation_run.py',m,'--phase','test','--concurrency',str(a.legacy_concurrency)]] for m in ('DyLAN','EvoAgent','AutoAgents')},
+      **{m:[[legacy,os.environ.get('MFLOW_LEGACY_RUNNER','baselines/automation_run.py'),m,'--phase','test','--concurrency',str(a.legacy_concurrency)]] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }
     if math:
         commands.update({

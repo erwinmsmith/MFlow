@@ -52,6 +52,31 @@ with tempfile.TemporaryDirectory() as root:
 `]);
 });
 
+test('legacy disk failures remain resumable infrastructure failures, not scored answers',async()=>{
+  await promisify(execFile)('python3',['-c',`
+import sys,types,tempfile,contextvars
+from pathlib import Path
+from unittest.mock import patch
+class TransportFailure(BaseException):pass
+with tempfile.TemporaryDirectory() as root:
+ scope=contextvars.ContextVar('scope');out=Path(root)/'DyLAN/test';out.mkdir(parents=True)
+ calls=[]
+ def rpc(route,task,**kwargs):
+  calls.append(route)
+  return {'checkpoint':False} if route=='start' else {'score':0,'partialCredit':0}
+ stub=types.SimpleNamespace(RUNS=Path(root),SCOPE=scope,tasks=lambda _:[],freeze_run=lambda *a:None,benchmark_rpc=rpc,usage=lambda *a:0,save_row=lambda *a:None,TransportFailure=TransportFailure)
+ with patch.dict(sys.modules,{'bench_common':stub}):
+  import baselines.automation_run as runner
+  class Method:
+   def solve(self,prompt):raise OSError(28,'No space left on device')
+  runner.method=Method()
+  try:runner.episode('DyLAN','test',{'id':'fixture','prompt':'public task'})
+  except TransportFailure:pass
+  else:raise AssertionError('Disk failure must escape scoring')
+  assert calls==['start']
+`]);
+});
+
 test('legacy MATH round observer verifies its frozen candidate without entering optimization',async t=>{
   const python=resolve('../MFlow-baselines/.venv-aflow/bin/python');
   try{await access(python);}catch{t.skip('Native AFlow environment required');return;}
