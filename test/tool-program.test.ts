@@ -55,6 +55,20 @@ test('task-local tools use Ditto, bind parameters/results, freeze as definitions
   await assert.rejects(runtime(tools,2).run(candidate,{id:'budget',prompt:'Fixture'}),/Tool call limit/);
 });
 
+test('generated tools are shared only with dependency-capable existing and future members',async()=>{
+  const candidate=base();
+  candidate.composition=callCode(`
+    ctx.spawn({...ctx.profile('root'),id:'ready'});
+    ctx.spawn({...ctx.profile('root'),id:'restricted',tools:[]});
+    ctx.registerTool('root',${JSON.stringify(program)});
+    ctx.spawn({...ctx.profile('root'),id:'later',tools:['arithmetic']});
+  `,program.name,{x:4},'later');
+  const result=await runtime().run(candidate,{id:'sharing',prompt:'Fixture'});
+  assert.equal(JSON.parse(result.answer).content.sum,8);
+  for(const id of ['root','ready','later'])assert.ok(result.agents.find(a=>a.id===id)!.tools.includes(program.name));
+  assert.ok(!result.agents.find(a=>a.id==='restricted')!.tools.includes(program.name));
+});
+
 test('tool contracts reject unavailable dependencies, collisions and invalid arguments; failed sequences stop before writes',async()=>{
   assert.throws(()=>validateToolLibrary([program],[]),/requires earlier registered/);
   assert.throws(()=>validateToolLibrary([program,program],['arithmetic']),/Duplicate tool/);

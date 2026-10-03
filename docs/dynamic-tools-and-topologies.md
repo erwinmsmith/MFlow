@@ -141,3 +141,8 @@ without providing Python. It does not remove dependency validation.
 
 The updated MFlow experiment starts a new frozen search run because capabilities
 and model-visible instructions changed; previous search scores are not reused.
+
+Generated tools are also shared with existing and later-spawned members that
+already hold every dependency. Sharing cannot grant API write access to a
+read-only planner. This prevents a capable reviewer from seeing a generated
+tool in evidence but being unable to use it.

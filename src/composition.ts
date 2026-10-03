@@ -193,6 +193,11 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     };
     registry.register(creator); tools.push(creator);
   }
+  const grantCreatedTools = (profile: AgentProfile) => {
+    for (const { definition, origin } of orchestration.tools!)
+      if (origin === 'generated' && !profile.tools.includes(definition.name) && toolDependencies(definition).every(name => profile.tools.includes(name)))
+        profile.tools.push(definition.name);
+  };
   const prepareProfile = (profile: AgentProfile) => {
     const parsed = profileSchema.parse(profile);
     if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
@@ -200,6 +205,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       parsed.tools = [...new Set([...parsed.tools, 'create_tool', ...(tools.some(t => t.name === 'python') ? ['python'] : [])])];
       parsed.nodes = [...new Set([...(parsed.nodes ?? []), 'INTERACTION.ACT.TOOL' as const, 'INTERACTION.OBSERVE' as const])];
     }
+    grantCreatedTools(parsed);
     agents.validateProfile(parsed);
     return parsed;
   };
@@ -231,7 +237,8 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       if (missing.length)
         throw new PolicyContractError(`Tool creation requires the creator to hold every dependency capability. Missing: ${missing.join(', ')}. Available dependencies: ${owner.profile.tools.filter(name => name !== 'create_tool').join(', ')}. Use these exact tool names; API endpoints belong in api_fetch arguments, not dependency names.`);
       const name = registerTool(parsed, id, 'generated');
-      owner.profile.tools.push(name); event('REGISTER_TOOL', id);
+      for (const agent of population.values()) grantCreatedTools(agent.profile);
+      event('REGISTER_TOOL', id);
       return name;
     },
     profile: (id: string) => structuredClone(member(id).profile),
