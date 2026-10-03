@@ -1,8 +1,24 @@
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, open, readFile, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { MeteredProvider } from "./ditto.js";
 import type { Evaluated, Task, Execution } from "./types.js";
 import { append, digest, save } from "./util.js";
+
+// Full traces stay on disk; retaining every execution makes long tests exhaust the heap.
+const summary = ({ taskId, score, f1, partialCredit, confidence, inheritedFrom, execution }: Evaluated) =>
+  ({ taskId, score, f1, partialCredit, confidence, inheritedFrom,
+    execution: { taskId: execution.taskId, tokens: execution.tokens } });
+
+async function* completedRows(path: string): AsyncGenerator<Evaluated> {
+  const file = await open(path, 'r').catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (!file) return;
+  try {
+    for await (const line of file.readLines()) if (line.trim()) yield JSON.parse(line);
+  } finally { await file.close(); }
+}
 
 /** Persist model work before grading, including across a failed grading/resume. */
 export async function checkpointExecution(path: string, taskId: string, execute: () => Promise<Execution>): Promise<Execution> {
@@ -23,7 +39,7 @@ export async function evaluateFrozen(options: {
   provider: MeteredProvider; evaluate: (task: Task) => Promise<Evaluated>;
 }) {
   const { out, resume, manifest, tasks, provider, evaluate } = options;
-  let rows: Evaluated[] = [], previousUsage: typeof provider.records = [];
+  let rows: ReturnType<typeof summary>[] = [], previousUsage: typeof provider.records = [];
   if (resume) {
     const saved = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"));
     if (digest(saved) !== digest(manifest)) throw new Error("Evaluation resume manifest mismatch");
@@ -31,7 +47,7 @@ export async function evaluateFrozen(options: {
       if (error.code === "ENOENT") return "";
       throw error;
     });
-    rows = (await readOrEmpty("test.jsonl")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    for await (const row of completedRows(join(out, 'test.jsonl'))) rows.push(summary(row));
     const usage = await readOrEmpty("usage.json");
     previousUsage = usage ? JSON.parse(usage) : [];
     if (new Set(rows.map((r) => r.taskId)).size !== rows.length ||
@@ -48,7 +64,7 @@ export async function evaluateFrozen(options: {
       // Write cost first: an interruption must not leave a completed row without known cost.
       await save(join(out, "usage.json"), usage());
       await append(join(out, "test.jsonl"), result);
-      rows.push(result);
+      rows.push(summary(result));
       await append(join(out, "attempts.jsonl"), { taskId: task.id, event: "completed", at: new Date().toISOString() });
     } catch (error) {
       await save(join(out, "usage.json"), usage());
@@ -74,20 +90,17 @@ export async function evaluateConcurrent(options: {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('Invalid concurrency');
   const rowDir = join(out, 'rows');
   await mkdir(rowDir, { recursive: true });
-  const valid = new Set(tasks.map(t => t.id)), rows = new Map<string, Evaluated>();
+  const valid = new Set(tasks.map(t => t.id)), rows = new Map<string, ReturnType<typeof summary>>();
+  const fingerprints = new Map<string, string>();
   if (valid.size !== tasks.length) throw new Error('Duplicate test task');
   const accept = (row: Evaluated) => {
     if (!valid.has(row.taskId) || row.execution.taskId !== row.taskId) throw new Error('Unexpected test result');
-    const previous = rows.get(row.taskId);
-    if (previous && digest(previous) !== digest(row)) throw new Error('Conflicting test result');
-    rows.set(row.taskId, row);
+    const hash = digest(row), previous = fingerprints.get(row.taskId);
+    if (previous && previous !== hash) throw new Error('Conflicting test result');
+    fingerprints.set(row.taskId, hash);
+    rows.set(row.taskId, summary(row));
   };
-  const previous = await readFile(join(out, 'test.jsonl'), 'utf8').catch(error => {
-    if (error.code !== 'ENOENT') throw error;
-    return '';
-  });
-  for (const line of previous.split('\n').filter(Boolean)) {
-    const row = JSON.parse(line) as Evaluated;
+  for await (const row of completedRows(join(out, 'test.jsonl'))) {
     if (rows.has(row.taskId)) throw new Error('Duplicate completed test result');
     accept(row);
   }
@@ -109,6 +122,7 @@ export async function evaluateConcurrent(options: {
   };
   const status = (state: string) => save(join(out, 'status.json'), {
     status: state, completed: rows.size, planned: tasks.length, active,
+    correct: [...rows.values()].reduce((n, r) => n + r.score, 0),
     concurrency, failed: errors.length, updatedAt: new Date().toISOString(),
   });
   await status('running');

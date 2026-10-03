@@ -57,9 +57,10 @@ def status(out):
             for candidate in sorted((folder/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1])):
                 directory=folder/'round-tests'/candidate.stem
                 summary=read(directory/'summary.json',{})
-                rows=list(jsonl(directory/('test.jsonl' if method=='MFlow' else 'results.jsonl'))) if (directory/('test.jsonl' if method=='MFlow' else 'results.jsonl')).exists() else []
+                progress=read(directory/'status.json',{})
+                rows=[] if 'correct' in progress or summary else list(jsonl(directory/('test.jsonl' if method=='MFlow' else 'results.jsonl'))) if (directory/('test.jsonl' if method=='MFlow' else 'results.jsonl')).exists() else []
                 entry['roundTests'].append({'round':int(candidate.stem.split('-')[-1]),'status':'completed' if summary else jobs.get('jobs',{}).get(f'{method}/round-tests/{candidate.stem}',{}).get('status','queued'),
-                    'completed':summary.get('count',len(rows)),'accuracy':summary.get('accuracy',summary.get('passRate',sum(r['score'] for r in rows)/len(rows) if rows else None)),
+                    'completed':summary.get('count',progress.get('completed',len(rows))),'accuracy':summary.get('accuracy',summary.get('passRate',progress['correct']/progress['completed'] if progress.get('completed') and 'correct' in progress else sum(r['score'] for r in rows)/len(rows) if rows else None)),
                     'output':str(directory),'purpose':'observation-only'})
         if method=='MFlow':
             entry['cost']={}
@@ -164,11 +165,12 @@ def main():
     (out/'bridge.json').write_text(json.dumps({'port':int(port)})+'\n')
     legacy=str(ROOT.parent/'MFlow-baselines/.venv-legacy/bin/python');aflow=str(ROOT.parent/'MFlow-baselines/.venv-aflow/bin/python')
     node=['node','--env-file-if-exists=.env','dist/src/cli.js']
+    aflow_adapter=os.environ.get('MFLOW_AFLOW_RUNNER','baselines/automation_aflow.py')
     search=out/'MFlow/search';test=out/'MFlow/test'
     commands={
       'MFlow':[(node+['search','--benchmark',a.benchmark,'--config',str(out/'search-config.json'),'--out',str(search),'--source',str(ROOT.parent/'MFlow-baselines/sources/AFlow'),'--python',aflow]+(['--resume'] if (search/'manifest.json').exists() else [])),
                (node+['evaluate','--benchmark',a.benchmark,'--bundle',str(search/'best.json'),'--out',str(test),'--concurrency',str(config.get('concurrency',4 if env['MFLOW_MODEL']=='qwen3.5-9b' else 24))]+(['--resume'] if (test/'manifest.json').exists() else []))],
-      'AFlow':[[aflow,'baselines/automation_aflow.py']],
+      'AFlow':[[aflow,aflow_adapter]],
       **{m:[[legacy,'baselines/automation_run.py',m,'--phase','test','--concurrency',str(a.legacy_concurrency)]] for m in ('DyLAN','EvoAgent','AutoAgents')},
     }
     if math:
@@ -217,7 +219,7 @@ def main():
                 if method=='MFlow':
                     commands[name]=[node+['evaluate','--benchmark',a.benchmark,'--bundle',str(candidate),'--out',str(out/name),'--concurrency',str(config.get('concurrency',4))]]
                 else:
-                    commands[name]=[[aflow,*(['baselines/aflow.py','--phase','search-test'] if math else ['baselines/automation_aflow.py']),'--test-round',candidate.stem.split('-')[-1],'--test-out',str(out/name)]]
+                    commands[name]=[[aflow,*(['baselines/aflow.py','--phase','search-test'] if math else [aflow_adapter]),'--test-round',candidate.stem.split('-')[-1],'--test-out',str(out/name)]]
                 # The evaluator creates its own output directory/immutable manifest.
                 launch(name,0);break
         return pending_rounds

@@ -1,0 +1,13 @@
+# Local experiment recovery — 2026-10-03
+
+Both v5 comparisons exhausted the configured provider balance (HTTP 402). The supervisors were stopped, with job receipts saved as `provider-outage-20261003.json`. After the user confirmed recharge, the same frozen snapshots resumed successfully. Completed results and failed-call accounting are retained.
+
+An independent engineering failure stopped MFlow's AutomationBench round-1 observer at 147/600: its full `test.jsonl` was 2,198,409,859 bytes, exceeding Node's whole-file read limit. Serial and concurrent evaluators now stream completed rows and retain only scores/token summaries plus full-row conflict fingerprints in memory. Original executions and complete result rows remain on disk; wrong answers remain completed results. Progress includes a correct count so monitoring need not parse gigabytes of execution traces.
+
+For existing immutable snapshots, `scripts/evaluation_io_repair.mjs` applies the compiled evaluation I/O fix only to the `evaluate` entrypoint. `MFLOW_EVALUATION_IO_REPAIR` points to a receipt containing the original module, replacement module and both SHA-256 hashes. The hook validates both files before loading. Search, actors, prompts, grading, datasets and registry Ditto are unchanged. The repair and scheduler have separate versioned receipts; original experiment manifests are retained without modification.
+
+Regression checks cover streaming without `readFile(test.jsonl)`, trace preservation on disk, conflict detection, and checksum/entrypoint restrictions on the repair. Model degeneration and context-limit failures remain scored outcomes; provider failures resume without counting unfinished tasks as completed. Partial test scores must not guide search or prompt tuning.
+
+AFlow also propagated a transport failure before its other evaluation threads finished. During interpreter shutdown, 45 search episodes in round 5 / pass 1 caught executor-shutdown errors as ordinary episode failures. The adapter now drains already-started threads and stops scheduling on an infrastructure failure. Those 45 result/world checkpoints (including five provisionally scored successes) were archived for rerun; all cost records remain. No test record or genuine model failure was removed. Round 5 had not completed or entered selection. The archive and exact IDs are in `engineering-repair-20261003/recovery.json`.
+
+`scripts/aflow_drain_repair.py` supports these frozen runs through a separately recorded, checksum-verified replacement of only `evaluate_static`; actor and workflow functions remain from the original snapshot. The scheduler receives its path as `MFLOW_AFLOW_RUNNER` and the receipt as `MFLOW_AFLOW_DRAIN_REPAIR`.

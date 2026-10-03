@@ -112,9 +112,16 @@ def episode(number,repeat,phase,task):
 
 async def evaluate_static(number,repeat,strategy,concurrency,phase='search'):
     rows=tasks('search' if phase=='search' else 'test');gate=asyncio.Semaphore(concurrency)
+    failure=None
     async def run(task):
-        async with gate:return await asyncio.to_thread(episode,number,repeat,phase,task)
-    results=await asyncio.gather(*(run(t) for t in rows))
+        nonlocal failure
+        async with gate:
+            if failure is not None:raise failure
+            try:return await asyncio.to_thread(episode,number,repeat,phase,task)
+            except (TransportFailure,Exception) as error:
+                failure=error;raise
+    results=await asyncio.gather(*(run(t) for t in rows),return_exceptions=True)
+    if failure is not None:raise failure
     return {'score':sum(r['score'] for r in results)/len(results),'meanPartialCredit':sum(r['partialCredit'] for r in results)/len(results),'meanTokens':sum(r['tokens'] for r in results)/len(results),'tokens':sum(r['tokens'] for r in results),
             'organizationSummary':{'staticWorkflow':number,'evaluated':len(results)},
             'failures':[{'taskId':r['taskId'],'question':t['prompt'],'prediction':r['answer'],'partialCredit':r['partialCredit'],**({'referenceAnswer':t['answer']} if DATASET=='HLE' and phase=='search' else {})} for r,t in zip(results,rows) if not r['score']]}

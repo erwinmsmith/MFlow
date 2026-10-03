@@ -19,6 +19,28 @@ from repairs import parse_roles, validate_workflow, validate_role_plan, install_
 
 
 class AdapterTests(unittest.TestCase):
+    def test_aflow_transport_failure_drains_threads_and_does_not_schedule_more_tasks(self):
+        import asyncio
+        import threading
+        import automation_aflow as adapter
+        started=threading.Event();release=threading.Event();calls=[];finished=[]
+        def episode(number,repeat,phase,task):
+            calls.append(task['id'])
+            if task['id']=='a':
+                started.wait(2);raise common.TransportFailure('fixture outage')
+            started.set();release.wait(2);finished.append(task['id'])
+            return {'score':1,'partialCredit':1,'tokens':1,'answer':'fixture'}
+        async def check():
+            pending=asyncio.create_task(adapter.evaluate_static(1,0,{},2))
+            try:
+                await asyncio.to_thread(started.wait,2);await asyncio.sleep(.05)
+                self.assertFalse(pending.done())
+            finally:release.set()
+            with self.assertRaises(common.TransportFailure):await pending
+        with patch.object(adapter,'tasks',return_value=[{'id':i} for i in ('a','b','c')]),patch.object(adapter,'episode',episode):
+            asyncio.run(check())
+        self.assertEqual(calls,['a','b']);self.assertEqual(finished,['b'])
+
     def test_round_observers_drain_every_candidate_without_mixing_final_tests(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('experiment',common.ROOT/'scripts/automation_experiment.py')
