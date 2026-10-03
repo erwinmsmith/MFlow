@@ -1,5 +1,6 @@
 import type { StateCheckpoint } from "@codesoul-co/ditto";
 import { z } from "zod";
+import { toolProgramSchema, type ToolProgram } from './tool-program.js';
 
 export const actions = [
   "CONTINUE",
@@ -63,6 +64,7 @@ export const agentTemplateSchema = z.object({
   composition: z.string().min(1),
 }).strict();
 export const organizationSchema = z.object({
+  toolLibrary: z.array(toolProgramSchema).optional(),
   initialAgents: z.array(profileSchema).min(1),
   agentTemplates: z.array(agentTemplateSchema).optional(),
   initialBindings: z.record(z.string(), z.string()).optional(),
@@ -219,6 +221,7 @@ export interface Execution {
   environment?: { contract: string; world: unknown };
   /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
   orchestration?: {
+    tools?: { creatorId: string; definition: ToolProgram; hash: string; origin: 'library' | 'generated' }[];
     programs?: { agentId: string; composition: string; origin: 'template' | 'generated'; templateId?: string }[];
     graphs: { id: string; nodes: { id: string; type: string; dependencies: string[] }[]; inputs: Record<string, unknown>; outputs: unknown }[];
     lifecycle: { action: string; agentId: string; parentId?: string; afterGraph: number; profile?: AgentProfile; templateId?: string }[];

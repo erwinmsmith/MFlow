@@ -210,6 +210,8 @@ Consolidation 只接收任务输入与 agent 输出，不接收评分或参考�
 
 最新搜索协议见 [v5：异构 MAS 配置、父节点执行图继承与动态策略](docs/search-v5.md)。
 
-当前实验实现：[v8 完整文本推理与动态 MAS](docs/search-v8.md)。该版借用 AFlow 验证搜索产物初始化，比较时需要披露迁移先验；持久化工具创建仍待 Ditto 公共包支持。
+MATH v8 历史实验：[完整文本推理与动态 MAS](docs/search-v8.md)。该版借用 AFlow 验证搜索产物初始化，比较时需要披露迁移先验。
+
+当前代码支持[多结构初始化与动态工具搜索](docs/dynamic-tools-and-topologies.md)：树状分解、并行与跨 agent 节点交织，以及通过公开 Ditto 注册、调用和冻结参数化工具；inference 可按搜索规则创建题内新工具与库外 subagent。
 
 HLE 的五框架协议、图片/工具接入和远端运行命令见 [HLE experiment](docs/hle-experiment.md)。

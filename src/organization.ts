@@ -26,7 +26,7 @@ export function organizationEvidence(execution: Execution) {
   }
   return {
     agents: execution.agents, actions, noops,
-    ...(native ? { graphs, nodeCalls, nodeFailures, lifecycle: native.lifecycle, programs: native.programs,
+    ...(native ? { graphs, nodeCalls, nodeFailures, lifecycle: native.lifecycle, programs: native.programs, tools: native.tools,
       executedAgents: [...new Set(native.graphs.flatMap(g => g.nodes.map(n => n.id.split('/')[0])))],
       publishedAnswers: execution.outputs.map(o => ({ agentId: o.agentId, answer: o.output.candidate_answer })),
     } : {}),

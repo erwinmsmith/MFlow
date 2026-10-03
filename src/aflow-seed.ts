@@ -1,3 +1,4 @@
+import { toolDesignInstruction } from './tool-program.js';
 import { organizationSchema, rootProfile, compositionNodes, type Task } from './types.js';
 import { FACTORY_PROMPT } from './prompts.js';
 
@@ -184,11 +185,13 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 /** Multiple measured roots; selection and all descendants use search data only. */
 export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], names?: string[]) {
   const seed = benchmarkSeed(tasks);
-  if (!['automationbench','hle'].includes(tasks[0].metric)) return [{ name: 'default', ...seed }];
-  const academic=tasks[0].metric==='hle';
-  const planAssignment=academic?'Identify the subject, exact assumptions, viable reasoning approaches and decisive checks. Do not give a guessed answer.':'Produce a dependency plan and verification checklist.';
-  const executeAssignment=academic?'Solve the original question using the plan as a proposal; verify its decisive steps and return the required academic answer format.':'Execute the plan against the actual APIs and verify requested effects.';
+  const extended=['automationbench','hle'].includes(tasks[0].metric);
+  const academic=tasks[0].metric!=='automationbench';
+  const availableTools=[...new Set(seed.organization.agentTemplates!.flatMap(t=>t.profile.tools))];
+  const planAssignment=academic?`Plan this ${seed.kind} task: identify exact assumptions, specification constraints, viable approaches and decisive checks. Do not invent external evidence or hidden tests.`:'Produce a dependency plan and verification checklist.';
+  const executeAssignment=academic?'Solve the original question using the plan as a proposal; verify its decisive steps and preserve the original task output contract.':'Execute the plan against the actual APIs and verify requested effects.';
   const auditAssignment=academic?'Identify alternative methods, ambiguous assumptions, counterexamples and exact checks for this question.':'Plan exact postcondition checks and protection against duplicate effects.';
+  const planningPrompts={...seed.prompts,retrieve:`Analyze the supplied ${seed.kind} task and assigned branch only. Return a concrete plan, dependency analysis or critique. Do not produce the final task answer or claim unexecuted tool effects. Respect original constraints; the executor will produce the final answer.`};
   const single = `return loop({id:'single',plan:function*(ctx){return (yield* ctx.runAgent('root')).candidate_answer;}});`;
   const planned = structuredClone(seed.organization);
   const planner = { ...planned.agentTemplates![0], id: 'planner', description: academic?'Design a subject-specific method and decisive checks.':'Plan exact dependencies and postconditions without making writes.',
@@ -199,23 +202,23 @@ export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], name
   planned.initialAgents.push({ id: 'planner', ...planner.profile });
   planned.initialBindings!.planner = 'planner';
   const planExecute = `return loop({id:'plan-execute',plan:function*(ctx){
-    const plan=yield* ctx.runAgent('planner',${JSON.stringify(planAssignment)}); ctx.dormant('planner');
+    const plan=yield* ctx.runAgent('planner',${JSON.stringify(planAssignment)},'retrieve'); ctx.dormant('planner');
     return (yield* ctx.runAgent('root',{plan,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
   }});`;
   const parallel = structuredClone(planned);
   parallel.initialAgents.push({...parallel.initialAgents[1],id:'auditor',objective:auditAssignment,capability:academic?'Independent method and assumption checking':'Independent effect and consistency planning'});
   parallel.initialBindings!.auditor='planner';
   const parallelPlan = `return loop({id:'parallel-plan',plan:function*(ctx){
-    const g=graph('parallel-planning').node('planner/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner',${JSON.stringify(planAssignment)}),false,'text'))
-      .node('auditor/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor',${JSON.stringify(auditAssignment)}),false,'text'));
+    const g=graph('parallel-planning').node('planner/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner',${JSON.stringify(planAssignment)},'retrieve'),false,'text'))
+      .node('auditor/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor',${JSON.stringify(auditAssignment)},'retrieve'),false,'text'));
     const out=yield* graphStep(g,null,{concurrency:2});
     const plans=['planner','auditor'].map(id=>ctx.publishText(id,ctx.unwrap(out[id+'/plan']).message.content,'raw'));
     ctx.dormant('planner');ctx.dormant('auditor');
     return (yield* ctx.runAgent('root',{plans,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
   }});`;
   const adaptive = structuredClone(seed);
-  adaptive.prompts.factory = `Design a task-local subagent for this ${academic?'academic question':'workflow'}. Return JSON {profile,composition} only.
-profile has exactly id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. reasoning must be one of cot, long-cot, react, tot, got, self-consistency. private_context contains brief method instructions, never a solved answer, long derivation or copy of the task. Do not solve the question during design. Available tools: ${academic?'arithmetic, python, web_search':'api_search, api_fetch, base64_encode'}. Available nodes: ${compositionNodes.join(', ')}.
+  adaptive.prompts.factory = `Design a task-local subagent for this ${seed.kind} task. Return JSON {profile,composition} only.
+profile has exactly id (use specialist), objective, capability, private_context, tools, nodes, reasoning, expected_output, stop_condition. reasoning must be one of cot, long-cot, react, tot, got, self-consistency. private_context contains brief method instructions, never a solved answer, long derivation or copy of the task. Do not solve the question during design. Available tools: ${availableTools.join(', ')}. Available nodes: ${compositionNodes.join(', ')}.
 composition is JavaScript source returning a public Ditto loop({id,plan:function*(ctx){...}}); the generator returns an AgentOutput object, never a string. Use ctx.self for node IDs; ctx.task contains only id/prompt, ctx.evidence the assignment.
 Build graph/loop structure and reasoning appropriate to this task's ${academic?'subject, uncertainties and competing approaches':'concrete API dependencies'}. It may delegate recursively with ctx.spawn(profile,parentId,composition) and yield* ctx.runAgent. Tools execute only through native INTERACTION.ACT.TOOL and INTERACTION.OBSERVE; no imports/process/network/eval.
 For SAMPLE use ctx.request(id,ctx.textMessages(id,ctx.evidence,ctx.prompt),true,'text'); ctx.unwrap checks node success. Preserve assistant actionRequests metadata and tool actionRequestId. ctx.publishText(id,text,'raw') returns AgentOutput.
@@ -224,7 +227,7 @@ This valid JSON example illustrates the interface. Adapt the profile and graph t
 ${JSON.stringify({profile:{id:'specialist',...seed.organization.agentTemplates![0].profile,private_context:'Choose a method and use actual tools for decisive checks; preserve observed evidence.'},composition:seed.organization.agentTemplates![0].composition})}`;
   adaptive.composition = `return loop({id:'adaptive-factory',plan:function*(ctx){
     const node='root/factory';
-    let messages=ctx.textMessages('root',${JSON.stringify(academic?'Design a subject-specific subagent and internal graph suited to this question; it may reason, compute or research and should resolve the decisive uncertainty.':'Design a distinct subagent to execute this task; choose its actual internal graph and capability.')},'factory'),design;
+    let messages=ctx.textMessages('root',${JSON.stringify(academic?'Design a task-specific subagent and internal graph; preserve the original output contract and use only available tools to resolve the decisive uncertainty.':'Design a distinct subagent to execute this task; choose its actual internal graph and capability.')},'factory'),design;
     for(let attempt=0;attempt<3;attempt++){
       const g=graph('factory').node(node,'INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
       const result=yield* graphStep(g,null);
@@ -239,16 +242,87 @@ ${JSON.stringify({profile:{id:'specialist',...seed.organization.agentTemplates![
     ctx.spawnTemplate('reviewer','reviewer','root');
     const review=yield* ctx.runAgent('reviewer',{candidate:executed,instruction:${JSON.stringify(academic ? 'Verify the decisive step using independent evidence or computation when useful. Correct concrete errors; do not restate speculation as fact.' : 'Inspect actual effects against the original task. Repair only missing or incorrect effects; preserve successful writes and never duplicate records.') }},'review');
     ctx.dormant('reviewer');
-    ${academic ? String.raw`function answer(text){return (text.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nConfidence:|$)/i)?.[1] ?? '').trim().replace(/\s+/g,' ');}
+    ${academic ? `function answer(text){return ${seed.dataset==='HLE' ? String.raw`(text.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nConfidence:|$)/i)?.[1] ?? '').trim().replace(/\s+/g,' ')` : seed.kind==='mathematical reasoning' ? "ctx.answerKey(text)" : "text.trim()"};}
     if(executed.candidate_answer && review.candidate_answer && (!answer(executed.candidate_answer) || answer(executed.candidate_answer)!==answer(review.candidate_answer))){
       const final=yield* ctx.runAgent('root',{candidate:executed,review,instruction:'Resolve the concrete disagreement by a decisive check, not majority agreement.'},'integrate');
       return final.candidate_answer || review.candidate_answer;
     }` : ''}
     return review.candidate_answer || executed.candidate_answer;
   }});`;
+  // Cross-agent dependencies are native edges in one graph, not a serial role list.
+  const diamond = `return loop({id:'cross-review',plan:function*(ctx){
+    const g=graph('cross-review')
+      .node('planner/propose','INFER.REASONING.SAMPLE',[],()=>ctx.request('planner',ctx.textMessages('planner',${JSON.stringify(planAssignment)},'retrieve'),false,'text'))
+      .node('auditor/propose','INFER.REASONING.SAMPLE',[],()=>ctx.request('auditor',ctx.textMessages('auditor',${JSON.stringify(auditAssignment)},'retrieve'),false,'text'))
+      .node('planner/check','INFER.REASONING.SAMPLE',['auditor/propose'],(_,out)=>ctx.request('planner',ctx.textMessages('planner',{proposal:ctx.unwrap(out['auditor/propose']).message.content,instruction:'Find concrete gaps or dependencies in the other branch. Provide corrections.'},'retrieve'),false,'text'))
+      .node('auditor/check','INFER.REASONING.SAMPLE',['planner/propose'],(_,out)=>ctx.request('auditor',ctx.textMessages('auditor',{proposal:ctx.unwrap(out['planner/propose']).message.content,instruction:'Challenge the other branch using constraints, counterexamples or postconditions.'},'retrieve'),false,'text'));
+    const out=yield* graphStep(g,null,{concurrency:2});
+    const evidence=Object.fromEntries(Object.entries(out).map(([id,value])=>[id,ctx.unwrap(value).message.content]));
+    ctx.dormant('planner');ctx.dormant('auditor');
+    return (yield* ctx.runAgent('root',{evidence,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
+  }});`;
+  const treeOrganization=structuredClone(planned);
+  treeOrganization.initialAgents=treeOrganization.initialAgents.filter(a=>a.id==='root');
+  treeOrganization.initialBindings={root:'solver'};
+  const tree = `return loop({id:'task-tree',plan:function*(ctx){
+    const messages=[{role:'system',content:'Decompose the supplied task into complementary branches. Return JSON {branches:[{objective:string,subtasks:string[]}]}. Choose the number of branches and subtasks to fit this task; do not solve it or claim tool actions. Respect its original output contract.'},
+      {role:'user',content:JSON.stringify(ctx.task)}];
+    let plan;
+    for(let attempt=0;attempt<3;attempt++){
+      const split=graph('decompose').node('root/decompose','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
+      const out=yield* graphStep(split,null);
+      if(out['root/decompose'].status!=='success'){ctx.failedAgent('root',out['root/decompose'].error);break;}
+      const response=ctx.unwrap(out['root/decompose']);
+      try{
+        const proposed=JSON.parse(response.message.content);
+        if(!proposed || !Array.isArray(proposed.branches) || proposed.branches.some(b=>!b || typeof b.objective!=='string' || !Array.isArray(b.subtasks) || b.subtasks.some(x=>typeof x!=='string')))throw new Error('Expected branches:[{objective:string,subtasks:string[]}]');
+        plan=proposed;break;
+      }catch(error){if(attempt===2){ctx.failedAgent('root',String(error));break;}messages.push(response.message,{role:'user',content:'Repair only the decomposition JSON contract: '+String(error)});}
+    }
+    if(!plan)return (yield* ctx.runAgent('root','Decomposition failed; solve directly with the available capabilities.')).candidate_answer;
+    let g=graph('tree-analysis');const leaves=[];
+    for(const [index,branch] of plan.branches.entries()){
+      const id='branch-'+index;ctx.spawnTemplate('planner',id,'root');
+      ctx.reconfigure(id,{...ctx.profile(id),objective:branch.objective});
+      g=g.node(id+'/plan','INFER.REASONING.SAMPLE',[],()=>ctx.request(id,ctx.textMessages(id,branch.objective,'retrieve'),false,'text'));
+      leaves.push(id+'/plan');
+      for(const [part,assignment] of branch.subtasks.entries()){
+        const child=id+'-leaf-'+part;ctx.spawnTemplate('planner',child,id);
+        ctx.reconfigure(child,{...ctx.profile(child),objective:assignment});
+        g=g.node(child+'/analyze','INFER.REASONING.SAMPLE',[id+'/plan'],(_,out)=>ctx.request(child,ctx.textMessages(child,{assignment,parentPlan:ctx.unwrap(out[id+'/plan']).message.content},'retrieve'),false,'text'));
+        leaves.push(child+'/analyze');
+      }
+    }
+    const evidence=leaves.length?yield* graphStep(g,null,{concurrency:leaves.length}):{};
+    const branches=leaves.map(id=>({id,analysis:ctx.unwrap(evidence[id]).message.content}));
+    for(const agent of ctx.agents)if(agent.profile.id!=='root')ctx.dormant(agent.profile.id);
+    return (yield* ctx.runAgent('root',{branches,instruction:${JSON.stringify(executeAssignment)}})).candidate_answer;
+  }});`;
+  const toolFactory=structuredClone(seed);
+  toolFactory.organization.initialAgents[0].tools=[...availableTools];
+  toolFactory.organization.initialAgents[0].nodes=[...compositionNodes];
+  const toolSolver=toolFactory.organization.agentTemplates!.find(t=>t.id==='independent')!;
+  toolFactory.organization.initialBindings!.root=toolSolver.id;
+  toolFactory.composition=`return loop({id:'tool-factory',plan:function*(ctx){
+    const messages=[{role:'system',content:${JSON.stringify(toolDesignInstruction)}},
+      {role:'user',content:JSON.stringify({task:ctx.task,availableTools:ctx.profile('root').tools})}];
+    for(let attempt=0;attempt<3;attempt++){
+      const g=graph('tool-design').node('root/design','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',messages,false,'json'));
+      const out=yield* graphStep(g,null);
+      if(out['root/design'].status!=='success'){ctx.failedAgent('root',out['root/design'].error);break;}
+      const response=ctx.unwrap(out['root/design']);
+      try{const proposal=JSON.parse(response.message.content);if(proposal.tool!==null)ctx.registerTool('root',proposal.tool);break;}
+      catch(error){if(attempt===2){ctx.failedAgent('root',String(error));break;}messages.push(response.message,{role:'user',content:'Repair only the tool definition contract: '+String(error)});}
+    }
+    return (yield* ctx.runAgent('root', 'Use new tools only when useful. Check pure tools with generic inputs; validate schemas and read-only preconditions for mutating tools. Never perform dummy writes or send test messages; execute only intended task effects.')).candidate_answer;
+  }});`;
   const all = [{name:'single',...seed,composition:single}, {name:'review',...seed},
-    {name:'plan-execute',...seed,organization:planned,composition:planExecute},
-    {name:'parallel-plan',...seed,organization:parallel,composition:parallelPlan}, {name:'adaptive',...adaptive}];
+    {name:'plan-execute',...seed,prompts:planningPrompts,organization:planned,composition:planExecute},
+    {name:'parallel-plan',...seed,prompts:planningPrompts,organization:parallel,composition:parallelPlan}, {name:'adaptive',...adaptive},
+    {name:'tree',...seed,prompts:planningPrompts,organization:treeOrganization,composition:tree},
+    {name:'cross-review',...seed,prompts:planningPrompts,organization:parallel,composition:diamond},
+    {name:'tool-factory',...toolFactory}];
+  if(!extended)all.unshift({name:'default',...seed});
   if (names?.some(name => !all.some(s => s.name === name)) || names?.length === 0) throw new Error('Unknown or empty MAS initialization');
-  return names ? names.map(name => all.find(s => s.name === name)!) : all;
+  return names ? names.map(name => all.find(s => s.name === name)!) : all.filter(s => extended || s.name !== 'review');
 }

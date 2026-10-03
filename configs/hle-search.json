@@ -6,8 +6,11 @@
   "maxOutputTokens": 393216,
   "initializations": [
     "adaptive",
-    "review",
+    "tree",
     "parallel-plan",
+    "cross-review",
+    "tool-factory",
+    "review",
     "plan-execute",
     "single"
   ]

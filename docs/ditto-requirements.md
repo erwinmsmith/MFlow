@@ -97,7 +97,7 @@ DITTO-004 尚缺的通用能力缩小为：工具参数/隐藏推理/keep-alive 
 
 2026-09-30 实际复现：AutomationBench 开发题 `simple.gmail_invoice_email` 的 AFlow 工具调用持续约 15 分钟，公开 text_delta 只观察到 404 个字符，最终抛出工具参数 JSON 未闭合（position 786428），usage 丢失。需要公开参数增量的调用 ID、字节数/最后更新时间，允许应用检测参数生成的精确重复周期，并在解析失败/取消时保留供应商已返回的 usage。验收包含长参数正常完成、参数重复、截断 JSON 与取消；不能把无文本事件视为无进展。当前不复制解析器；模型输出错误按真实世界状态评分，HTTP/基础设施错误仍停止实验。
 
-## DITTO-005：声明式的隔离代码工具创建与任务局部注册（待支持）
+## DITTO-005：声明式的隔离代码工具创建与任务局部注册（历史需求，见下方复核）
 
 核查版本：registry `@codesoul-co/ditto@0.1.1`，2026-09-29。
 
@@ -146,3 +146,18 @@ MFlow 当前仅通过公开 fetch 注入保存错误详情，将明确的模型�
 当前依赖升级至 registry `@codesoul-co/ditto@0.1.2`（npm tarball `https://registry.npmjs.org/@codesoul-co/ditto/-/ditto-0.1.2.tgz`，Ditto dev 提交 `c8ac380`，main 发布提交 `b6eb649`）。三种 HTTP 协议公开 `reasoning_delta` / `action_delta`；可选 `idleTimeoutMs` 依据实际生成增量刷新，空 SSE 心跳不算生成。MFlow 仅消费这些公共事件，分别记录文本/参数/推理字符数，推理内容不落进度日志；持续生成不受该空闲保护影响。SDK 459 项检查通过。
 
 DITTO-004 剩余通用需求仍为供应商请求 ID、解析失败/取消时已知 usage 及具体字段路径。未知用量保留为未知，不能将预留额度当作实际 token。未实现供应商解析器或复制 Ditto 执行基础设施。
+
+
+## 2026-10-03：DITTO-005 当前搜索语法已可通过公开组合满足
+
+重新追踪 registry `0.1.2` 的 `ToolRegistry.register/call`、`createInteractionWorker({tools: registry})`
+和既有 Python Sandbox 后，确认本次所需的参数化纯计算/已有工具组合无需新执行基础设施。
+MFlow 的工具定义属于应用搜索语法：Zod 校验参数，Python 定义委托现有 `python`，
+Sequence 定义将 JSON 参数绑定后通过同一个公开 registry 调用依赖。不存在宿主动态 eval、
+自写沙箱或替换 Ditto 节点。每题新建 registry，定义随候选/冻结包保存，运行状态不持久化。
+已接入模型生成、题内注册、跨成员授权使用、序列化重载与不同题隔离；见
+[实现和边界](dynamic-tools-and-topologies.md)。此前“必须等待包更新才能搜索任何工具创建”的结论过宽。
+
+DITTO-005 原提议中任意语言/执行环境的统一代码工件构造、通用撤销及资源生命周期管理，
+仍不是发布包的单一声明式接口，本应用没有实现这些基础设施；当前参数化语法无需依赖它们。
+外部可变资源的事务隔离继续列在 DITTO-002，不能把保存工具源定义称为该需求已完成。

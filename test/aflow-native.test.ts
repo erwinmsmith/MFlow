@@ -126,7 +126,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       assert.ok(input.messages[0].content.includes('agentTemplates'));
       assert.ok(input.messages[0].content.includes('RUN_TEMPLATE'));
 
-      value = { organization: initialOrganization, modification: `Change the agent instructions (${proposals}).`, composition: aflowInspiredComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
+      value = { organization: {...initialOrganization,toolLibrary:[{name:'generated_sum',description:'Add parameters',parameters:[{name:'values',description:'Numbers',type:'array',required:true}],implementation:{kind:'sequence',steps:[{tool:'arithmetic',arguments:{operation:'add',values:{$input:'/values'}}}]}}]}, modification: `Change the agent instructions (${proposals}).`, composition: aflowInspiredComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
     } else {
       agents++;
       const candidate = JSON.stringify(input.messages).includes('NATIVE-CANDIDATE-MARKER') || JSON.stringify(input.messages).includes('wrong');
@@ -142,7 +142,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     const search = join(dir, 'tasks.jsonl');
     await writeFile(search, [0, 1, 2, 3].map((i) => JSON.stringify({ id: `train-${i}`, prompt: `fixture ${i}`, answer: String.raw`\boxed{42}`, metric: 'exact', benchmark: 'math' })).join('\n') + '\n');
     const options = { out: join(dir, 'search'), search, source, python,
-      config: { maxRounds: 1, validationRounds: 2, concurrency: 2 },
+      config: { initializations: ['default'], maxRounds: 1, validationRounds: 2, concurrency: 2 },
       model: { model: 'fixture', baseUrl: `http://127.0.0.1:${address.port}`, temperature: 0, seed: 42 } };
     const executionPath = join(options.out, 'round-2/pass-1/0.execution.json');
     let beforeCommit = '';
@@ -162,6 +162,8 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(bundle.strategy.id, 's1');
     const observed = JSON.parse(await readFile(join(options.out, 'round-candidates/round-2.json'), 'utf8'));
     assert.equal(observed.strategy.id, 's2');
+    assert.equal(observed.strategy.organization.toolLibrary[0].name,'generated_sum');
+    assert.deepEqual(JSON.parse(await readFile(join(options.out,'tool-library.json'),'utf8')).tools,[]);
     assert.deepEqual(observed.selectionTaskIds, bundle.selectionTaskIds);
     assert.ok(!JSON.stringify(observed).includes('HIDDEN-LABEL'));
     assert.deepEqual(bundle.pool, initialOrganization.initialAgents);
@@ -170,11 +172,12 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.deepEqual(library.templates, bundle.strategy.organization.agentTemplates);
     assert.equal(library.selectedRound, 1);
     const child = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/strategy.json'), 'utf8'));
-    assert.deepEqual(child.organization, initialOrganization);
+    assert.deepEqual(child.organization, observed.strategy.organization);
     assert.equal(child.composition, aflowInspiredComposition);
     const failed = JSON.parse(await readFile(join(options.out, 'round-2/pass-0/0.json'), 'utf8'));
     assert.equal(failed.solutionEvidence.length, 2);
     assert.equal(failed.actualTokens, 40);
+    assert.equal(failed.organization.tools[0].definition.name,'generated_sum');
     const parentContext = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/parent_context.json'), 'utf8'));
     assert.deepEqual(parentContext.strategy.organization, initialOrganization);
     assert.equal(parentContext.strategy.composition, aflowInspiredComposition);
@@ -240,7 +243,7 @@ test('DROP controller ranks partial F1 and a corrected child using its own datas
   try {
     const search = join(dir, 'tasks.jsonl'), out = join(dir, 'search');
     await writeFile(search, JSON.stringify(task) + '\n');
-    await runAFlowSearch({ search, out, source, python, config: { maxRounds: 1, validationRounds: 1, concurrency: 1 },
+    await runAFlowSearch({ search, out, source, python, config: { initializations: ['default'], maxRounds: 1, validationRounds: 1, concurrency: 1 },
       model: { model: 'fixture', baseUrl: `http://127.0.0.1:${address.port}`, temperature: 0, seed: 42 } });
     const records = JSON.parse(await readFile(join(out, 'DROP/workflows/results.json'), 'utf8'));
     assert.deepEqual(records.map((r: { score: number }) => r.score), [0.67, 1]);
@@ -265,7 +268,7 @@ test('provider unavailability aborts native search without writing zero scores',
   const addr=server.address();assert.ok(addr&&typeof addr!=='string');
   try {
     const search=join(dir,'tasks.jsonl');await writeFile(search,JSON.stringify({id:'fixture',prompt:'fixture',answer:'42',metric:'exact'})+'\n');
-    await assert.rejects(runAFlowSearch({out:join(dir,'search'),search,source,python,config:{maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${addr.port}`,temperature:0,seed:42}}),/controller exited/);
+    await assert.rejects(runAFlowSearch({out:join(dir,'search'),search,source,python,config:{initializations:['default'],maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${addr.port}`,temperature:0,seed:42}}),/controller exited/);
     assert.equal(calls,1);
     await assert.rejects(access(join(dir,'search/round-1/pass-0/0.json')));
     await assert.rejects(access(join(dir,'search/best.json')));
@@ -291,7 +294,7 @@ test('optimizer infrastructure/format failure stops without creating phantom rou
   try{
     const search=join(dir,'tasks.jsonl');await writeFile(search,JSON.stringify({id:'fixture',prompt:'fixture',answer:'42',metric:'exact'})+'\n');
     const out=join(dir,'search');
-    await assert.rejects(runAFlowSearch({out,search,source,python,config:{maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${address.port}`,temperature:0,seed:42}}),/controller exited/);
+    await assert.rejects(runAFlowSearch({out,search,source,python,config:{initializations:['default'],maxRounds:1,validationRounds:1,concurrency:1},model:{model:'fixture',baseUrl:`http://127.0.0.1:${address.port}`,temperature:0,seed:42}}),/controller exited/);
     const checkpoint=JSON.parse(await readFile(join(out,'controller.json'),'utf8'));
     assert.equal(checkpoint.round,1);assert.equal(checkpoint.phase,'generating');
     assert.equal(calls,4); // Solve, review, optimizer, one syntax-only repair.

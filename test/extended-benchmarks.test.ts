@@ -21,8 +21,14 @@ const model = { model: 'fixture', baseUrl: 'https://invalid.example', temperatur
 
 test('multiple MAS roots preserve distinct graphs; a factory creates an executable agent outside the library', async () => {
   const seeds = benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}]);
-  assert.deepEqual(seeds.map(s=>s.name),['single','review','plan-execute','parallel-plan','adaptive']);
+  assert.deepEqual(seeds.map(s=>s.name),['single','review','plan-execute','parallel-plan','adaptive','tree','cross-review','tool-factory']);
   for(const seed of seeds)validateComposition(seed.composition);
+  for(const benchmark of ['automationbench','hle'] as const){
+    const config=JSON.parse(await readFile(`configs/${benchmark}-search.json`,'utf8'));
+    const configured=benchmarkSeeds([{benchmark,metric:benchmark}],config.initializations);
+    assert.deepEqual(new Set(configured.map(s=>s.name)),new Set(seeds.map(s=>s.name)));
+    for(const seed of configured)validateComposition(seed.composition);
+  }
   assert.equal(seeds[2].organization.initialAgents.length,2);
   const seed=seeds[4],template=seed.organization.agentTemplates![0];
   const profile={id:'new-api-specialist',...template.profile,private_context:'NEW-CAPABILITY-MARKER'};
@@ -134,7 +140,7 @@ test('full HLE holdout is disjoint; question images reach newly derived native a
     const images=await Promise.all(search.filter(t=>t.images?.length).map(async task=>({task,size:(await stat(sharedPath(benchmarkHome(),task.images![0].path))).size})));
     const task={...images.sort((a,b)=>b.size-a.size)[0].task,answer:'GRADER_ONLY_IMAGE_REFERENCE'};
     const input=await actorInput(task);assert.deepEqual(Object.keys(input).sort(),['id','imageParts','images','prompt']);
-    const seeds=benchmarkSeeds([task]);assert.equal(seeds.length,5);for(const seed of seeds)validateComposition(seed.composition);
+    const seeds=benchmarkSeeds([task]);assert.equal(seeds.length,8);for(const seed of seeds)validateComposition(seed.composition);
     const seed=seeds[4],template=seed.organization.agentTemplates![0];
     const profile={id:'subject-specialist',...template.profile};let calls=0;
     const agents=new DittoAgents(new MeteredProvider({async invoke(request){

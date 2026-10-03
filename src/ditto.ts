@@ -13,6 +13,7 @@ import {
   stateDigest,
   type BudgetScope,
   type RegisteredTool,
+  ToolRegistry,
 } from "@codesoul-co/ditto";
 import type {
   ModelProvider,
@@ -37,7 +38,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.7/generation-progress", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.8/dynamic-tools", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;
@@ -304,7 +305,7 @@ export class DittoAgents {
   get resourceVersion() {
     return executionVersion;
   }
-  runtime(tools: string[], timeoutMs: number) {
+  runtime(tools: string[], timeoutMs: number, registry?: ToolRegistry) {
     const chosen = this.tools.filter((t) => tools.includes(t.name));
     if (chosen.length !== new Set(tools).size)
       throw new Error("Agent requested an unregistered tool");
@@ -319,11 +320,13 @@ export class DittoAgents {
           defaultProvider: "mflow",
           timeoutMs,
         }),
-        createInteractionWorker({ tools: chosen }),
+        createInteractionWorker({ tools: registry ?? chosen }),
       ],
       sandbox: {
         execute: chosen.some((t) => t.name === 'python'),
-        tools: chosen.map((t) => t.name),
+        // An episode-local registry plus per-profile checks in runComposition
+        // constrain dynamic names; no global tool registry is exposed.
+        tools: registry ? ['*'] : chosen.map((t) => t.name),
         network: [new URL(this.model.baseUrl).origin, ...(chosen.some(t=>t.name==='web_search')?['https://www.bing.com']:[])],
       },
     });

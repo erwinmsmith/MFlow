@@ -1,8 +1,10 @@
 import { createContext, Script } from 'node:vm';
-import { graph, loop, graphStep, type ExecutionGraph, type GraphInvocation, type GraphPlan,
+import { graph, loop, graphStep, ToolRegistry, type ExecutionGraph, type GraphInvocation, type GraphPlan,
   type LoopPlanDefinition, type NodeType } from '@codesoul-co/ditto';
 import { z } from 'zod';
-import { EpisodeExhausted, type DittoAgents } from './ditto.js';
+import { EpisodeExhausted, DittoAgents } from './ditto.js';
+import { createProgramTool, toolProgramSchema, toolDependencies, validateToolLibrary, type ToolProgram } from './tool-program.js';
+import { digest } from './util.js';
 import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, type Execution, type Limits,
   type Strategy, type TaskInput } from './types.js';
 import { PolicyContractError } from './strategy-program.js';
@@ -139,9 +141,26 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
   const programs = new Map<string, LoopPlanDefinition<unknown, unknown>>();
   const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
-  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [] };
+  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
   let peakActive = 0, toolCalls = 0;
+  // Each task owns its registry and source artifacts, including parallel test tasks.
+  const tools = [...agents.tools], registry = new ToolRegistry();
+  agents = new DittoAgents(agents.provider, agents.model, tools);
+  for (const tool of tools) registry.register(tool);
+  validateToolLibrary(strategy.organization.toolLibrary ?? [], tools.map(t => t.name));
+  const countToolCall = () => {
+    if (++toolCalls > limits.maxToolCalls) throw new EpisodeExhausted('Tool call limit reached');
+  };
+  const registerTool = (definition: ToolProgram, creatorId: string, origin: 'library' | 'generated') => {
+    const parsed = toolProgramSchema.parse(definition);
+    validateToolLibrary([parsed], tools.map(t => t.name));
+    const tool = createProgramTool(parsed, registry, countToolCall);
+    registry.register(tool); tools.push(tool);
+    orchestration.tools!.push({ creatorId, definition: parsed, hash: digest(parsed), origin });
+    return parsed.name;
+  };
+  for (const tool of strategy.organization.toolLibrary ?? []) registerTool(tool, 'root', 'library');
   const event = (action: string, agentId: string, parentId?: string) => {
     orchestration.lifecycle.push({ action, agentId, ...(parentId ? { parentId } : {}), afterGraph: orchestration.graphs.length,
       ...(population.get(agentId)?.templateId ? { templateId: population.get(agentId)!.templateId } : {}),
@@ -173,6 +192,15 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get agents() { return structuredClone([...population.values()]); },
     get outputs() { return structuredClone(outputs); },
     get graphs() { return structuredClone(orchestration.graphs); },
+    get tools() { return structuredClone(orchestration.tools); },
+    registerTool: (id: string, definition: ToolProgram) => {
+      const owner = member(id), parsed = toolProgramSchema.parse(definition);
+      if (toolDependencies(parsed).some(name => !owner.profile.tools.includes(name)))
+        throw new PolicyContractError('Tool creation requires the creator to hold every dependency capability');
+      const name = registerTool(parsed, id, 'generated');
+      owner.profile.tools.push(name); event('REGISTER_TOOL', id);
+      return name;
+    },
     profile: (id: string) => structuredClone(member(id).profile),
     spawn: (profile: AgentProfile, parentId = 'root', composition?: string) => {
       const definition = composition === undefined ? undefined : compile(composition, machine.context).definition;
@@ -296,7 +324,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     }
     if (nodeTask.node.startsWith('INFER.')) {
       for (const action of value.actions ?? []) {
-        if (!agent.profile.tools.includes(action.name) || action.target?.kind !== 'tool')
+        if (!agent.profile.tools.includes(action.name) || action.target?.kind !== 'tool' || action.target.toolName !== action.name)
           throw new PolicyContractError(`Agent ${id} requested an unavailable action`);
       }
       // Deployment settings cannot be optimized into another provider/model.
@@ -312,13 +340,14 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     }
     if (nodeTask.node === 'INTERACTION.ACT.TOOL') {
       if (!agent.profile.tools.includes(value.call?.name)) throw new PolicyContractError(`Agent ${id} cannot use tool ${value.call?.name}`);
-      if (++toolCalls > limits.maxToolCalls) throw new EpisodeExhausted('Tool call limit reached');
+      countToolCall();
     }
     return value;
   };
   const before = agents.provider.tokens, callsBefore = agents.provider.calls, recordsBefore = agents.provider.records.length;
   agents.provider.beginEpisode(limits.maxTokens, { runId: task.id, branchId: strategy.id });
-  const runtime = agents.runtime(agents.tools.map(t => t.name), limits.timeoutMs);
+  // Generated names are registered later; the runtime's base capabilities remain fixed.
+  const runtime = agents.runtime(agents.tools.map(t => t.name), limits.timeoutMs, registry);
   const signal = AbortSignal.timeout(limits.timeoutMs);
   const finish = (answer:string,executionError?:string): Execution => ({ taskId: task.id, strategyId: strategy.id, answer, orchestration,
     ...(executionError?{executionError}:{}),trace: [], agents: [...population.values()].map(a => a.profile), outputs,
