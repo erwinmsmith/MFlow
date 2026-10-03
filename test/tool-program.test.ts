@@ -119,6 +119,8 @@ test('native creation reports repairable errors and derives creator identity fro
     if(n<4){
       const args=n===1?{definition:{...program,implementation:{kind:'sequence',steps:[{tool:'missing',arguments:{}}]}}}:n===2?{definition:program,agentId:'victim'}:{definition:program};
       if(n>1)assert.ok(JSON.stringify(input.messages).includes('TOOL_DEFINITION'));
+      if(n===2)assert.match(JSON.stringify(input.messages), /Missing: missing.*Available dependencies: arithmetic/);
+      assert.match(input.actions!.find(a=>a.name==='create_tool')!.description!, /Creator: root.*Available dependency tools: arithmetic.*Python definitions are unavailable/);
       return {message:{role:'assistant' as const,content:''},actionRequests:[{id:'create'+n,name:'create_tool',arguments:args}],finishReason:'action_request' as const,usage:{totalTokens:10}};
     }
     return {message:{role:'assistant' as const,content:String.raw`\boxed{42}`},finishReason:'stop' as const,usage:{totalTokens:10}};
@@ -134,10 +136,15 @@ test('native creation reports repairable errors and derives creator identity fro
 test('generated Python tools execute in the existing public Ditto sandbox',async t=>{
   let image:string;try{image=await pythonImage();}catch{t.skip('Docker Python image unavailable');return;}
   const python:ToolProgram={...program,implementation:{kind:'python',source:'def run(args):\n    return {"twice": args["x"] * 2}'}};
-  const candidate=base();candidate.organization.initialAgents[0].tools=['python'];
-  candidate.composition=callCode(`ctx.registerTool('root',${JSON.stringify(python)});`);
-  const result=JSON.parse((await runtime([createPythonTool(image)]).run(candidate,{id:'python',prompt:'Fixture'})).answer);
-  assert.equal(result.status,'success');assert.equal(JSON.parse(result.content).twice,6);
+  for (const owner of ['root','child']) {
+    const candidate=base();candidate.organization.initialAgents[0].tools=[];
+    candidate.composition=callCode(`${owner==='child'?"ctx.spawn({...ctx.profile('root'),id:'child',tools:[]});":''}ctx.registerTool('${owner}',${JSON.stringify(python)});`,python.name,{x:3},owner);
+    const execution=await runtime([createPythonTool(image)]).run(candidate,{id:'python-'+owner,prompt:'Fixture'});
+    const result=JSON.parse(execution.answer);
+    assert.equal(result.status,'success');assert.equal(JSON.parse(result.content).twice,6);
+    assert.deepEqual(execution.agents.find(a=>a.id===owner)!.tools.sort(),['create_tool',python.name,'python'].sort());
+    assert.equal(execution.orchestration!.tools![0].creatorId,owner);
+  }
 });
 
 test('malformed tree design repairs locally then solves without registering partial artifacts',async()=>{

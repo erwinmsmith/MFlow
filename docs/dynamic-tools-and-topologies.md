@@ -122,3 +122,22 @@ self-consistency、反思/融合、工具创建与调用、Context 加载/选择
 原生 baseline 适配器中的 OSError 现在作为基础设施故障退出，不再作为模型失败评分。
 已确认因磁盘写满导致中断、却被错误提交的结果单独留存失效记录，再从干净题目世界重试；
 正常完成但答错、模型格式错误的记录保留，不能按 test 得分选择性重跑。
+
+## AutomationBench tool creation repair (2026-10-04)
+
+AutomationBench MFlow search now registers the existing isolated Python tool in
+addition to the official API tools. Its immutable image ID is saved in the search
+manifest and frozen bundle; inference uses that same image. With tool creation
+enabled, every initial/spawned/reconfigured agent receives Python when the
+deployment provides it. API write capabilities remain heterogeneous. Other
+baselines retain their original tool configuration; report this MFlow compute
+capability difference in comparisons.
+
+Each create_tool action describes the exact creator, allowed dependency names and
+Python availability. Dependency errors name missing and available capabilities.
+Discovered API endpoints must be passed to api_fetch, never used as registry names.
+This fixes the previous workflow deployment that advertised Python definitions
+without providing Python. It does not remove dependency validation.
+
+The updated MFlow experiment starts a new frozen search run because capabilities
+and model-visible instructions changed; previous search scores are not reused.

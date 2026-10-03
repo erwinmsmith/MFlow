@@ -197,7 +197,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     const parsed = profileSchema.parse(profile);
     if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
     if (strategy.organization!.toolCreation) {
-      parsed.tools = [...new Set([...parsed.tools, 'create_tool'])];
+      parsed.tools = [...new Set([...parsed.tools, 'create_tool', ...(tools.some(t => t.name === 'python') ? ['python'] : [])])];
       parsed.nodes = [...new Set([...(parsed.nodes ?? []), 'INTERACTION.ACT.TOOL' as const, 'INTERACTION.OBSERVE' as const])];
     }
     agents.validateProfile(parsed);
@@ -227,8 +227,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get tools() { return structuredClone(orchestration.tools); },
     registerTool: (id: string, definition: ToolProgram) => {
       const owner = member(id), parsed = toolProgramSchema.parse(definition);
-      if (toolDependencies(parsed).some(name => !owner.profile.tools.includes(name)))
-        throw new PolicyContractError('Tool creation requires the creator to hold every dependency capability');
+      const missing = toolDependencies(parsed).filter(name => !owner.profile.tools.includes(name));
+      if (missing.length)
+        throw new PolicyContractError(`Tool creation requires the creator to hold every dependency capability. Missing: ${missing.join(', ')}. Available dependencies: ${owner.profile.tools.filter(name => name !== 'create_tool').join(', ')}. Use these exact tool names; API endpoints belong in api_fetch arguments, not dependency names.`);
       const name = registerTool(parsed, id, 'generated');
       owner.profile.tools.push(name); event('REGISTER_TOOL', id);
       return name;
@@ -316,7 +317,8 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       generation: { temperature: agents.model.temperature, maxTokens: limits.maxOutputTokens,
         ...(new URL(agents.model.baseUrl).hostname === 'api.deepseek.com' ? {} : { seed: agents.model.seed }) },
       actions: useTools ? agents.tools.filter(t => member(id).profile.tools.includes(t.name)).map(t => ({
-        name: t.name, description: t.description, inputSchema: t.inputSchema, target: { kind: 'tool', toolName: t.name },
+        name: t.name, description: t.description + (t.name === 'create_tool'
+          ? `\nCreator: ${id}. Available dependency tools: ${member(id).profile.tools.filter(name => name !== 'create_tool').join(', ')}. Python definitions are ${member(id).profile.tools.includes('python') ? 'enabled' : 'unavailable; use sequence'}. API endpoints discovered by api_search are URLs for api_fetch, not registered tool names.` : ''), inputSchema: t.inputSchema, target: { kind: 'tool', toolName: t.name },
       })) : [], metadata: { kind: 'agent', agentId: id },
     }),
     unwrap: (value: { status: string; output?: unknown; error?: unknown }) => {

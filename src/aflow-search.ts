@@ -112,15 +112,15 @@ export async function runAFlowSearch(options: {
   const seeds = benchmarkSeeds(tasks, config.initializations), seed = seeds[0];
   const workflow = tasks[0].metric === 'automationbench';
   const webSearch=tasks[0].metric==='hle';
-  const allowedTools = workflow ? automationTools : ['arithmetic', 'python', ...(webSearch?['web_search']:[])];
+  const allowedTools = workflow ? [...automationTools, 'python'] : ['arithmetic', 'python', ...(webSearch?['web_search']:[])];
   const taskInterface = policyInterface + '\nDeployment availableTools: ' + allowedTools.join(', ') + '. create_tool is provided to every agent.';
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
-  const image = workflow ? undefined : await pythonImage();
+  const image = await pythonImage();
   const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>, context: Record<string, unknown> = {}) =>
     new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? '', {
       onProgress: progress => save(join(out, 'requests', `${progress.id}.json`), { ...context, ...progress }),
-    }), undefined, observe), options.model, image ? [arithmeticTool, createPythonTool(image), ...(webSearch?[createBenchmarkWebTool()]:[])] : []);
+    }), undefined, observe), options.model, [...(workflow ? [] : [arithmeticTool]), createPythonTool(image), ...(webSearch?[createBenchmarkWebTool()]:[])]);
   // Check configuration before starting the Python optimizer or creating paid requests.
   makeAgents();
   const source = resolve(options.source);
