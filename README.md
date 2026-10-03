@@ -1,5 +1,4 @@
-# MFlow — 搜索 多agent 派生与组织策略
-
+# MFlow
 搜索一个可复用的组织策略 `π`；推理时，`π` 根据任务中的信息缺口动态组织不同能力的 agent。每个搜索节点是一套完整策略，每条搜索边是一处局部策略修改。
 
 项目使用 npm 发布的 **`@codesoul-co/ditto@0.1.2`**。agent 的 Context、推理、工具调用由 Ditto Worker/Graph/Runtime 执行。没有本地 Ditto 源码依赖、私有路径导入、vendoring、Ditto monkey patch 或直接调用模型的SDK。
