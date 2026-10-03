@@ -357,7 +357,8 @@ export class DittoAgents {
       },
       { role: "user" as const, content: JSON.stringify({ kind, payload }) },
     ],imageTask);
-    const model = { provider: "mflow", model: this.model.model };
+    const model = { provider: "mflow", model: this.model.model,
+      ...(this.model.providerOptions ? { providerOptions: this.model.providerOptions } : {}) };
     const generation = {
       temperature: this.model.temperature,
       ...(new URL(this.model.baseUrl).hostname === "api.deepseek.com"

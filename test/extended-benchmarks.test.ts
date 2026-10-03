@@ -55,6 +55,8 @@ test('HLE remains test-only and grading references enter only the Ditto judge', 
   const provider = new MeteredProvider({ async invoke(input) {
     const text = JSON.stringify(input); calls.push(text);
     const judging = input.metadata?.kind === 'hle-judge';
+    if (judging) assert.deepEqual(input.model.providerOptions?.response_format, { type: 'json_object' });
+    else assert.notDeepEqual(input.model.providerOptions?.response_format, { type: 'json_object' });
     return { message: { role: 'assistant', content: judging ? JSON.stringify({
       extracted_final_answer: 'candidate', reasoning: 'Fixture judgement', correct: 'no', confidence: 60, strict: true,
     }) : 'Explanation: fixture\nAnswer: candidate\nConfidence: 60%' }, finishReason: 'stop', usage: {totalTokens: 10} };
