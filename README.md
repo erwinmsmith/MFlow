@@ -215,3 +215,5 @@ MATH v8 历史实验：[完整文本推理与动态 MAS](docs/search-v8.md)。�
 当前代码支持[多结构初始化与动态工具搜索](docs/dynamic-tools-and-topologies.md)：树状分解、并行与跨 agent 节点交织，以及通过公开 Ditto 注册、调用和冻结参数化工具；inference 可按搜索规则创建题内新工具与库外 subagent。
 
 HLE 的五框架协议、图片/工具接入和远端运行命令见 [HLE experiment](docs/hle-experiment.md)。
+
+AutomationBench 另支持不搜索的 **SingleLLM** 基线：单模型通过 Ditto 工具循环直接完成同一 test，启动方式见 [AutomationBench 实验说明](docs/automationbench-experiment.md)。

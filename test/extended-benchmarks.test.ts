@@ -94,7 +94,7 @@ test('Ditto registered API tools mutate one official world, whose saved checkpoi
   try { tasks = await readTasks('benchmark:automationbench/search'); }
   catch (e) { t.skip(`Local official assets unavailable: ${String(e)}`); return; }
   const task = tasks.find(t => t.reference?.automationTaskId === 'simple.email_sf_contact_phone_update')!;
-  const seed = benchmarkSeed([task]); let n = 0;
+  const seed = benchmarkSeeds([task],['single'])[0]; let n = 0;
   const calls: string[] = [];
   const provider = new MeteredProvider({ async invoke(input) {
     calls.push(JSON.stringify(input)); n++;
@@ -107,6 +107,9 @@ test('Ditto registered API tools mutate one official world, whose saved checkpoi
   } });
   const execution = await executeBenchmark(task, new DittoAgents(provider, model), { ...initialStrategy, ...seed }, limitsSchema.parse({maxTokens: 100000, maxToolCalls: 10}));
   assert.ok(execution.toolEvents.length >= 2);
+  assert.equal(execution.agents.length,1);assert.equal(calls.length,3);
+  assert.equal(execution.orchestration!.lifecycle.some(e=>e.action==='SPAWN'),false);
+  assert.equal(execution.orchestration!.tools!.length,0);
   assert.ok(calls.every(c => !c.includes('initial_state') && !c.includes('assertions')));
   const restored = JSON.parse(JSON.stringify(execution));
   const result = await grade(task, execution.answer, restored);

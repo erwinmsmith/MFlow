@@ -75,3 +75,27 @@ The shared-bridge standby service waits while the original five-method runner is
 The first `a447e90` snapshot is retained separately as a preflight attempt, not combined with formal accuracy results. Real calls exposed a missing output parent directory and argument validation escaping the native tool observation path. The repaired adapter keeps the official schema, returns a public failed ExternalResult with detailed content and a safe error message, and lets native Ditto observe and repair the call. Prompts explicitly require JSON strings/null for API params/body. An integration check executes invalid arguments, model repair and successful official grading. Formal v2 starts all five methods from scratch after this change; held-out tasks have not been evaluated or used for repair.
 
 Preflight usage, interrupted request records and checkpoints remain under the original snapshot. Known usage and requests interrupted before usage was returned must be reported separately; their exact token charge is unavailable. Resume v2 from its own immutable snapshot, rather than importing preflight quality rows.
+
+
+## SingleLLM：直接模型工具调用基线（2026-10-03）
+
+新增可选 `SingleLLM`，复用既有 `seed --initialization single` 和并发 `evaluate`，
+不执行搜索或根据测试结果选取提示词。固定一个 root：模型生成 → Ditto 工具调用/观察 →
+继续生成，直到给出最终结果。没有独立 reviewer、subagent 派生或新工具创建。
+这是一条单模型工具循环基线；AutomationBench 需要实际 API 状态改变，不能用一次纯文本回答代替。
+
+- 与其他方法相同的 DeepSeek Flash、temperature 0、关闭 thinking，以及未搜索的任务专用提示词。
+- 相同的 600 道 test、逐题重置的官方世界、API 发现/执行/base64 工具和官方评分。
+- 模型调用和工具执行均使用 registry Ditto；每题完整成本、错误和断点由现有 evaluator 保存。
+- 默认五框架调度不变；显式选择新增方法，独立输出目录避免与其他实验混写。
+
+```sh
+# 在已固定的代码快照中加载该实验的私有环境后运行；run 目录须独立。
+python3 scripts/automation_experiment.py --benchmark automationbench \
+  --methods SingleLLM --run runs/automationbench-single-llm \
+  --concurrency 16
+# 恢复已有运行时追加 --resume；查看进度使用 --status 和相同 --run。
+```
+
+冻结的初始 bundle 位于 `SingleLLM/seed.json`，结果/进度位于 `SingleLLM/test/`。
+`--status` 显示该方法的通过率、部分得分、实际已知 token 与未知用量；无 search/optimizer 成本。

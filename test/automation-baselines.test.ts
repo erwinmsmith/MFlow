@@ -38,6 +38,17 @@ with tempfile.TemporaryDirectory() as root:
   main()
  assert len(calls)==2 and 'search' in calls[0] and 'evaluate' in calls[1]
  assert list(json.loads((Path(root)/'jobs.json').read_text())['jobs'])==['MFlow']
+ calls.clear()
+ with patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':root}),patch.object(sys,'argv',['runner','--run',root,'--resume','--methods','SingleLLM']),patch('scripts.automation_experiment.subprocess.Popen',Child),patch('scripts.automation_experiment.time.sleep'):
+  main()
+ assert len(calls)==2 and 'seed' in calls[0] and 'evaluate' in calls[1]
+ assert calls[0][calls[0].index('--initialization')+1]=='single'
+ assert json.loads((Path(root)/'scheduler.json').read_text())['phases']=={'SingleLLM':['test']}
+ single=Path(root)/'SingleLLM';(single/'seed.json').write_text('{}');(single/'test').mkdir();(single/'test/manifest.json').write_text('{}')
+ (Path(root)/'jobs.json').write_text(json.dumps({'jobs':{'SingleLLM':{'status':'failed'}}}));calls.clear()
+ with patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':root}),patch.object(sys,'argv',['runner','--run',root,'--resume','--methods','SingleLLM']),patch('scripts.automation_experiment.subprocess.Popen',Child),patch('scripts.automation_experiment.time.sleep'):
+  main()
+ assert len(calls)==1 and 'evaluate' in calls[0] and '--resume' in calls[0]
 `]);
 });
 

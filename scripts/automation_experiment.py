@@ -1,4 +1,4 @@
-"""Run all five complete methods from an immutable code snapshot. No token cap."""
+"""Run selected complete methods from an immutable code snapshot. No token cap."""
 import argparse
 import hashlib
 import json
@@ -18,7 +18,7 @@ def require_disk_space(path):
 
 def prune_progress(out):
     # Cost and resume state live elsewhere; request files are transient diagnostics.
-    directories=[out/'requests',out/'MFlow/search/requests',out/'MFlow/test/requests',
+    directories=[out/'requests',out/'MFlow/search/requests',out/'MFlow/test/requests',out/'SingleLLM/test/requests',
                  *(out/'MFlow/round-tests').glob('round-*/requests')]
     for directory in directories:
         for path in directory.glob('*.json'):
@@ -79,7 +79,7 @@ def status(out):
     overrides=read(out/'method-outputs.json',{})
     recovery=read(out/'recovery.json')
     if recovery:report['recovery']=recovery
-    for method in ('MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'):
+    for method in ('MFlow','AFlow','DyLAN','EvoAgent','AutoAgents','SingleLLM'):
         override=overrides.get(method,{})
         folder=Path(override['output']) if override else out/method;entry={}
         if override:entry['replacement']=override
@@ -113,8 +113,9 @@ def status(out):
             for path in (folder/'search').glob('*/workflows/results.json'):
                 for row in read(path,[]):scores.setdefault(row['round'],[]).append(row['score'])
             entry['searchCurve']=[{'round':number,'completedPasses':len(values),'meanScore':sum(values)/len(values)} for number,values in sorted(scores.items())]
+        if method=='SingleLLM':entry['cost']={'test':cost(r for path in (folder/'test/task-usage').glob('*.json') for r in read(path,[]))}
         for phase in ('pilot','search','test'):
-            file=folder/phase/('test.jsonl' if method=='MFlow' else 'results.jsonl')
+            file=folder/phase/('test.jsonl' if method in ('MFlow','SingleLLM') else 'results.jsonl')
             if file.exists():
                 totals={'evaluations':0,'correct':0,'tokens':0};partial=0
                 for row in jsonl(file):
@@ -169,11 +170,12 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run')
     p.add_argument('--execution-root',type=Path,help='Use an existing immutable actor snapshot with this separately recorded scheduler')
     p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
-    p.add_argument('--methods',nargs='+',choices=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],default=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],help='Resume or run only selected methods; final test follows completed search')
+    p.add_argument('--methods',nargs='+',choices=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents','SingleLLM'],default=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],help='Resume or run only selected methods; final test follows completed search')
     p.add_argument('--legacy-concurrency',type=int,default=1,help='Isolated worker processes per native legacy method')
     p.add_argument('--port',type=int,help='Independent Ditto baseline bridge port');a=p.parse_args()
     if a.concurrency is not None and a.concurrency<1 or a.legacy_concurrency<1:p.error('Concurrency must be positive')
     if a.port is not None and not 1<=a.port<=65535:p.error('Invalid bridge port')
+    if 'SingleLLM' in a.methods and a.benchmark!='automationbench':p.error('SingleLLM currently supports AutomationBench')
     if a.execution_root is not None:ROOT=a.execution_root.resolve()
     math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
@@ -219,6 +221,8 @@ def main():
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
+    single=out/'SingleLLM';bundle=single/'seed.json';single_test=single/'test'
+    commands['SingleLLM']=([] if bundle.exists() else [node+['seed','--benchmark','automationbench','--initialization','single','--out',str(bundle)]])+[node+['evaluate','--benchmark','automationbench','--bundle',str(bundle),'--out',str(single_test),'--concurrency',str(config.get('concurrency',8))]+(['--resume'] if (single_test/'manifest.json').exists() else [])]
     commands={name:commands[name] for name in dict.fromkeys(a.methods)}
     # Scheduling can change without replacing actor code or invalidating search checkpoints.
     # Archive/restart the prior supervisor before switching this receipt.
@@ -236,11 +240,12 @@ def main():
                 available=available_memory_mib()
                 if available>=minimum:break
                 jobs['jobs'][name]={'stage':index,'status':'waiting_for_memory','availableMiB':available,'requiredMiB':minimum};persist();time.sleep(10)
-        if name!='MFlow':start_bridge()
+        if name not in ('MFlow','SingleLLM'):start_bridge()
         (out/name).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
         command=commands[name][index]
         if name=='MFlow' and ((search if index==0 else test)/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
+        if name=='SingleLLM' and 'evaluate' in command and (single_test/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
         child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
     bridge=None
@@ -261,7 +266,7 @@ def main():
         require_disk_space(out)
         prune_progress(out)
         last_prune=time.monotonic()
-        if any(name!='MFlow' for name in commands):start_bridge()
+        if any(name not in ('MFlow','SingleLLM') for name in commands):start_bridge()
         pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
         for name in pending:jobs['jobs'][name]={'status':'queued'}
         persist()
@@ -277,7 +282,7 @@ def main():
                 bridge=None;start_bridge()
             for name,(index,at) in list(retrying.items()):
                 if time.monotonic()>=at:
-                    if not name.startswith('MFlow'):
+                    if name not in ('MFlow','SingleLLM'):
                         reset={'method':name.split('/')[0]}
                         if name=='AFlow':reset.update(taskPrefix='round_' if math else 'round-')
                         request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps(reset).encode(),headers={'Content-Type':'application/json'})
