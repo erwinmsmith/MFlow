@@ -10,10 +10,12 @@ for (const [receiptPath, module] of [
   [process.env.MFLOW_STATE_IO_REPAIR, 'util.js'],
   [process.env.MFLOW_HLE_JUDGE_REPAIR, 'hle-grading.js'],
   [process.env.MFLOW_MODEL_OPTIONS_REPAIR, 'ditto.js'],
+  [process.env.MFLOW_SEARCH_STORAGE_REPAIR, 'aflow-search.js'],
+  [process.env.MFLOW_BRIDGE_STORAGE_REPAIR, 'bridge.mjs'],
 ]) {
   if (!receiptPath) continue;
   const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
-  if (!receipt.original.endsWith('/dist/src/' + module)) throw new Error('Unexpected I/O repair target');
+  if (!receipt.original.endsWith((module === 'bridge.mjs' ? '/baselines/' : '/dist/src/') + module)) throw new Error('Unexpected I/O repair target');
   const readChecked = (path, sha) => {
     const source = readFileSync(path);
     if (createHash('sha256').update(source).digest('hex') !== sha) throw new Error('Evaluation I/O repair checksum mismatch');

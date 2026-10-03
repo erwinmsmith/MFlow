@@ -1,6 +1,6 @@
 // Official controllers keep their control flow; all model calls use published Ditto.
 import { createServer } from 'node:http';
-import { appendFileSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createDitto, createInferWorker, createHttpProvider, createInteractionWorker, graph, Sandbox, runReactFlow } from '@codesoul-co/ditto';
@@ -21,7 +21,7 @@ const append=(file,row)=>appendFileSync(resolve(out,file),JSON.stringify(row)+'\
 const readRows=file=>existsSync(file)?readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse):[];
 let spent=readRows(resolve(out,'usage.jsonl')).reduce((n,r)=>n+r.charged,0),active=0;
 const optimizerFailures=new Map();
-const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,idleTimeoutMs:process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS?Number(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS):undefined,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(resolve(out,'requests',p.id+'.json'),JSON.stringify(p));}});
+const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,idleTimeoutMs:process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS?Number(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS):undefined,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{const path=resolve(out,'requests',p.id+'.json');if(p.state==='completed'){rmSync(path,{force:true});return;}mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(path,JSON.stringify(p));}});
 const automation=config.benchmark==='automationbench',hle=config.benchmark==='hle',dataset=hle?'HLE':'AutomationBench',instruction=hle?hleInstruction:automationInstruction,sessions=new Map(),lookup=new Map();
 const image=automation?undefined:await pythonImage(config.aflowPythonImage);
 if(hle)process.env.MFLOW_HLE_PROTOCOL=config.datasetProtocol;
@@ -59,7 +59,7 @@ const ledgerProvider={async invoke(input,options){
     const u=response?.usage,known=u?.totalTokens??(u?.inputTokens!==undefined&&u?.outputTokens!==undefined?u.inputTokens+u.outputTokens:undefined);
     const charged=known??estimate;spent+=charged;
     append('usage.jsonl',{id,method,kind,phase:`${method}:${phase}`,taskId,charged,usage:u??null,unknownUsage:known===undefined,finishReason:response?.finishReason??'unknown',at:new Date().toISOString()});
-    append('responses.jsonl',{id,method,phase,taskId,message:response?.message??null,inputHash:createHash('sha256').update(JSON.stringify(input.messages)).digest('hex')});
+    append('responses.jsonl',{id,method,phase,taskId,outputHash:createHash('sha256').update(JSON.stringify(response?.message??null)).digest('hex'),inputHash:createHash('sha256').update(JSON.stringify(input.messages)).digest('hex')});
   }
 }};
 // Reuse MFlow's transient retry policy; each attempt still settles in the ledger.

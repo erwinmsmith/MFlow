@@ -1,10 +1,10 @@
-import { mkdir, open, readFile, readdir } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { MeteredProvider } from "./ditto.js";
 import type { Evaluated, Task, Execution } from "./types.js";
-import { append, digest, save } from "./util.js";
+import { append, digest, save, compactExecution } from "./util.js";
 
-// Full traces stay on disk; retaining every execution makes long tests exhaust the heap.
+// Keep compact evidence on disk and only scoring/cost summaries in memory.
 const summary = ({ taskId, score, f1, partialCredit, confidence, inheritedFrom, execution }: Evaluated) =>
   ({ taskId, score, f1, partialCredit, confidence, inheritedFrom,
     execution: { taskId: execution.taskId, tokens: execution.tokens } });
@@ -64,6 +64,7 @@ export async function evaluateFrozen(options: {
       // Write cost first: an interruption must not leave a completed row without known cost.
       await save(join(out, "usage.json"), usage());
       await append(join(out, "test.jsonl"), result);
+      await rm(join(out, 'executions', `${digest(task.id)}.json`), { force: true });
       rows.push(summary(result));
       await append(join(out, "attempts.jsonl"), { taskId: task.id, event: "completed", at: new Date().toISOString() });
     } catch (error) {
@@ -95,7 +96,7 @@ export async function evaluateConcurrent(options: {
   if (valid.size !== tasks.length) throw new Error('Duplicate test task');
   const accept = (row: Evaluated) => {
     if (!valid.has(row.taskId) || row.execution.taskId !== row.taskId) throw new Error('Unexpected test result');
-    const hash = digest(row), previous = fingerprints.get(row.taskId);
+    const hash = digest({ ...row, execution: compactExecution(row.execution) }), previous = fingerprints.get(row.taskId);
     if (previous && previous !== hash) throw new Error('Conflicting test result');
     fingerprints.set(row.taskId, hash);
     rows.set(row.taskId, summary(row));
@@ -111,6 +112,8 @@ export async function evaluateConcurrent(options: {
     const logged = rows.has(row.taskId);
     accept(row);
     if (!logged) await append(join(out, 'test.jsonl'), row);
+    await rm(join(rowDir, name));
+    await rm(join(out, 'executions', `${digest(row.taskId)}.json`), { force: true });
   }
   const remaining = tasks.filter(t => !rows.has(t.id));
   let next = 0, active = 0, writes = Promise.resolve();
@@ -138,6 +141,8 @@ export async function evaluateConcurrent(options: {
         await persist(async () => {
           accept(row);
           await append(join(out, 'test.jsonl'), row);
+          await rm(join(rowDir, `${digest(task.id)}.json`), { force: true });
+          await rm(join(out, 'executions', `${digest(task.id)}.json`), { force: true });
           await append(join(out, 'attempts.jsonl'), { taskId: task.id, event: 'completed', at: new Date().toISOString() });
         });
       } catch (error) {

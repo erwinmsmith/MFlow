@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
@@ -142,7 +144,17 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     const options = { out: join(dir, 'search'), search, source, python,
       config: { maxRounds: 1, validationRounds: 2, concurrency: 2 },
       model: { model: 'fixture', baseUrl: `http://127.0.0.1:${address.port}`, temperature: 0, seed: 42 } };
-    await runAFlowSearch(options);
+    const executionPath = join(options.out, 'round-2/pass-1/0.execution.json');
+    let beforeCommit = '';
+    const originalRm = fs.rm;
+    const capture = t.mock.method(fs, 'rm', async (...args: Parameters<typeof fs.rm>) => {
+      if (String(args[0]) === executionPath) beforeCommit = await readFile(executionPath, 'utf8');
+      return originalRm(...args);
+    });
+    syncBuiltinESMExports();
+    try { await runAFlowSearch(options); }
+    finally { capture.mock.restore(); syncBuiltinESMExports(); }
+    await assert.rejects(access(executionPath));
     assert.equal(agents, 32); assert.equal(proposals, 1);
     const records = JSON.parse(await readFile(join(options.out, 'MATH/workflows/results.json'), 'utf8'));
     assert.deepEqual(records.map((r: {score: number}) => r.score), [1, 1, 0, 0]);
@@ -182,6 +194,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     checkpoint.phase = 'evaluating'; checkpoint.round = 1;
     checkpoint.experience = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/experience.json'), 'utf8'));
     await writeFile(checkpointPath, JSON.stringify(checkpoint));
+    await writeFile(executionPath, beforeCommit);
     await rm(join(options.out, 'round-2/pass-1/0.json'));
     await runAFlowSearch({ ...options, resume: true });
     assert.equal(agents, 32); assert.equal(proposals, 1);

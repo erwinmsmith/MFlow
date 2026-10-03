@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, readdir, mkdir, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -232,6 +232,7 @@ export async function runAFlowSearch(options: {
       }
       row.tokens = agents.provider.tokens + previousUsage.reduce((n, r) => n + r.charged, 0);
       await save(path, row);
+      await rm(join(dir, `${index}.execution.json`), { force: true });
       console.log(JSON.stringify({ round: number, repeat, task: index + 1, score: row.score, tokens: row.tokens, error: row.error }));
       return row;
     });

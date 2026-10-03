@@ -1,6 +1,28 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, rename, appendFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, writeFile, rename, appendFile, rm } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
+import type { Execution } from './types.js';
+
+/** Disk evidence only; live graph inputs/outputs remain available to the strategy. */
+export function compactExecution(execution: Execution): Execution {
+  if (!execution.orchestration) return execution;
+  return { ...execution, orchestration: { ...execution.orchestration,
+    graphs: execution.orchestration.graphs.map(graph => ({ ...graph, inputs: {},
+      outputs: Object.fromEntries(graph.nodes.map(node => {
+        const result = (graph.outputs as Record<string, { status?: string; error?: unknown }>)[node.id];
+        return [node.id, result ? { status: result.status, error: result.error } : {}];
+      })),
+    })),
+  } };
+}
+
+function stored(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const row = value as { execution?: Execution; taskId?: string; answer?: string; orchestration?: unknown };
+  if (row.execution) return { ...row, execution: compactExecution(row.execution) };
+  if (row.taskId && typeof row.answer === 'string' && row.orchestration) return compactExecution(value as Execution);
+  return value;
+}
 
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
@@ -21,9 +43,11 @@ export const digest = (value: unknown) =>
 const saves = new Map<string, Promise<void>>();
 export async function save(path: string, value: unknown) {
   path = resolve(path);
-  const text = JSON.stringify(value, null, 2) + "\n";
+  const completedRequest = basename(dirname(path)) === 'requests' && (value as { state?: string })?.state === 'completed';
+  const text = JSON.stringify(stored(value)) + "\n";
   // Parallel nodes share usage checkpoints. Commit snapshots in invocation order.
   const pending = (saves.get(path) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    if (completedRequest) { await rm(path, { force: true }); return; }
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path + ".tmp", text);
     await rename(path + ".tmp", path);
@@ -34,7 +58,7 @@ export async function save(path: string, value: unknown) {
 }
 export async function append(path: string, value: unknown) {
   await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, JSON.stringify(value) + "\n");
+  await appendFile(path, JSON.stringify(stored(value)) + "\n");
 }
 export class Random {
   constructor(private seed: number) {}

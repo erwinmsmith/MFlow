@@ -3,12 +3,28 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import time
 import urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
+
+def require_disk_space(path):
+    minimum=int(os.environ.get('MFLOW_MIN_FREE_GIB','10'))*1024**3
+    if shutil.disk_usage(path).free<minimum:
+        raise RuntimeError('Insufficient free disk space; experiment paused until storage is reclaimed')
+
+def prune_progress(out):
+    # Cost and resume state live elsewhere; request files are transient diagnostics.
+    directories=[out/'requests',out/'MFlow/search/requests',out/'MFlow/test/requests',
+                 *(out/'MFlow/round-tests').glob('round-*/requests')]
+    for directory in directories:
+        for path in directory.glob('*.json'):
+            try:
+                if path.stat().st_mtime<time.time()-86400:path.unlink()
+            except FileNotFoundError:pass
 
 def read(path,default=None):
     return json.loads(path.read_text()) if path.exists() else default
@@ -237,6 +253,9 @@ def main():
             except OSError:time.sleep(1)
         else:raise RuntimeError('Bridge did not become ready')
     try:
+        require_disk_space(out)
+        prune_progress(out)
+        last_prune=time.monotonic()
         if not hle:start_bridge()
         pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
         for name in pending:jobs['jobs'][name]={'status':'queued'}
@@ -247,6 +266,9 @@ def main():
             for name in pending:launch(name,0)
         observers_pending=round_tests()
         while active or retrying or observers_pending:
+            require_disk_space(out)
+            if time.monotonic()-last_prune>=60:
+                prune_progress(out);last_prune=time.monotonic()
             if bridge is not None and bridge.poll() is not None:
                 bridge=None;start_bridge()
             for name,(index,at) in list(retrying.items()):
