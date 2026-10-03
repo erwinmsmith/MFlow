@@ -1,3 +1,4 @@
+import type { dittoGuide } from './ditto-guide.js';
 import { join } from "node:path";
 import { z } from "zod";
 import { OrganizationRuntime } from "./runtime.js";
@@ -40,6 +41,7 @@ export interface Bundle {
   version: 3;
   executionVersion: string;
   dittoVersion: "0.1.2";
+  dittoGuide?: typeof dittoGuide;
   pythonImage?: string;
   webSearch?: boolean;
   strategy: Strategy;

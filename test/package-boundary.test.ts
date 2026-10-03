@@ -23,7 +23,7 @@ test("production imports use only published Ditto entrypoints and locked registr
       const name = match[1];
       if (name.includes("ditto"))
         assert.ok(
-          allowed.has(name) || name === "./ditto.js",
+          allowed.has(name) || name === "./ditto.js" || name === "./ditto-guide.js",
           `Invalid Ditto import in ${file}: ${name}`,
         );
       assert.ok(

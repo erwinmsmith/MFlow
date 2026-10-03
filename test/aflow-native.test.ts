@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { dittoGuide } from '../src/ditto-guide.js';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
@@ -159,6 +160,8 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     const records = JSON.parse(await readFile(join(options.out, 'MATH/workflows/results.json'), 'utf8'));
     assert.deepEqual(records.map((r: {score: number}) => r.score), [1, 1, 0, 0]);
     const bundle = JSON.parse(await readFile(join(options.out, 'best.json'), 'utf8'));
+    assert.deepEqual(bundle.dittoGuide,dittoGuide);
+    assert.deepEqual(JSON.parse(await readFile(join(options.out,'ditto-guide.json'),'utf8')),dittoGuide);
     assert.equal(bundle.strategy.id, 's1');
     const observed = JSON.parse(await readFile(join(options.out, 'round-candidates/round-2.json'), 'utf8'));
     assert.equal(observed.strategy.id, 's2');
@@ -167,7 +170,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.deepEqual(observed.selectionTaskIds, bundle.selectionTaskIds);
     assert.ok(!JSON.stringify(observed).includes('HIDDEN-LABEL'));
     assert.deepEqual(bundle.pool, initialOrganization.initialAgents);
-    assert.deepEqual(bundle.strategy.organization, initialOrganization);
+    assert.deepEqual(bundle.strategy.organization, {...initialOrganization,toolCreation:true});
     const library = JSON.parse(await readFile(join(options.out, 'agent-library.json'), 'utf8'));
     assert.deepEqual(library.templates, bundle.strategy.organization.agentTemplates);
     assert.equal(library.selectedRound, 1);
@@ -179,7 +182,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(failed.actualTokens, 40);
     assert.equal(failed.organization.tools[0].definition.name,'generated_sum');
     const parentContext = JSON.parse(await readFile(join(options.out, 'MATH/workflows/round_2/parent_context.json'), 'utf8'));
-    assert.deepEqual(parentContext.strategy.organization, initialOrganization);
+    assert.deepEqual(parentContext.strategy.organization, {...initialOrganization,toolCreation:true});
     assert.equal(parentContext.strategy.composition, aflowInspiredComposition);
     assert.equal(parentContext.execution.length, 2);
     assert.equal(parentContext.execution[0].evaluated, 4);

@@ -1,3 +1,4 @@
+import { dittoGuide, assertDittoGuide } from './ditto-guide.js';
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { readFile, mkdir, access, readdir } from "node:fs/promises";
@@ -122,8 +123,10 @@ async function run() {
     const { unrestrictedConfig, aflowConfigSchema } = await import('./aflow-search.js');
     const input: Parameters<typeof benchmarkSeed>[0] = [{ benchmark: name, metric: name }];
     const seed = values.initialization ? benchmarkSeeds(input, [values.initialization])[0] : benchmarkSeed(input);
+    // Direct baselines use only the benchmark's supplied tools; MAS search enables creation.
+    seed.organization.toolCreation = false;
     const config = unrestrictedConfig(aflowConfigSchema.parse({}).maxOutputTokens);
-    const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.2',
+    const bundle: Bundle = { version: 3, executionVersion, dittoVersion: '0.1.2', dittoGuide,
       model: model(42), config, strategy: { ...initialStrategy, id: `${name}-unsearched-seed`,
         composition: seed.composition, organization: seed.organization, prompts: seed.prompts },
       pool: seed.organization.initialAgents, experimentalScope: 'standard-isolated-state-v2', searchDataHash: digest([]),
@@ -426,6 +429,7 @@ async function loadBundle(path: string): Promise<Bundle> {
   )
     throw new Error("Incompatible strategy bundle");
   strategySchema.parse(raw.strategy);
+  if (raw.strategy.organization?.toolCreation || raw.dittoGuide) assertDittoGuide(raw.dittoGuide);
   profileSchema.array().min(1).parse(raw.pool);
   searchConfigSchema.parse(raw.config);
   for (const key of [

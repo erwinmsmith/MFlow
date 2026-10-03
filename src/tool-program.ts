@@ -30,6 +30,7 @@ export function validateToolLibrary(library: ToolProgram[], base: string[]) {
   const names = new Set(base);
   for (const value of library) {
     const tool = toolProgramSchema.parse(value);
+    if (toolDependencies(tool).includes('create_tool')) throw new Error('Tool definitions cannot depend on create_tool');
     if (names.has(tool.name)) throw new Error(`Duplicate tool ${tool.name}`);
     for (const dependency of toolDependencies(tool))
       if (!names.has(dependency)) throw new Error(`Tool ${tool.name} requires earlier registered tool ${dependency}`);
@@ -98,5 +99,5 @@ export function createProgramTool(definition: ToolProgram, registry: ToolRegistr
   };
 }
 
-export const toolDesignInstruction = `Decide whether a small parameterized tool would help this task. Return JSON {tool:null} if existing tools suffice, otherwise {tool:definition}. Do not solve the benchmark in the definition or embed its question, answer or environment state. The tool must be generalizable, with task values supplied as parameters. Never invent an unavailable dependency.
+export const toolDesignInstruction = `Create a small parameterized tool when it helps your current assignment. Call create_tool with {definition}; after successful registration its name is available on your next inference turn. Creation is optional, available throughout execution to every agent, and never a prerequisite for solving. Use existing tools directly when sufficient. Do not solve the benchmark in the definition or embed its question, answer or environment state. The tool must be generalizable, with task values supplied as parameters. Never invent an unavailable dependency or use create_tool as a dependency. Choose a unique generated_ name including your agent ID to avoid collisions with other members.
 A definition has name (generated_ prefix), description, parameters:[{name,description,type,required}], implementation. Parameter types are string,number,integer,boolean,array,object. implementation is either {kind:'python',source:'def run(args): ...'} (only when python is available; return a JSON value, standard library, no network/files/persistent state) or {kind:'sequence',steps:[{tool,arguments}]} using existing tools. JSON argument bindings {$input:'/name'} read supplied parameters, {$step:'/0/path'} reads a prior step's JSON result. The sequence returns the final result, stops on a failed dependency and does not retry side effects. Creation is not correctness evidence: use generic checks for pure tools; for mutating tools check dependency schemas and read-only preconditions, then execute only intended task effects. Never create dummy records or send test messages. Registration and execution use Ditto; never generate host JavaScript, eval, imports or a replacement execution engine.`;

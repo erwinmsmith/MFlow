@@ -1,6 +1,6 @@
 # HLE / DeepSeek Flash comparison
 
-> The five-root description below documents the existing frozen experiment. New code adds tree, cross-review and tool-factory roots; see [the 2026-10-03 update](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
+> The five-root description below documents the existing frozen experiment. New code supports seven MAS topologies with optional tool creation available to every member; see [the 2026-10-04 update](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
 
 2026-10-02: the active comparison moved to [local parallel execution](local-deepseek-20261002.md), using local web retrieval without the hb SSH relay. Server deployment details below describe the previous run.
 

@@ -15,13 +15,14 @@ import { pythonImage } from '../src/python-tool.js';
 import { benchmarkPath, benchmarkHome, sharedPath } from '../src/benchmark-hub.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { validateComposition } from '../src/composition.js';
+import { dittoGuide, assertDittoGuide } from '../src/ditto-guide.js';
 
 const hleTools=['arithmetic','python','web_search'].map(name=>({name,description:'Offline fixture',inputSchema:{type:'object',properties:{}},effects:['read'] as ['read'],validate:()=>{},execute:async()=>{throw new Error('No tool request expected in fixture');}}));
 const model = { model: 'fixture', baseUrl: 'https://invalid.example', temperature: 0, seed: 42 };
 
 test('multiple MAS roots preserve distinct graphs; a factory creates an executable agent outside the library', async () => {
   const seeds = benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}]);
-  assert.deepEqual(seeds.map(s=>s.name),['single','review','plan-execute','parallel-plan','adaptive','tree','cross-review','tool-factory']);
+  assert.deepEqual(seeds.map(s=>s.name),['single','review','plan-execute','parallel-plan','adaptive','tree','cross-review']);
   for(const seed of seeds)validateComposition(seed.composition);
   for(const benchmark of ['automationbench','hle'] as const){
     const config=JSON.parse(await readFile(`configs/${benchmark}-search.json`,'utf8'));
@@ -36,7 +37,12 @@ test('multiple MAS roots preserve distinct graphs; a factory creates an executab
   let n=0;
   const agents=new DittoAgents(new MeteredProvider({async invoke(input){
     n++;const factory=input.metadata?.nodeId==='root/factory';
-    if(factory){assert.equal(input.messages[0].role,'system');assert.match(String(input.messages[0].content),/Do not solve the question during design/);assert.ok(String(input.messages[1].content).startsWith('{"task":'));}
+    if(factory){
+      assert.equal(input.messages[0].role,'system');assert.match(String(input.messages[0].content),/Do not solve the question during design/);
+      assert.ok(String(input.messages[0].content).includes(dittoGuide.text));
+      const payload=JSON.parse(String(input.messages[1].content));assert.equal(payload.guideHash,dittoGuide.sha256);
+      assert.ok(payload.availableTools.some((t:any)=>t.name==='create_tool'&&t.inputSchema));assert.ok(payload.templates.length);
+    } else assert.ok(!JSON.stringify(input.messages).includes('DITTO DESIGN GUIDE'));
     if(input.metadata?.agentId===profile.id)assert.ok(JSON.stringify(input.messages).includes('NEW-CAPABILITY-MARKER'));
     return {message:{role:'assistant',content:factory?JSON.stringify({profile,composition:program}):'Task completed by new program'},finishReason:'stop',usage:{totalTokens:10}};
   }}),model,automationTools.map(name=>({name,description:'Offline fixture',inputSchema:{type:'object',properties:{}},effects:['read'] as ['read'],validate:()=>{},execute:async()=>({status:'success' as const,content:''})})));
@@ -48,6 +54,9 @@ test('multiple MAS roots preserve distinct graphs; a factory creates an executab
   assert.ok(result.orchestration!.graphs.some(g=>g.nodes.some(node=>node.id===profile.id+'/new-specialist-node')));
   assert.equal(result.orchestration!.programs![0].composition,program);
   assert.equal(JSON.stringify(seed.organization),before);
+  assertDittoGuide(JSON.parse(JSON.stringify(dittoGuide)));
+  assert.throws(()=>assertDittoGuide({...dittoGuide,text:dittoGuide.text+' edited'}),/Incompatible frozen/);
+  assert.throws(()=>assertDittoGuide(undefined),/Incompatible frozen/);
   await assert.rejects(runtime.run({...initialStrategy,...seed,composition:`return loop({id:'unsafe',plan:function*(ctx){ctx.spawn(${JSON.stringify(profile)},'root','return process.env;');return '';}});`},{id:'invalid',prompt:'Public request'}),/process is not defined/);
 });
 
@@ -94,7 +103,7 @@ test('Ditto registered API tools mutate one official world, whose saved checkpoi
   try { tasks = await readTasks('benchmark:automationbench/search'); }
   catch (e) { t.skip(`Local official assets unavailable: ${String(e)}`); return; }
   const task = tasks.find(t => t.reference?.automationTaskId === 'simple.email_sf_contact_phone_update')!;
-  const seed = benchmarkSeeds([task],['single'])[0]; let n = 0;
+  const seed = benchmarkSeeds([task],['single'])[0]; seed.organization.toolCreation=false; let n = 0;
   const calls: string[] = [];
   const provider = new MeteredProvider({ async invoke(input) {
     calls.push(JSON.stringify(input)); n++;
@@ -143,7 +152,7 @@ test('full HLE holdout is disjoint; question images reach newly derived native a
     const images=await Promise.all(search.filter(t=>t.images?.length).map(async task=>({task,size:(await stat(sharedPath(benchmarkHome(),task.images![0].path))).size})));
     const task={...images.sort((a,b)=>b.size-a.size)[0].task,answer:'GRADER_ONLY_IMAGE_REFERENCE'};
     const input=await actorInput(task);assert.deepEqual(Object.keys(input).sort(),['id','imageParts','images','prompt']);
-    const seeds=benchmarkSeeds([task]);assert.equal(seeds.length,8);for(const seed of seeds)validateComposition(seed.composition);
+    const seeds=benchmarkSeeds([task]);assert.equal(seeds.length,7);for(const seed of seeds)validateComposition(seed.composition);
     const seed=seeds[4],template=seed.organization.agentTemplates![0];
     const profile={id:'subject-specialist',...template.profile};let calls=0;
     const agents=new DittoAgents(new MeteredProvider({async invoke(request){

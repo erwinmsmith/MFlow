@@ -217,3 +217,5 @@ MATH v8 历史实验：[完整文本推理与动态 MAS](docs/search-v8.md)。�
 HLE 的五框架协议、图片/工具接入和远端运行命令见 [HLE experiment](docs/hle-experiment.md)。
 
 AutomationBench 另支持不搜索的 **SingleLLM** 基线：单模型通过 Ditto 工具循环直接完成同一 test，启动方式见 [AutomationBench 实验说明](docs/automationbench-experiment.md)。
+
+MFlow 搜索与 test 共用[冻结的 Ditto 设计指南](docs/dynamic-tools-and-topologies.md)，所有成员均可在执行中按需创建工具；初始化仅表示 MAS 结构。

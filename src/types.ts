@@ -64,6 +64,7 @@ export const agentTemplateSchema = z.object({
   composition: z.string().min(1),
 }).strict();
 export const organizationSchema = z.object({
+  toolCreation: z.boolean().optional(),
   toolLibrary: z.array(toolProgramSchema).optional(),
   initialAgents: z.array(profileSchema).min(1),
   agentTemplates: z.array(agentTemplateSchema).optional(),

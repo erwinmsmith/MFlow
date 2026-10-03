@@ -1,3 +1,4 @@
+import { dittoGuide } from './ditto-guide.js';
 import {
   createDitto,
   createContextWorker,
@@ -38,7 +39,7 @@ import {
   type Strategy,
 } from "./types.js";
 
-export const executionVersion = stateDigest({ code: "mflow-native-library-v3.8/dynamic-tools", AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
+export const executionVersion = stateDigest({ code: "mflow-native-library-v3.9/per-agent-tool-creation", dittoGuide: dittoGuide.sha256, AGENT_PROMPT, REVIEW_PROMPT, FACTORY_PROMPT, FORMAT_PROMPT });
 
 export interface ModelSettings {
   model: string;

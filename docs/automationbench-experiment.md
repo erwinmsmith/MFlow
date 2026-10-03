@@ -1,6 +1,6 @@
 # AutomationBench / DeepSeek Flash comparison
 
-> The five-root description below documents the existing frozen experiment. New code adds tree, cross-review and tool-factory roots; see [the 2026-10-03 update](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
+> The five-root description below documents the existing frozen experiment. New code supports seven MAS topologies with optional tool creation available to every member; see [the 2026-10-04 update](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
 
 2026-10-02: DeepSeek comparisons moved to [local parallel snapshots](local-deepseek-20261002.md) after hb became unreachable. Use that document for the active progress commands; server snapshots below remain historical records.
 

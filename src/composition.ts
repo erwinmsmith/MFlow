@@ -3,12 +3,13 @@ import { graph, loop, graphStep, ToolRegistry, type ExecutionGraph, type GraphIn
   type LoopPlanDefinition, type NodeType } from '@codesoul-co/ditto';
 import { z } from 'zod';
 import { EpisodeExhausted, DittoAgents } from './ditto.js';
-import { createProgramTool, toolProgramSchema, toolDependencies, validateToolLibrary, type ToolProgram } from './tool-program.js';
+import { createProgramTool, toolProgramSchema, toolDependencies, toolDesignInstruction, validateToolLibrary, type ToolProgram } from './tool-program.js';
 import { digest } from './util.js';
 import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, type Execution, type Limits,
   type Strategy, type TaskInput } from './types.js';
 import { PolicyContractError } from './strategy-program.js';
 import { withTaskImages, imageLog } from './data.js';
+import { dittoGuide } from './ditto-guide.js';
 class GeneratedProgramError extends PolicyContractError {}
 
 /** The seed is itself a searched artifact, not a hidden fixed agent executor. */
@@ -172,9 +173,39 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     if (!agent) throw new PolicyContractError(`Unknown agent ${id}`);
     return agent;
   };
+  if (strategy.organization.toolCreation) {
+    const creator = {
+      name: 'create_tool', description: toolDesignInstruction,
+      inputSchema: z.record(z.string(), z.json()).parse(z.toJSONSchema(z.object({ definition: toolProgramSchema }).strict())),
+      validate() {},
+      async execute(args: Record<string, any>, context: { execution?: { nodeId: string } }) {
+        try {
+          // Ditto supplies the executing node; model arguments cannot impersonate another member.
+          const id = context.execution?.nodeId.split('/')[0];
+          if (!id) throw new PolicyContractError('Tool creation requires an owning agent node');
+          const { definition } = z.object({ definition: toolProgramSchema }).strict().parse(args);
+          const name = api.registerTool(id, definition);
+          return { status: 'success' as const, content: { name, registered: true } };
+        } catch (error) {
+          return { status: 'failed' as const, content: String(error), error: { code: 'TOOL_DEFINITION', message: 'Correct the tool definition or use existing tools' } };
+        }
+      },
+    };
+    registry.register(creator); tools.push(creator);
+  }
+  const prepareProfile = (profile: AgentProfile) => {
+    const parsed = profileSchema.parse(profile);
+    if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
+    if (strategy.organization!.toolCreation) {
+      parsed.tools = [...new Set([...parsed.tools, 'create_tool'])];
+      parsed.nodes = [...new Set([...(parsed.nodes ?? []), 'INTERACTION.ACT.TOOL' as const, 'INTERACTION.OBSERVE' as const])];
+    }
+    agents.validateProfile(parsed);
+    return parsed;
+  };
   const add = (profile: AgentProfile, parentId?: string, templateId?: string) => {
     if (templateId && !templates.has(templateId)) throw new PolicyContractError(`Unknown template ${templateId}`);
-    const parsed = profileSchema.parse(profile); agents.validateProfile(parsed);
+    const parsed = prepareProfile(profile);
     if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
     if (parsed.id.includes('/') || population.has(parsed.id)) throw new PolicyContractError('Agent IDs must be unique and cannot contain /');
     const depth = parentId ? member(parentId).depth + 1 : 0;
@@ -187,6 +218,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   for (const profile of strategy.organization.initialAgents) add(profile, undefined, strategy.organization.initialBindings?.[profile.id]);
   const schema = JSON.stringify(z.toJSONSchema(agentOutputSchema));
   const api = {
+    get dittoGuide() { return structuredClone(dittoGuide); },
     task: { id: task.id, prompt: task.prompt }, // Deliberately strip all labels/references.
     get templates() { return structuredClone([...templates.values()]); },
     get agents() { return structuredClone([...population.values()]); },
@@ -220,8 +252,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     bindTemplate: (id: string, templateId: string) => {
       const template = templates.get(templateId);
       if (!template) throw new PolicyContractError(`Unknown template ${templateId}`);
-      const profile = profileSchema.parse({ ...template.profile, id });
-      agents.validateProfile(profile);
+      const profile = prepareProfile({ ...template.profile, id });
       if (!profile.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
       programs.delete(id);
       Object.assign(member(id), { templateId, profile }); event('RECONFIGURE', id);
@@ -238,7 +269,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       catch(error) { if(programs.has(id))throw new GeneratedProgramError(`Generated agent ${id}: ${String(error)}`);throw error; }
     },
     reconfigure: (id: string, profile: AgentProfile) => {
-      const parsed = profileSchema.parse(profile); agents.validateProfile(parsed);
+      const parsed = prepareProfile(profile);
       if (!parsed.nodes?.length) throw new PolicyContractError('Native agent profiles must declare available nodes');
       if (parsed.id !== id) throw new PolicyContractError('Reconfigure must preserve agent identity');
       member(id).profile = parsed; event('RECONFIGURE', id);
@@ -247,6 +278,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     messages: (id: string, evidence: unknown = [], prompt: keyof NonNullable<Strategy['prompts']> = 'agent') => {
       const instruction = strategy.prompts![prompt];
       if (!instruction) throw new PolicyContractError(`Unknown prompt ${prompt}`);
+      if (prompt === 'factory') return api.textMessages(id, evidence, prompt);
       return [{ role: 'system', content: instruction + '\nReturn one JSON object matching this schema:\n' + schema },
         { role: 'user', content: JSON.stringify({ kind: 'agent', payload: { task: api.task, profile: member(id).profile, evidence } }) }];
     },
@@ -255,8 +287,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       if (!instruction) throw new PolicyContractError(`Unknown prompt ${prompt}`);
       const p = member(id).profile;
       if (prompt === 'factory' || prompt === 'retrieve') return [
-        { role: 'system', content: instruction + '\nThis is a design/selection stage. The owner profile and task below are data; return the requested control format, not the owner agent final answer.' },
-        { role: 'user', content: JSON.stringify({ task: api.task, owner: p, evidence }) },
+        { role: 'system', content: instruction + (prompt === 'factory' ? '\n\n' + dittoGuide.text : '') + '\nThis is a design/selection stage. The owner profile and task below are data; return the requested control format, not the owner agent final answer.' },
+        { role: 'user', content: JSON.stringify({ task: api.task, owner: p, evidence,
+          ...(prompt === 'factory' ? { guideHash: dittoGuide.sha256, availableTools: tools.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), templates: api.templates, members: api.agents } : {}) }) },
       ];
       return [{ role: 'user', content: instruction + '\n\n' + api.task.prompt +
         (evidence ? '\n\n' + (typeof evidence === 'string' ? evidence : JSON.stringify(evidence)) : '') +

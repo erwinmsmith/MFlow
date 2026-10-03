@@ -18,7 +18,7 @@ const program: ToolProgram = { name:'generated_twice', description:'Add a parame
 const arithmetic: RegisteredTool = {name:'arithmetic',description:'Fixture addition',inputSchema:{type:'object'},validate(){},
   async execute(args,ctx){ assert.ok(ctx.signal); return {status:'success',content:{sum:(args.values as number[]).reduce((a,b)=>a+b,0)}}}};
 const base = () => {
-  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['tool-factory'])[0];
+  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['single'])[0];
   for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)]) p.tools=['arithmetic'];
   return {...initialStrategy,...seed};
 };
@@ -75,27 +75,60 @@ test('tool contracts reject unavailable dependencies, collisions and invalid arg
   assert.equal(writes,0);
 });
 
-test('model-generated tool registration is followed by native inference/action/observation and a fresh run recreates it',async()=>{
-  const candidate=base(), pristine=JSON.stringify(candidate);let designs=0,uses=0;
-  const provider=new MeteredProvider({async invoke(input){
-    if(input.metadata?.nodeId==='root/design') {
-      designs++;
-      return {message:{role:'assistant' as const,content:JSON.stringify({tool:program})},finishReason:'stop' as const,usage:{totalTokens:10}};
+test('every MAS topology exposes optional native tool creation to roots, planners and generated subagents',async()=>{
+  for(const name of ['single','review','plan-execute','parallel-plan','adaptive','tree','cross-review']){
+    const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],[name])[0];
+    for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['arithmetic'];
+    const candidate={...initialStrategy,...seed},pristine=JSON.stringify(candidate),creators=new Set<string>();
+    const provider=new MeteredProvider({async invoke(input){
+      const id=String(input.metadata?.agentId),node=String(input.metadata?.nodeId);
+      const response=(content:string,actionRequests?:{id:string;name:string;arguments:any}[])=>({message:{role:'assistant' as const,content},...(actionRequests?{actionRequests}:{}),finishReason:actionRequests?'action_request' as const:'stop' as const,usage:{totalTokens:10}});
+      if(node==='root/factory')return response(JSON.stringify({profile:{id:'new-specialist',...seed.organization.agentTemplates![0].profile},composition:seed.organization.agentTemplates![0].composition}));
+      if(node==='root/decompose')return response(JSON.stringify({branches:[{objective:'branch',subtasks:['leaf']}]}));
+      assert.ok(input.actions?.some(a=>a.name==='create_tool'),node);
+      const made='generated_'+id.replace(/-/g,'_');
+      if(!input.actions?.some(a=>a.name===made)){
+        // Create only after using an ordinary tool: not a mandatory initialization stage.
+        if(!input.messages.some(m=>m.role==='tool'))return response('',[{id:'base',name:'arithmetic',arguments:{operation:'add',values:[1,2]}}]);
+        creators.add(id);
+        return response('',[{id:'create',name:'create_tool',arguments:{definition:{...program,name:made}}}]);
+      }
+      if(!input.messages.some(m=>m.role==='tool'&&m.metadata?.name===made))return response('',[{id:'use',name:made,arguments:{x:7}}]);
+      assert.ok(JSON.stringify(input.messages).includes('14'));
+      return response(String.raw`Evidence \boxed{14}`);
+    }});
+    const runner=new OrganizationRuntime(new DittoAgents(provider,model,[arithmetic]),limitsSchema.parse({maxSteps:200,maxToolCalls:100,maxTokens:100000,maxPoolAgents:20,maxActiveAgents:20,maxDepth:5}));
+    for(const id of ['one','two']){
+      const result=await runner.run(candidate,{id,prompt:'Fixture'});
+      assert.equal(result.answer,String.raw`\boxed{14}`);
+      assert.ok(result.orchestration!.tools!.length>0);
+      assert.deepEqual(new Set(result.orchestration!.tools!.map(t=>t.creatorId)),creators);
+      for(const creator of creators)assert.ok(result.orchestration!.toolCalls!.some(c=>c.agentId===creator&&c.name==='generated_'+creator.replace(/-/g,'_')&&c.status==='success'));
+      if(name==='tree')assert.ok(creators.has('branch-0-leaf-0'));
+      if(name==='adaptive')assert.ok(creators.has('new-specialist'));
+      if(name==='review')assert.ok(creators.has('root')&&creators.has('reviewer'));
     }
-    if(!input.messages.some(m=>m.role==='tool')) {
-      assert.ok(input.actions?.some(a=>a.name===program.name));uses++;
-      return {message:{role:'assistant' as const,content:''},actionRequests:[{id:'twice',name:program.name,arguments:{x:7}}],finishReason:'action_request' as const,usage:{totalTokens:10}};
-    }
-    assert.ok(JSON.stringify(input.messages).includes('14'));
-    return {message:{role:'assistant' as const,content:String.raw`\boxed{14}`},finishReason:'stop' as const,usage:{totalTokens:10}};
-  }});
-  const runner=new OrganizationRuntime(new DittoAgents(provider,model,[arithmetic]),limitsSchema.parse({maxSteps:20,maxToolCalls:10,maxTokens:100000}));
-  for(const id of ['one','two']){
-    const result=await runner.run(candidate,{id,prompt:'Fixture'});
-    assert.equal(result.answer,String.raw`\boxed{14}`);assert.equal(result.toolEvents.length,1);
-    assert.deepEqual(result.orchestration!.toolCalls,[{agentId:'root',name:program.name,status:'success'}]);
+    assert.equal(JSON.stringify(candidate),pristine);
   }
-  assert.equal(designs,2);assert.equal(uses,2);assert.equal(JSON.stringify(candidate),pristine);
+});
+
+test('native creation reports repairable errors and derives creator identity from the Ditto node',async()=>{
+  const candidate=base();let n=0;
+  const provider=new MeteredProvider({async invoke(input){
+    n++;
+    if(n<4){
+      const args=n===1?{definition:{...program,implementation:{kind:'sequence',steps:[{tool:'missing',arguments:{}}]}}}:n===2?{definition:program,agentId:'victim'}:{definition:program};
+      if(n>1)assert.ok(JSON.stringify(input.messages).includes('TOOL_DEFINITION'));
+      return {message:{role:'assistant' as const,content:''},actionRequests:[{id:'create'+n,name:'create_tool',arguments:args}],finishReason:'action_request' as const,usage:{totalTokens:10}};
+    }
+    return {message:{role:'assistant' as const,content:String.raw`\boxed{42}`},finishReason:'stop' as const,usage:{totalTokens:10}};
+  }});
+  const result=await new OrganizationRuntime(new DittoAgents(provider,model,[arithmetic]),limitsSchema.parse({maxSteps:30,maxTokens:100000})).run(candidate,{id:'repair',prompt:'Fixture'});
+  assert.equal(result.orchestration!.tools!.length,1);assert.equal(result.orchestration!.tools![0].creatorId,'root');
+  assert.deepEqual(result.orchestration!.toolCalls!.map(c=>c.status),['failed','failed','success']);
+  const baseline=base();baseline.organization.toolCreation=false;baseline.organization.initialAgents[0].nodes!.push('INTERACTION.ACT.TOOL');
+  baseline.composition=callCode('','create_tool',{definition:program});
+  await assert.rejects(runtime().run(baseline,{id:'disabled',prompt:'Fixture'}),/cannot use tool/);
 });
 
 test('generated Python tools execute in the existing public Ditto sandbox',async t=>{
@@ -107,8 +140,8 @@ test('generated Python tools execute in the existing public Ditto sandbox',async
   assert.equal(result.status,'success');assert.equal(JSON.parse(result.content).twice,6);
 });
 
-test('malformed tree/tool design repairs locally then solves without registering partial artifacts',async()=>{
-  for(const name of ['tree','tool-factory']){
+test('malformed tree design repairs locally then solves without registering partial artifacts',async()=>{
+  for(const name of ['tree']){
     const candidate=benchmarkSeeds([{benchmark:'math',metric:'math'}],[name])[0];let designs=0;
     const provider=new MeteredProvider({async invoke(input){
       const design=['root/design','root/decompose'].includes(String(input.metadata?.nodeId));
@@ -141,7 +174,7 @@ test('tree roots really derive grandchildren; cross-review weaves nodes and runs
     if(name==='tree') {
       assert.equal(result.depth,2);
       assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='SPAWN'&&e.agentId==='branch-0-leaf-0'&&e.parentId==='branch-0'));
-      assert.deepEqual(result.orchestration!.graphs[1].nodes.find(n=>n.id==='branch-1-leaf-0/analyze')!.dependencies,['branch-1/plan']);
-    } else assert.deepEqual(result.orchestration!.graphs[0].nodes.find(n=>n.id==='planner/check')!.dependencies,['auditor/propose']);
+      assert.deepEqual(result.orchestration!.graphs.flatMap(g=>g.nodes).find(n=>n.id==='branch-1-leaf-0/analyze')!.dependencies,['branch-1/plan']);
+    } else assert.deepEqual(result.orchestration!.graphs.flatMap(g=>g.nodes).find(n=>n.id==='planner/check')!.dependencies,['auditor/propose']);
   }
 });
