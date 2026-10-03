@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile, rename, appendFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
@@ -18,10 +18,19 @@ export function canonical(value: unknown): string {
 }
 export const digest = (value: unknown) =>
   createHash("sha256").update(canonical(value)).digest("hex");
+const saves = new Map<string, Promise<void>>();
 export async function save(path: string, value: unknown) {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path + ".tmp", JSON.stringify(value, null, 2) + "\n");
-  await rename(path + ".tmp", path);
+  path = resolve(path);
+  const text = JSON.stringify(value, null, 2) + "\n";
+  // Parallel nodes share usage checkpoints. Commit snapshots in invocation order.
+  const pending = (saves.get(path) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path + ".tmp", text);
+    await rename(path + ".tmp", path);
+  });
+  saves.set(path, pending);
+  try { await pending; }
+  finally { if (saves.get(path) === pending) saves.delete(path); }
 }
 export async function append(path: string, value: unknown) {
   await mkdir(dirname(path), { recursive: true });
