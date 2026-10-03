@@ -93,6 +93,7 @@ test('model-generated tool registration is followed by native inference/action/o
   for(const id of ['one','two']){
     const result=await runner.run(candidate,{id,prompt:'Fixture'});
     assert.equal(result.answer,String.raw`\boxed{14}`);assert.equal(result.toolEvents.length,1);
+    assert.deepEqual(result.orchestration!.toolCalls,[{agentId:'root',name:program.name,status:'success'}]);
   }
   assert.equal(designs,2);assert.equal(uses,2);assert.equal(JSON.stringify(candidate),pristine);
 });

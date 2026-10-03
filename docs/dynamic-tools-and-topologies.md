@@ -2,7 +2,7 @@
 
 本次是新的执行/搜索语义；使用 registry `@codesoul-co/ditto@0.1.2`，不需要修改 Ditto。
 正在运行的冻结快照保持原协议，不能将新根节点插入旧搜索后继续沿用其 manifest。
-HLE 已按用户要求暂停，保留断点；此更新不启动新付费实验。
+HLE 按用户要求暂停并保留断点。用户随后授权启动新版 AutomationBench 搜索：先搜索，冻结最终候选后再 test，取消逐轮 test；历史逐轮结果不用于选取或优化。
 
 ## 初始化与后续变异
 
@@ -56,3 +56,17 @@ Inference 从冻结定义重新注册工具，运行同一派生程序，仍可�
 验证覆盖公开 Ditto 调用、模型生成→注册→观察、成员间授权调用、定义重载、题间隔离、
 依赖/参数错误、写入前失败、嵌套调用保护、实际 Docker Python，以及树/交织节点并发。
 这些工程测试使用脚本模型，只证明执行契约，不证明准确率提升。
+
+
+## 搜索监控与运行调度
+
+`scripts/automation_experiment.py` 仅在搜索结束后启动最终 test，不自动提交任何逐轮测试。
+`--methods MFlow` 可以运行独立的新 MFlow 快照；`--methods AFlow DyLAN EvoAgent AutoAgents`
+可在旧快照上恢复其余方法，保持原来的配置、划分和已完成题目。调度策略写入 `scheduler.json`，
+不会把调度变化冒充为同一个 actor 版本。远端 Qwen 原调度已经是 final-only。
+
+`--status` 的 `methods.MFlow.currentValidation.organization` 报告：派生题数、生成的成员程序数、
+创建的工具数、通过原生 TOOL 节点调用生成工具的次数/成功次数、跨 agent 图依赖边、最大派生深度和节点失败。
+这里工具调用成功是运行成功，不代表任务得分提高；复合工具内部的依赖调用不重复计入该指标。
+`methods.MFlow.searchCurve` 报告每轮已完成重复数和平均得分，必须等满配置的重复次数才比较完整轮次。
+统计仅从已落盘的 search 记录汇总；不额外保存大模型请求全文、世界快照或读取 test 来指导优化。

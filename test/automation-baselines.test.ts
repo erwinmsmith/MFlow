@@ -21,6 +21,8 @@ with tempfile.TemporaryDirectory() as root:
   def __init__(self,args,**kwargs):
    self.bridge=args==['node','baselines/bridge.mjs'];calls.append(args)
    if '--out' in args:assert Path(args[args.index('--out')+1]).parent.exists()
+   if 'search' in args:
+    candidate=Path(root)/'MFlow/search/round-candidates/round-1.json';candidate.parent.mkdir(parents=True,exist_ok=True);candidate.write_text('{}')
   def poll(self):return None if self.bridge else 0
   def terminate(self):pass
   def wait(self,**kwargs):return 0
@@ -29,6 +31,13 @@ with tempfile.TemporaryDirectory() as root:
  jobs=json.loads((Path(root)/'jobs.json').read_text())['jobs']
  assert len(jobs)==5 and all(r['status']=='completed' for r in jobs.values())
  assert len(calls)==7
+ assert not any('--test-round' in c or any('round-candidates' in str(a) for a in c) for c in calls)
+ assert json.loads((Path(root)/'scheduler.json').read_text())['testPolicy']=='final-only'
+ calls.clear();(Path(root)/'jobs.json').write_text(json.dumps({'jobs':{'MFlow':{'status':'queued'}}}))
+ with patch.dict(os.environ,{'MFLOW_MODEL':'deepseek-flash','BENCHMARK_HOME':root}),patch.object(sys,'argv',['runner','--run',root,'--resume','--methods','MFlow']),patch('scripts.automation_experiment.subprocess.Popen',Child),patch('scripts.automation_experiment.time.sleep'):
+  main()
+ assert len(calls)==2 and 'search' in calls[0] and 'evaluate' in calls[1]
+ assert list(json.loads((Path(root)/'jobs.json').read_text())['jobs'])==['MFlow']
 `]);
 });
 
@@ -62,7 +71,8 @@ test('remote progress separates known usage and methods while the journal is bei
 import contextlib,io,json,tempfile
 from pathlib import Path
 from unittest.mock import patch
-from scripts.automation_experiment import status
+from scripts.automation_experiment import status,organization_progress
+assert organization_progress([{'organization':{'actions':{'SPAWN':2},'depth':2,'programs':[{'origin':'generated'}],'tools':[{'origin':'generated'}],'toolUsage':[{'name':'generated_add','status':'success'},{'name':'generated_bad','status':'failed'}],'graphs':[{'nodes':[{'id':'child/check','dependencies':['root/solve']}]}]}}])=={'evaluatedTasks':1,'tasksWithSpawn':1,'generatedPrograms':1,'createdTools':1,'generatedToolCalls':2,'successfulGeneratedToolCalls':1,'crossAgentEdges':1,'maxDepth':2,'nodeFailures':{}}
 with tempfile.TemporaryDirectory() as root:
  out=Path(root);folder=out/'MFlow/search/round-1/pass-0';folder.mkdir(parents=True)
  (folder/'0.usage.json').write_text(json.dumps([{'status':'known','charged':5},{'status':'unknown','charged':99}]))

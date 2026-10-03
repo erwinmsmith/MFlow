@@ -141,7 +141,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
   const programs = new Map<string, LoopPlanDefinition<unknown, unknown>>();
   const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
-  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [] };
+  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [], toolCalls: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
   let peakActive = 0, toolCalls = 0;
   // Each task owns its registry and source artifacts, including parallel test tasks.
@@ -397,6 +397,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
             else if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))
               result[node.id] = { status: 'error', error: { code: 'INCOMPLETE_MODEL_OUTPUT', message: 'Node produced no complete response' } };
           }
+          if (node.type === 'INTERACTION.ACT.TOOL') orchestration.toolCalls!.push({ agentId: node.id.split('/')[0], name: (bindings[node.id] as any).call.name, status: output?.status ?? 'error' });
           if (node.type === 'INTERACTION.OBSERVE') toolEvents.push(output);
         }
         orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: structuredClone(result) });

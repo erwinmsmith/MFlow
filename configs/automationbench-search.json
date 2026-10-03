@@ -5,11 +5,11 @@
   "concurrency": 8,
   "maxOutputTokens": 393216,
   "initializations": [
-    "adaptive",
+    "tool-factory",
     "tree",
+    "adaptive",
     "parallel-plan",
     "cross-review",
-    "tool-factory",
     "review",
     "plan-execute",
     "single"

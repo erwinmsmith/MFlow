@@ -52,11 +52,30 @@ def cost(records):
             field='judgeTokens' if row['status']=='known' else 'unknownJudgeCalls';result[field]=result.get(field,0)+(row['charged'] if row['status']=='known' else 1)
     return result
 
+def organization_progress(rows):
+    result={'evaluatedTasks':len(rows),'tasksWithSpawn':0,'generatedPrograms':0,'createdTools':0,
+            'generatedToolCalls':0,'successfulGeneratedToolCalls':0,'crossAgentEdges':0,'maxDepth':0,'nodeFailures':{}}
+    for row in rows:
+        org=row.get('organization') or {}
+        result['tasksWithSpawn']+=bool(org.get('actions',{}).get('SPAWN'))
+        result['generatedPrograms']+=sum(p.get('origin')=='generated' for p in org.get('programs',[]) or [])
+        result['createdTools']+=sum(t.get('origin')=='generated' for t in org.get('tools',[]) or [])
+        for call in org.get('toolUsage',[]) or []:
+            if call.get('name','').startswith('generated_'):
+                result['generatedToolCalls']+=1
+                result['successfulGeneratedToolCalls']+=call.get('status')=='success'
+        for graph in org.get('graphs',[]) or []:
+            result['crossAgentEdges']+=sum(dep.split('/')[0]!=node['id'].split('/')[0] for node in graph['nodes'] for dep in node['dependencies'])
+        result['maxDepth']=max(result['maxDepth'],org.get('depth',0))
+        for name,count in org.get('nodeFailures',{}).items():result['nodeFailures'][name]=result['nodeFailures'].get(name,0)+count
+    return result
+
 def status(out):
     jobs=read(out/'jobs.json',{})
     manifest=read(out/'experiment-manifest.json',{})
     planned=manifest.get('searchCount',119 if manifest.get('benchmark')=='math' else 200)
     report={'run':str(out),'protocol':{k:manifest[k] for k in ('benchmark','model','datasetProtocol','searchCount','testCount','judgeModel','toolProtocol') if k in manifest},'jobs':jobs.get('jobs',{}),'methods':{}}
+    report['schedule']=read(out/'scheduler.json',{})
     overrides=read(out/'method-outputs.json',{})
     recovery=read(out/'recovery.json')
     if recovery:report['recovery']=recovery
@@ -72,10 +91,11 @@ def status(out):
             entry['roundTests']=[]
             for candidate in sorted((folder/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1])):
                 directory=folder/'round-tests'/candidate.stem
+                if not directory.exists():continue
                 summary=read(directory/'summary.json',{})
                 progress=read(directory/'status.json',{})
                 rows=[] if 'correct' in progress or summary else list(jsonl(directory/('test.jsonl' if method=='MFlow' else 'results.jsonl'))) if (directory/('test.jsonl' if method=='MFlow' else 'results.jsonl')).exists() else []
-                entry['roundTests'].append({'round':int(candidate.stem.split('-')[-1]),'status':'completed' if summary else jobs.get('jobs',{}).get(f'{method}/round-tests/{candidate.stem}',{}).get('status','queued'),
+                entry['roundTests'].append({'round':int(candidate.stem.split('-')[-1]),'status':'completed' if summary else jobs.get('jobs',{}).get(f'{method}/round-tests/{candidate.stem}',{}).get('status','stopped'),
                     'completed':summary.get('count',progress.get('completed',len(rows))),'accuracy':summary.get('accuracy',summary.get('passRate',progress['correct']/progress['completed'] if progress.get('completed') and 'correct' in progress else sum(r['score'] for r in rows)/len(rows) if rows else None)),
                     'output':str(directory),'purpose':'observation-only'})
         if method=='MFlow':
@@ -88,7 +108,11 @@ def status(out):
             passes=sorted((folder/'search').glob('round-*/pass-*'),key=lambda p:(int(p.parent.name.split('-')[-1]),int(p.name.split('-')[-1])))
             if passes:
                 current=passes[-1];rows=[read(p) for p in current.glob('*.json') if p.stem.isdigit()]
-                entry['currentValidation']={'round':current.parent.name,'pass':current.name,'completed':len(rows),'planned':planned,'correct':sum(r['score'] for r in rows)}
+                entry['currentValidation']={'round':current.parent.name,'pass':current.name,'completed':len(rows),'planned':planned,'correct':sum(r['score'] for r in rows),'organization':organization_progress(rows)}
+            scores={}
+            for path in (folder/'search').glob('*/workflows/results.json'):
+                for row in read(path,[]):scores.setdefault(row['round'],[]).append(row['score'])
+            entry['searchCurve']=[{'round':number,'completedPasses':len(values),'meanScore':sum(values)/len(values)} for number,values in sorted(scores.items())]
         for phase in ('pilot','search','test'):
             file=folder/phase/('test.jsonl' if method=='MFlow' else 'results.jsonl')
             if file.exists():
@@ -108,7 +132,7 @@ def status(out):
         if override:
             entry['originalJob']=report['jobs'].get(method,{})
             progress=entry.get('testStatus',entry.get('pilotStatus',{}))
-            report['jobs'][method]={'status':progress.get('status','queued'),'service':override['service'],'output':str(folder)}
+            report['jobs'][method]={'status':progress.get('status','stopped'),'service':override['service'],'output':str(folder)}
             try:
                 state=subprocess.run(['systemctl','--user','show',override['service'],'--property=ActiveState','--value'],capture_output=True,text=True,timeout=3,check=True).stdout.strip()
                 if state:report['jobs'][method].update(serviceState=state,status='running' if state=='active' else 'failed' if state=='failed' else report['jobs'][method]['status'])
@@ -145,6 +169,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run')
     p.add_argument('--execution-root',type=Path,help='Use an existing immutable actor snapshot with this separately recorded scheduler')
     p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
+    p.add_argument('--methods',nargs='+',choices=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],default=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],help='Resume or run only selected methods; final test follows completed search')
     p.add_argument('--legacy-concurrency',type=int,default=1,help='Isolated worker processes per native legacy method')
     p.add_argument('--port',type=int,help='Independent Ditto baseline bridge port');a=p.parse_args()
     if a.concurrency is not None and a.concurrency<1 or a.legacy_concurrency<1:p.error('Concurrency must be positive')
@@ -194,12 +219,13 @@ def main():
           'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
+    commands={name:commands[name] for name in dict.fromkeys(a.methods)}
     # Scheduling can change without replacing actor code or invalidating search checkpoints.
     # Archive/restart the prior supervisor before switching this receipt.
     (out/'scheduler.json').write_text(json.dumps({'path':str(Path(__file__).resolve()),
         'sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'executionRoot':str(ROOT),
-        'phases':{'MFlow':['search','test'],'AFlow':['search','test'],
-                  **{m:['test'] for m in ('DyLAN','EvoAgent','AutoAgents')}}},indent=2)+'\n')
+        'testPolicy':'final-only','methods':list(commands),
+        'phases':{m:['search','test'] if m in ('MFlow','AFlow') else ['test'] for m in commands}},indent=2)+'\n')
     jobs=read(out/'jobs.json',{'jobs':{}});active={};retrying={}
     def persist():
         path=out/'jobs.json';path.with_suffix('.tmp').write_text(json.dumps(jobs,indent=2)+'\n');path.with_suffix('.tmp').replace(path)
@@ -210,35 +236,14 @@ def main():
                 available=available_memory_mib()
                 if available>=minimum:break
                 jobs['jobs'][name]={'stage':index,'status':'waiting_for_memory','availableMiB':available,'requiredMiB':minimum};persist();time.sleep(10)
-        if name!='MFlow' or not hle:start_bridge()
-        (out/name if '/round-tests/' not in name else (out/name).parent).mkdir(parents=True,exist_ok=True)
+        if name!='MFlow':start_bridge()
+        (out/name).mkdir(parents=True,exist_ok=True)
         stream=(out/(name+'.log')).open('a')
         command=commands[name][index]
         if name=='MFlow' and ((search if index==0 else test)/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
-        if name.startswith('MFlow/round-tests/') and (out/name/'manifest.json').exists():command=command+['--resume']
         child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
     bridge=None
-    def round_tests():
-        # One full held-out round at a time per method; search continues independently.
-        # No observer output is ever read by either optimizer.
-        pending_rounds=False
-        for method in ('MFlow','AFlow'):
-            prefix=method+'/round-tests/'
-            if any(name.startswith(prefix) for name in (*active,*retrying)):continue
-            candidates=sorted((out/method/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1]))
-            for candidate in candidates:
-                name=prefix+candidate.stem
-                if (out/name/'summary.json').exists() or jobs['jobs'].get(name,{}).get('status')=='completed':continue
-                pending_rounds=True
-                if available_memory_mib()<int(os.environ.get('MFLOW_MIN_AVAILABLE_MIB','384')):break
-                if method=='MFlow':
-                    commands[name]=[node+['evaluate','--benchmark',a.benchmark,'--bundle',str(candidate),'--out',str(out/name),'--concurrency',str(config.get('concurrency',4))]]
-                else:
-                    commands[name]=[[aflow,*(['baselines/aflow.py','--phase','search-test'] if math else [aflow_adapter]),'--test-round',candidate.stem.split('-')[-1],'--test-out',str(out/name)]]
-                # The evaluator creates its own output directory/immutable manifest.
-                launch(name,0);break
-        return pending_rounds
     def start_bridge():
         nonlocal bridge
         if bridge is not None:return
@@ -256,7 +261,7 @@ def main():
         require_disk_space(out)
         prune_progress(out)
         last_prune=time.monotonic()
-        if not hle:start_bridge()
+        if any(name!='MFlow' for name in commands):start_bridge()
         pending=[name for name in commands if jobs['jobs'].get(name,{}).get('status')!='completed']
         for name in pending:jobs['jobs'][name]={'status':'queued'}
         persist()
@@ -264,8 +269,7 @@ def main():
             if pending:launch(pending.pop(0),0)
         else:
             for name in pending:launch(name,0)
-        observers_pending=round_tests()
-        while active or retrying or observers_pending:
+        while active or retrying:
             require_disk_space(out)
             if time.monotonic()-last_prune>=60:
                 prune_progress(out);last_prune=time.monotonic()
@@ -275,8 +279,7 @@ def main():
                 if time.monotonic()>=at:
                     if not name.startswith('MFlow'):
                         reset={'method':name.split('/')[0]}
-                        if name.startswith('AFlow/round-tests/'):reset.update(phase='test',taskPrefix='observe-round/'+name.split('/')[-1]+'/')
-                        elif name=='AFlow':reset.update(taskPrefix='round_' if math else 'round-')
+                        if name=='AFlow':reset.update(taskPrefix='round_' if math else 'round-')
                         request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps(reset).encode(),headers={'Content-Type':'application/json'})
                         try:
                             with urllib.request.urlopen(request,timeout=30) as response:json.load(response)
@@ -295,9 +298,8 @@ def main():
                         jobs['jobs'][name].update(status='retrying',nextAttemptAt=time.time()+60)
                     persist()
                     if a.sequential and pending:launch(pending.pop(0),0)
-            observers_pending=round_tests()
             time.sleep(2)
-        if any(j['status']=='failed' for j in jobs['jobs'].values()):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
+        if any(jobs['jobs'].get(name,{}).get('status')=='failed' for name in commands):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
     finally:
         for child,_ in active.values():child.terminate()
         if bridge is not None:bridge.terminate();bridge.wait(timeout=15)
