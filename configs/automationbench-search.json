@@ -5,12 +5,12 @@
   "concurrency": 8,
   "maxOutputTokens": 393216,
   "initializations": [
-    "tree",
-    "adaptive",
-    "parallel-plan",
-    "cross-review",
-    "review",
-    "plan-execute",
-    "single"
+    "dynamic-policy",
+    "dynamic-tree",
+    "dynamic-parallel-plan",
+    "dynamic-cross-review",
+    "dynamic-review",
+    "dynamic-plan-execute",
+    "dynamic-single"
   ]
 }

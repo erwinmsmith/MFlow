@@ -1,5 +1,6 @@
 import { organizationSchema, rootProfile, compositionNodes, type Task } from './types.js';
 import { FACTORY_PROMPT } from './prompts.js';
+import { dynamicPolicyComposition, dynamicPolicyPrompt } from './dynamic-policy.js';
 
 // Adapted from the actual AFlow MATH round-12 solve/revise candidate. These are
 // editable seeds, not fixed roles or an application-owned reasoning engine.
@@ -339,7 +340,10 @@ ${JSON.stringify({profile:{id:'specialist',...seed.organization.agentTemplates![
     {name:'parallel-plan',...seed,prompts:planningPrompts,organization:parallel,composition:parallelPlan}, {name:'adaptive',...adaptive},
     {name:'tree',...seed,prompts:planningPrompts,organization:treeOrganization,composition:tree},
     {name:'cross-review',...seed,prompts:planningPrompts,organization:parallel,composition:diamond}];
+  const dynamic = all.filter(s=>s.name!=='adaptive').map(s=>({...s,name:'dynamic-'+s.name,
+    prompts:{...s.prompts,factory:dynamicPolicyPrompt},composition:dynamicPolicyComposition(s.composition)}));
+  all.push({name:'dynamic-policy',...seed,prompts:{...seed.prompts,factory:dynamicPolicyPrompt},composition:dynamicPolicyComposition()},...dynamic);
   if(!extended)all.unshift({name:'default',...seed});
   if (names?.some(name => !all.some(s => s.name === name)) || names?.length === 0) throw new Error('Unknown or empty MAS initialization');
-  return names ? names.map(name => all.find(s => s.name === name)!) : all.filter(s => extended || s.name !== 'review');
+  return names ? names.map(name => all.find(s => s.name === name)!) : all.filter(s => !s.name.startsWith('dynamic-') && (extended || s.name !== 'review'));
 }

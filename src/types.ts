@@ -222,6 +222,7 @@ export interface Execution {
   environment?: { contract: string; world: unknown };
   /** Native Ditto Graph/Loop invocations, independent of the legacy action trace. */
   orchestration?: {
+    decisions?: { afterGraph: number; decision: unknown }[];
     toolCalls?: { agentId: string; name: string; status: string }[];
     tools?: { creatorId: string; definition: ToolProgram; hash: string; origin: 'library' | 'generated' }[];
     programs?: { agentId: string; composition: string; origin: 'template' | 'generated'; templateId?: string }[];

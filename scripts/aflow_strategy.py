@@ -238,7 +238,8 @@ def main():
         optimizer.round = len(seeds)
     # Run the native loop one iteration at a time, with no arbitrary total cap.
     # Never use an interrupted candidate's partial repetitions to declare convergence.
-    converged = lambda: checkpoint['phase'] not in ('evaluating', 'seeding') and optimizer.round > max(1, len(seeds)) and optimizer.convergence_utils.check_convergence(top_k=3)[0]
+    # Native convergence uses five stagnant rounds; initialization comparisons are not mutation rounds.
+    converged = lambda: (not seeds or optimizer.round >= len(seeds) + 5) and checkpoint['phase'] not in ('evaluating', 'seeding') and optimizer.round > max(1, len(seeds)) and optimizer.convergence_utils.check_convergence(top_k=3)[0]
     while (checkpoint['phase'] != 'finished' and not converged()
            and (config['maxRounds'] is None or optimizer.round <= config['maxRounds'])):
         optimizer.optimize('Graph')

@@ -146,3 +146,49 @@ Generated tools are also shared with existing and later-spawned members that
 already hold every dependency. Sharing cannot grant API write access to a
 read-only planner. This prevents a capable reviewer from seeing a generated
 tool in evidence but being unable to use it.
+
+## Dynamic policy search (2026-10-05)
+
+AutomationBench now measures seven editable dynamic initializations: policy-first,
+tree, parallel planning, cross-review, execute/review, plan/execute, and single.
+The last six provide an initial execution graph; all then reassess actual evidence
+with an executable policy loop. The policy-first root can design a new graph
+before acting. These are complete candidate programs, not hidden fixed runtime
+roles. AFlow mutates initial structure, internal programs, controller prompts and
+feedback-conditioned continuation jointly.
+
+Each policy decision records stop/continue, rationale and unresolved gap. A
+continuation supplies a complete native Ditto graph/loop stage: reuse a member,
+spawn a heterogeneous program, reconfigure capabilities, change an existing
+program with ctx.bindProgram, or weave multiple members into one dependency graph.
+After execution, current profiles, outputs, generated programs and executed
+topology are supplied to the next decision. Successful world effects are retained.
+Stages return AgentOutput and the complete MAS returns final text. Every model
+call and executable node still runs through the published Ditto package.
+
+ctx.structure exposes topology/program/decision evidence without duplicating raw
+graph output histories. ctx.recordDecision writes task-local policy evidence; it
+is not a grade or correctness signal. ctx.bindProgram changes only future
+internal execution, preserving identity and profile. Native INVALID_INPUT feedback
+(including malformed REFLECT criteria) returns to the generated program instead
+of aborting the entire task before the policy can repair it.
+
+Search feedback covers outcome/topology changes, generated programs, tools,
+cross-agent sharing and node failures rather than taking the first six examples.
+reusableCandidates contains representative successful program shapes and
+successfully invoked tool definitions with provenance. These remain search
+evidence, not automatically trusted templates: the optimizer must generalize
+away task values, promote useful artifacts explicitly, and re-evaluate the full
+candidate. A task passing does not establish a causal benefit for any one tool.
+
+AFlow's parent sampling, experience filtering and convergence test remain in use.
+The seven initialization comparisons cannot themselves satisfy the five-round
+optimization plateau: at least five mutation rounds must finish before accepting
+native convergence. No maximum search-round or experiment-token quota is added.
+
+The frozen bundle retains the full initial organization, dynamic control code,
+all prompts, reusable library, guide and Python image identity. Search and test
+execute the same program; runtime-generated members are fresh for each task and
+need not belong to the frozen template library. Test outcomes never enter the
+optimizer. The separately user-selected old round 9 test runs in the old v8
+snapshot; this changed search starts a fresh independent experiment.

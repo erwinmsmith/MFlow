@@ -142,7 +142,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
   const programs = new Map<string, LoopPlanDefinition<unknown, unknown>>();
   const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
-  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [], toolCalls: [] };
+  const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [], toolCalls: [], decisions: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
   let peakActive = 0, toolCalls = 0;
   // Each task owns its registry and source artifacts, including parallel test tasks.
@@ -231,6 +231,15 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get outputs() { return structuredClone(outputs); },
     get graphs() { return snapshotGraphData(orchestration.graphs); },
     get tools() { return structuredClone(orchestration.tools); },
+    get structure() { return snapshotGraphData({ graphs: orchestration.graphs.map(({id,nodes})=>({id,nodes})),
+      programs: orchestration.programs, decisions: orchestration.decisions }); },
+    recordDecision: (decision: unknown) => { orchestration.decisions!.push({ afterGraph: orchestration.graphs.length, decision: z.json().parse(decision) }); },
+    bindProgram: (id: string, composition: string) => {
+      member(id); const definition = compile(composition, machine.context).definition;
+      programs.set(id, definition);
+      orchestration.programs!.push({ agentId: id, composition, origin: 'generated' });
+      event('BIND_PROGRAM', id);
+    },
     registerTool: (id: string, definition: ToolProgram) => {
       const owner = member(id), parsed = toolProgramSchema.parse(definition);
       const missing = toolDependencies(parsed).filter(name => !owner.profile.tools.includes(name));
@@ -432,7 +441,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
             if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT'].includes(providerError.code))
               result[node.id] = { status: 'error', error: { code: providerError.code, message: providerError.message } };
             else if (output?.status !== 'success') {
-              if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT'].includes(output?.error?.code))
+              if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'INVALID_INPUT'].includes(output?.error?.code))
                 throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
             } else if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
               result[node.id] = { status: 'error', error: { code: 'OUTPUT_LIMIT', message: 'Provider output limit reached; partial output is not evidence' } };

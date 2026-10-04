@@ -27,7 +27,7 @@ test('multiple MAS roots preserve distinct graphs; a factory creates an executab
   for(const benchmark of ['automationbench','hle'] as const){
     const config=JSON.parse(await readFile(`configs/${benchmark}-search.json`,'utf8'));
     const configured=benchmarkSeeds([{benchmark,metric:benchmark}],config.initializations);
-    assert.deepEqual(new Set(configured.map(s=>s.name)),new Set(seeds.map(s=>s.name)));
+    assert.deepEqual(new Set(configured.map(s=>s.name)),new Set(benchmark==='automationbench' ? ['dynamic-policy','dynamic-tree','dynamic-parallel-plan','dynamic-cross-review','dynamic-review','dynamic-plan-execute','dynamic-single'] : seeds.map(s=>s.name)));
     for(const seed of configured)validateComposition(seed.composition);
   }
   assert.equal(seeds[2].organization.initialAgents.length,2);
