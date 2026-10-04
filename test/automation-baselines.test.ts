@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile, rm, access } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, access } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { readTasks } from '../src/data.js';
 import { benchmarkSeeds } from '../src/aflow-seed.js';
@@ -222,16 +222,16 @@ print('NATIVE_STATIC_OK')
   }finally{bridge.kill('SIGKILL');provider.close();await rm(dir,{recursive:true,force:true});}
 });
 
-test('native AFlow measures every MAS initialization, optimizes from eligible roots and resumes frozen selection',async t=>{
+test('MFlow native AFlow search mutates one root with inherited MAS and branch history, then freezes and resumes',async t=>{
   const python=resolve('../MFlow-baselines/.venv-aflow/bin/python'),source=resolve('../MFlow-baselines/sources/AFlow');
   try{await access(python);await access(source);}catch{t.skip('Native AFlow environment required');return;}
-  const dir=await mkdtemp(resolve('runs/multi-root-fixture-')),seeds=benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}],['single','plan-execute']);
+  const dir=await mkdtemp(resolve('runs/multi-root-fixture-')),seeds=benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}],['single']);
   const evaluated:number[]=[];let proposals=0,frozen=0;
   const server=createServer(async(req,res)=>{
     let text='';for await(const part of req)text+=part;const input=JSON.parse(text);let result:unknown;
-    if(req.url==='/bootstrap')result={config:{seed:42,maxRounds:2,validationRounds:1,concurrency:1},questionType:'API workflow',seeds,...seeds[0],interface:'Offline fixture only'};
-    else if(req.url==='/evaluate'){evaluated.push(input.round);result={score:input.round===3?1:.5,meanTokens:10,tokens:10,organizationSummary:{nodeCalls:{'INFER.REASONING.SAMPLE':1}},failures:[]};}
-    else if(req.url==='/propose'){proposals++;assert.ok(input.prompt.includes('plan-execute')||input.prompt.includes("id:'single'"));result={...seeds[0],modification:'An offline local prompt change'};}
+    if(req.url==='/bootstrap')result={config:{seed:42,maxRounds:3,validationRounds:1,concurrency:1},questionType:'API workflow',seeds,...seeds[0],interface:'Offline fixture only'};
+    else if(req.url==='/evaluate'){evaluated.push(input.round);result={score:input.round/4,meanTokens:10,tokens:10,organizationSummary:{nodeCalls:{'INFER.REASONING.SAMPLE':1}},failures:[]};}
+    else if(req.url==='/propose'){proposals++;assert.ok(input.prompt.includes('search_branch_history'));assert.ok(input.prompt.includes('parent_execution'));result={...seeds[0],prompts:{...seeds[0].prompts,agent:'candidate-'+input.round},modification:'A distinct offline change '+input.round};}
     else if(req.url==='/freeze'){frozen=input.round;result={frozen:true};}
     else if(req.url==='/checkpoint-round'){assert.ok(evaluated.includes(input.round));result={exported:true};}
     else throw new Error('Unexpected fixture route');
@@ -241,8 +241,15 @@ test('native AFlow measures every MAS initialization, optimizes from eligible ro
   try{
     const args=['scripts/aflow_strategy.py',`http://127.0.0.1:${address.port}`,source,dir];
     await promisify(execFile)(python,args,{timeout:60000,maxBuffer:1024*1024});
-    assert.deepEqual(evaluated,[1,2,3]);assert.equal(proposals,1);assert.equal(frozen,3);
+    assert.deepEqual(evaluated,[1,2,3,4]);assert.equal(proposals,3);assert.equal(frozen,4);
+    for(const round of [2,3,4]){
+      const root=join(dir,'AutomationBench/workflows');
+      const context=JSON.parse(await readFile(join(root,`round_${round}/parent_context.json`),'utf8'));
+      const parent=JSON.parse(await readFile(join(root,`round_${context.parentRound}/strategy.json`),'utf8'));
+      assert.ok(context.parentRound<round);assert.deepEqual(context.strategy,parent);assert.equal(context.execution.length,1);
+      assert.deepEqual(parent.organization.initialAgents.map((a:{id:string})=>a.id),['root']);
+    }
     await promisify(execFile)(python,args,{timeout:60000,maxBuffer:1024*1024});
-    assert.deepEqual(evaluated,[1,2,3]);assert.equal(proposals,1);
+    assert.deepEqual(evaluated,[1,2,3,4]);assert.equal(proposals,3);
   }finally{server.close();await rm(dir,{recursive:true,force:true});}
 });

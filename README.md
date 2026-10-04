@@ -212,10 +212,10 @@ Consolidation 只接收任务输入与 agent 输出，不接收评分或参考�
 
 MATH v8 历史实验：[完整文本推理与动态 MAS](docs/search-v8.md)。该版借用 AFlow 验证搜索产物初始化，比较时需要披露迁移先验。
 
-当前代码支持[多结构初始化与动态工具搜索](docs/dynamic-tools-and-topologies.md)：树状分解、并行与跨 agent 节点交织，以及通过公开 Ditto 注册、调用和冻结参数化工具；inference 可按搜索规则创建题内新工具与库外 subagent。
+当前代码采用[单根 MAS 结构与动态派生搜索](docs/dynamic-tools-and-topologies.md)：从一个 agent 出发，沿 AFlow 搜索树探索树状分解、并行、异构节点和跨 agent 交互；inference 按冻结的最优策略派生库外 subagent，并可通过公开 Ditto 接口创建和使用题内工具。
 
 HLE 的五框架协议、图片/工具接入和远端运行命令见 [HLE experiment](docs/hle-experiment.md)。
 
 AutomationBench 另支持不搜索的 **SingleLLM** 基线：单模型通过 Ditto 工具循环直接完成同一 test，启动方式见 [AutomationBench 实验说明](docs/automationbench-experiment.md)。
 
-MFlow 搜索与 test 共用[冻结的 Ditto 设计指南](docs/dynamic-tools-and-topologies.md)，所有成员均可在执行中按需创建工具；初始化仅表示 MAS 结构。
+MFlow 搜索与 test 共用[冻结的 Ditto 设计指南](docs/dynamic-tools-and-topologies.md)，所有成员均可在执行中按需创建工具；每个候选与每道题都只初始化 root，随后按策略派生。

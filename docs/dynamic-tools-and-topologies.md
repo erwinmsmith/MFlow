@@ -1,31 +1,31 @@
-# 多结构初始化与动态工具搜索（2026-10-04）
+# 单根 MAS 结构与动态派生搜索
 
 本次是新的执行/搜索语义；使用 registry `@codesoul-co/ditto@0.1.2`，不需要修改 Ditto。
 正在运行的冻结快照保持原协议，不能将新根节点插入旧搜索后继续沿用其 manifest。
 HLE 按用户要求暂停并保留断点。用户随后授权启动新版 AutomationBench 搜索：先搜索，冻结最终候选后再 test，取消逐轮 test；历史逐轮结果不用于选取或优化。
 
-## 初始化与后续变异
+## 当前搜索协议（2026-10-05 修正）
 
-AutomationBench/HLE 的默认根节点是七种 MAS 结构；工具创建作为每个成员的可选能力独立开放：
+MFlow 只有一棵搜索树，round 1 从一个 `root` agent 的 `dynamic-policy` 候选开始。
+AutomationBench、HLE 配置和其他 benchmark 的默认搜索入口均使用这一单根方案；
+候选验证拒绝多个初始 agent。`agentTemplates` 只是可选程序库，不会预先实例化成员。
+旧的七个初始化方案依次占据七轮的实验已停止；这不是当前协议，也不将旧分数移入新搜索。
 
-| 名称 | 初始组织与交互 |
-| --- | --- |
-| single | 单成员按任务使用工具 |
-| review | 执行后独立检查、修正 |
-| plan-execute | 先分解依赖，再执行 |
-| parallel-plan | 两个互补规划分支并行，汇合到执行者 |
-| adaptive | 根据题目生成库外成员的 profile 与内部 graph/loop |
-| tree | 按题目决定分支数及叶子数，root → 分支 → 叶子，依赖完成后汇总 |
-| cross-review | 两个成员同时提出方案，各自检查另一分支，交叉节点依赖后汇合 |
+- **round 1**：评估唯一初始候选；每题从 root 出发，按策略决定是否派生。
+- **round 2 起**：使用原 AFlow 的父节点采样、父节点经验、完整变异和重复评估。
+  父节点来自已经完成评估的历史候选，可能回到较早节点形成兄弟分支；不是强制线性链。
+- **搜索对象**：完整 MAS 程序、动态派生/停止/证据交互规则、各 agent 的节点配置与 graph/loop、
+  可复用 subagent 和工具库。新候选继承选中父节点的完整程序及真实执行反馈。
+- **多样性**：优化器收到已探索分支的结构摘要；树状拆解、并行合并、交叉上下文、异构推理和工具循环
+  是候选变异方向，不是七棵独立树。根据任务和测量反馈选择方向，不强制每题创建 agent 或工具。
+- **原生提示词适配**：保留一次一个明确改进点，去掉上游 Python 工作流的五行修改限制和十节点限制，
+  允许完整实现对应的 Ditto graph/loop、成员配置与控制代码。
+- **重复验证**：当前配置为每个候选同一搜索集的五次独立运行，五次不算五个搜索 round。
+- **停止与 test**：沿用 AFlow 原生收敛；全部搜索完成后按完整搜索重复评估的平均成绩冻结最优候选，
+  执行同一批完整 test。test 不参与提案、父节点选择或收敛，不逐轮 test。
 
-其他文本 benchmark 同样支持这些根节点；默认以 `default` 保留原始初始化，替代其相同的 `review` 别名，避免重复评估。
-`aflow-search` 配置的 `initializations` 可显式选择根节点。
-所有根节点按同一搜索集和验证次数评估；父节点选择、经验反馈、变异与收敛继续使用原 AFlow 控制器。
-
-规划阶段使用独立控制提示词，执行阶段保留各 benchmark 的原始输出契约。
-AutomationBench 的初始树/并行规划成员不做写入，执行者完成真实 API 副作用与后置检查。
-这些只是可修改的初始化，搜索可改分支、边、角色能力、成员内部节点、循环与派生条件；
-串行不是强制结构，树的层数也不是整个搜索空间的上限。
+旧结构生成器保留供历史复现和显式消融；正式 MFlow 搜索只允许一个初始化，且必须仅含 root。
+AFlow 基线的冻结运行和已有结果不因 MFlow 协议修正而变化。
 
 ## 工具定义与执行
 
@@ -149,13 +149,10 @@ tool in evidence but being unable to use it.
 
 ## Dynamic policy search (2026-10-05)
 
-AutomationBench now measures seven editable dynamic initializations: policy-first,
-tree, parallel planning, cross-review, execute/review, plan/execute, and single.
-The last six provide an initial execution graph; all then reassess actual evidence
-with an executable policy loop. The policy-first root can design a new graph
-before acting. These are complete candidate programs, not hidden fixed runtime
-roles. AFlow mutates initial structure, internal programs, controller prompts and
-feedback-conditioned continuation jointly.
+The single policy-first root can design a new graph before acting. All later
+candidates start with one agent and evolve the inherited MAS program. Alternative
+layouts are branches of the same search tree. AFlow mutates internal programs,
+controller prompts and feedback-conditioned derivation jointly.
 
 Each policy decision records stop/continue, rationale and unresolved gap. A
 continuation supplies a complete native Ditto graph/loop stage: reuse a member,
@@ -182,9 +179,9 @@ away task values, promote useful artifacts explicitly, and re-evaluate the full
 candidate. A task passing does not establish a causal benefit for any one tool.
 
 AFlow's parent sampling, experience filtering and convergence test remain in use.
-The seven initialization comparisons cannot themselves satisfy the five-round
-optimization plateau: at least five mutation rounds must finish before accepting
-native convergence. No maximum search-round or experiment-token quota is added.
+There is one initialization; subsequent rounds are measured mutations. Native
+convergence operates on those candidate scores. No maximum search-round or
+experiment-token quota is added.
 
 The frozen bundle retains the full initial organization, dynamic control code,
 all prompts, reusable library, guide and Python image identity. Search and test

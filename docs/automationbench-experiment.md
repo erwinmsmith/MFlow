@@ -1,6 +1,6 @@
 # AutomationBench / DeepSeek Flash comparison
 
-> The five-root description below documents the existing frozen experiment. New code supports seven MAS topologies with optional tool creation available to every member; see [the 2026-10-04 update](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
+> The multi-root description below documents historical frozen experiments. Current MFlow starts from one root agent and explores descendant MAS structures within one search tree; see [the current protocol](dynamic-tools-and-topologies.md). Existing runs are not silently migrated.
 
 2026-10-02: DeepSeek comparisons moved to [local parallel snapshots](local-deepseek-20261002.md) after hb became unreachable. Use that document for the active progress commands; server snapshots below remain historical records.
 

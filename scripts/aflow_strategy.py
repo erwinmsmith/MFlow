@@ -48,6 +48,8 @@ def main():
         from automation_aflow import prepare, write_static, evaluate_static, sample
         prepare(Path(out), Path(source))
     config = init['config']
+    if not static and len(init.get('seeds', [])) != 1:
+        raise ValueError('MFlow requires one single-agent root; explore topology through descendant mutations')
     random.seed(config['seed'])
     np.random.seed(config['seed'])
     llm = LLMConfig({'model': 'ditto', 'key': 'local', 'base_url': endpoint})
@@ -101,23 +103,58 @@ def main():
     optimizer.graph_utils.load_operators_description = lambda _: init['interface']
 
     original_prompt = optimizer.graph_utils.create_graph_optimize_prompt
+    def branch_history():
+        # No task text or answers: give structural coverage across the existing tree.
+        # Native AFlow still selects parents and supplies parent-specific experience.
+        records = optimizer.data_utils.load_results(str(workflows))
+        grouped = {}
+        for row in records:
+            grouped.setdefault(row['round'], []).append(row['score'])
+        history = []
+        for number, scores in sorted(grouped.items()):
+            if len(scores) != config['validationRounds']:
+                continue
+            directory = workflows / f'round_{number}'
+            strategy = json.loads((directory / 'strategy.json').read_text())
+            experience_path = directory / 'experience.json'
+            experience = json.loads(experience_path.read_text()) if experience_path.exists() else {}
+            summaries = execution_context(number, workflows)
+            actions, node_types = {}, set()
+            for summary in summaries:
+                for name, count in summary.get('actions', {}).items():
+                    actions[name] = actions.get(name, 0) + count
+                for example in summary.get('examples', []):
+                    node_types.update((example.get('organization') or {}).get('nodeCalls', {}))
+            history.append({'round': number, 'parentRound': experience.get('father node'),
+                            'score': sum(scores) / len(scores), 'modification': experience.get('modification', 'Single-agent root'),
+                            'actions': actions, 'executedNodeTypes': sorted(node_types),
+                            'templates': [{'id': t['id'], 'nodes': t['profile'].get('nodes', []),
+                                           'reasoning': t['profile'].get('reasoning'), 'tools': t['profile'].get('tools', [])}
+                                          for t in strategy['organization'].get('agentTemplates', [])],
+                            'toolLibrary': [t['name'] for t in strategy['organization'].get('toolLibrary', [])]})
+        return history
+
     def prompt(experience, score, graph, prompts, operator_description, type, log_data):
         if static:return original_prompt(experience,score,graph,prompts,init['interface'],type,log_data)+'\n'+init['interface']
         # Keep AFlow's single-change, complete artifact, feedback and experience instructions.
         # Language/import instructions are replaced because the search object is a native Ditto Graph/Loop composition.
         user = WORKFLOW_INPUT.format(experience=experience, score=score, graph=graph, prompt=prompts,
                                     operator_description=operator_description, type=type, log=log_data)
+        user = user.replace('and no more than 5 lines of code may be changed per modification—extensive modifications are strictly prohibited to maintain project focus!',
+                            'including all node definitions, profiles, bindings and control code needed to implement that one coherent structural change. No line-count limit applies.')
         start = user.index('When introducing new functionalities')
         end = user.index('**Under no circumstances', start)
         user = user[:start] + 'Generate complete JavaScript composition code returning a native Ditto loop plan, plus a complete JSON prompt map. No imports.\n' + user[end:]
         user = user.replace('You do not need to manually import prompt_custom or operator to use them; they are already included in the execution environment.', '')
         system = WORKFLOW_OPTIMIZE_PROMPT.format(type=type)
         system = system.replace("Python's", "JavaScript's")
+        system = system.replace('The graph \ncomplexity should not exceed 10.', 'Choose graph size from the measured task requirements; no fixed node-count limit applies.')
+        system = system.replace('single modification in XML tags in your reply.', 'single modification in the required structured response.')
         # Replace Custom-specific prompt restrictions, not the optimization procedure.
         begin = system.index('The prompt you need to generate')
         end = system.index('Considering information loss', begin)
         system = system[:begin] + 'Generate the complete JSON map of agent, factory, review, integrate and retrieve prompts. All five fields are editable.\n' + system[end:]
-        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members, their internal graphs/loops, the complete agentTemplates library, initialBindings and dynamic MAS routing from this parent, and make one focused change. The candidate jointly defines the MAS and its reusable agents; template-only optimization must not discard the outer derivation policy. Do not copy task answers or episodic memory into reusable profiles. Return composition and organization only as executable fields; parent_execution is evidence.\n' + user + '\n' + init['interface'] + '\nReturn modification, organization, composition and prompts according to the response schema. The strategy dynamically composes heterogeneous agents using native graphs and loops. Preserve and evolve their different internal node structures and cross-agent bindings; do not embed benchmark answers.'
+        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members, their internal graphs/loops, the complete agentTemplates library, initialBindings and dynamic MAS routing from this parent, and make one focused change. The candidate jointly defines the MAS and its reusable agents; template-only optimization must not discard the outer derivation policy. Do not copy task answers or episodic memory into reusable profiles. Return composition and organization only as executable fields; parent_execution is evidence.\n' + user + '\nsearch_branch_history: ' + json.dumps(branch_history()) + '\n' + init['interface'] + '\nReturn modification, organization, composition and prompts according to the response schema. The strategy dynamically composes heterogeneous agents using native graphs and loops. Preserve and evolve their different internal node structures and cross-agent bindings; do not embed benchmark answers.'
 
     optimizer.graph_utils.create_graph_optimize_prompt = prompt
 
@@ -151,7 +188,7 @@ def main():
             'strategy': json.loads((workflows / f"round_{parent['round']}" / 'strategy.json').read_text()),
             'execution': execution_context(parent['round'], workflows),
         }, indent=2) + '\n')
-        checkpoint.update(round=optimizer.round, phase='evaluating', experience=experience)
+        checkpoint.update(round=optimizer.round, phase='evaluating', parentRound=parent['round'], experience=experience)
         persist()
         return experience
     optimizer.experience_utils.create_experience_data = create_experience
@@ -219,7 +256,7 @@ def main():
     optimizer._optimize_graph = optimize_round
     optimizer.round = checkpoint['round']
     seeds = init.get('seeds', [])
-    if len(seeds) > 1 and checkpoint.get('seedRound', 1) <= len(seeds):
+    if static and len(seeds) > 1 and checkpoint.get('seedRound', 1) <= len(seeds):
         # Every root receives the same complete repetitions before native parent sampling.
         for number in range(checkpoint.get('seedRound', 1), len(seeds) + 1):
             seed = seeds[number - 1]
@@ -238,8 +275,8 @@ def main():
         optimizer.round = len(seeds)
     # Run the native loop one iteration at a time, with no arbitrary total cap.
     # Never use an interrupted candidate's partial repetitions to declare convergence.
-    # Native convergence uses five stagnant rounds; initialization comparisons are not mutation rounds.
-    converged = lambda: (not seeds or optimizer.round >= len(seeds) + 5) and checkpoint['phase'] not in ('evaluating', 'seeding') and optimizer.round > max(1, len(seeds)) and optimizer.convergence_utils.check_convergence(top_k=3)[0]
+    # MFlow has one root; every later measured candidate is a real mutation.
+    converged = lambda: (not static or not seeds or optimizer.round >= len(seeds) + 5) and checkpoint['phase'] not in ('evaluating', 'seeding') and optimizer.round > max(1, len(seeds)) and optimizer.convergence_utils.check_convergence(top_k=3)[0]
     while (checkpoint['phase'] != 'finished' and not converged()
            and (config['maxRounds'] is None or optimizer.round <= config['maxRounds'])):
         optimizer.optimize('Graph')

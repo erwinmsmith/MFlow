@@ -84,7 +84,7 @@ def status(out):
         folder=Path(override['output']) if override else out/method;entry={}
         if override:entry['replacement']=override
         controller=read(folder/('search/controller.json' if method=='MFlow' else 'controller.json'),{})
-        entry.update({k:controller[k] for k in ('round','phase','stopReason','seedRound') if k in controller})
+        entry.update({k:controller[k] for k in ('round','phase','stopReason','seedRound','parentRound') if k in controller})
         frozen=read(folder/('search/summary.json' if method=='MFlow' else 'frozen.json'),{})
         entry['frozen']={k:v for k,v in frozen.items() if k in ('round','selectedRound','validationAccuracy','validationScore','stopReason')}
         if method in ('MFlow','AFlow'):

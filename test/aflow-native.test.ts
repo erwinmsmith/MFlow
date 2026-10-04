@@ -8,7 +8,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programDecision, validateProgram, normalizeProgram, PolicyContractError } from '../src/strategy-program.js';
-import { runAFlowSearch, initialOrganization, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema } from '../src/aflow-search.js';
+import { runAFlowSearch, initialOrganization, programPrompts, parallelMap, unrestrictedConfig, aflowConfigSchema, assertSingleRoot } from '../src/aflow-search.js';
 import { aflowInspiredComposition, benchmarkSeed } from '../src/aflow-seed.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
@@ -100,6 +100,10 @@ test('parallel validation preserves task order and executes every task despite e
   assert.equal(calls, 17); assert.equal(peak, 3);
   assert.equal(unrestrictedConfig(393216).episode.maxTokens, Number.MAX_SAFE_INTEGER);
   assert.equal(aflowConfigSchema.parse({}).maxRounds, null);
+  assert.deepEqual(aflowConfigSchema.parse({}).initializations,['dynamic-policy']);
+  assert.throws(()=>aflowConfigSchema.parse({initializations:['single','tree']}));
+  assertSingleRoot(initialOrganization);
+  assert.throws(()=>assertSingleRoot({...initialOrganization,initialAgents:[rootProfile,{...rootProfile,id:'precreated'}]}),/exactly one root/);
 });
 
 test('official AFlow controller fully repeats candidates, freezes selection, and resumes without new calls', async (t) => {
@@ -126,6 +130,9 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       assert.ok(input.messages[0].content.includes('composition'));
       assert.ok(input.messages[0].content.includes('agentTemplates'));
       assert.ok(input.messages[0].content.includes('RUN_TEMPLATE'));
+      assert.ok(input.messages[0].content.includes('search_branch_history'));
+      assert.ok(!input.messages[0].content.includes('no more than 5 lines'));
+      assert.ok(!input.messages[0].content.includes('complexity should not exceed 10'));
 
       value = { organization: {...initialOrganization,toolLibrary:[{name:'generated_sum',description:'Add parameters',parameters:[{name:'values',description:'Numbers',type:'array',required:true}],implementation:{kind:'sequence',steps:[{tool:'arithmetic',arguments:{operation:'add',values:{$input:'/values'}}}]}}]}, modification: `Change the agent instructions (${proposals}).`, composition: aflowInspiredComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
     } else {
