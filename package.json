@@ -16,11 +16,11 @@
   },
   "dependencies": {
     "@codesoul-co/ditto": "0.1.2",
+    "typescript": "5.9.3",
     "undici": "7.30.0",
     "zod": "4.1.12"
   },
   "devDependencies": {
-    "@types/node": "24.10.0",
-    "typescript": "5.9.3"
+    "@types/node": "24.10.0"
   }
 }

@@ -5,6 +5,7 @@ import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { initialStrategy, limitsSchema } from '../src/types.js';
 import { organizationEvidence, summarizeOrganizations } from '../src/organization.js';
+import { validateComposition } from '../src/composition.js';
 
 const model={model:'fixture',baseUrl:'https://invalid.example',temperature:0,seed:42};
 const response=(content:string)=>({message:{role:'assistant' as const,content},finishReason:'stop' as const,usage:{totalTokens:1}});
@@ -22,6 +23,42 @@ const second=`return loop({id:'cross-agent',plan:function*(ctx){
     .node(id,'INFER.REASONING.SAMPLE',['root/evidence',ctx.self+'/observe'],(_,out)=>ctx.request(ctx.self,[{role:'user',content:JSON.stringify({evidence:out['root/evidence'],observation:out[ctx.self+'/observe']})}],false,'text')),null);
   return ctx.publishText(ctx.self,ctx.unwrap(out[id]).message.content,'raw');
 }});`;
+
+test('synchronous ctx delegation fails before evaluation; embedded source and legitimate generators remain valid',()=>{
+  for (const call of ["ctx.spawnTemplate('solver','child')", "ctx['spawnTemplate']('solver','child')", "ctx.publishText('root','done')"])
+    assert.throws(()=>validateComposition(`return loop({id:'invalid',plan:function*(ctx){yield* ${call};}});`),/is synchronous/);
+  validateComposition(`return loop({id:'valid',plan:function*(ctx){
+    const example="yield* ctx.spawnTemplate('solver','child')";
+    // yield* ctx.spawnTemplate is an invalid example, not executed code.
+    ctx.spawnTemplate('solver','child');return yield* ctx.runAgent('child');
+  }});`);
+});
+
+test('recursive agent programs unwind before repeating effects, then permit recovery and sequential reuse',async()=>{
+  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['dynamic-policy'])[0];
+  for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['write_fixture'];
+  const recursive=`return loop({id:'recursive',plan:function*(ctx){
+    yield* graphStep(graph('effect').node('root/write','INTERACTION.ACT.TOOL',[],()=>({call:{id:'w',name:'write_fixture',arguments:{}}})),null);
+    return yield* ctx.runAgent('child');
+  }});`;
+  const child=`return loop({id:'child',plan:function*(ctx){return yield* ctx.runAgent('root');}});`;
+  const composition=`return loop({id:'outer',plan:function*(ctx){
+    const template=ctx.agents.find(a=>a.profile.id==='root').templateId;
+    ctx.bindProgram('root',${JSON.stringify(recursive)});
+    ctx.spawn({...ctx.profile('root'),id:'child'},'root',${JSON.stringify(child)});
+    try{yield* ctx.runAgent('root');throw new Error('Expected recursion guard');}
+    catch(error){if(!String(error).includes('Recursive runAgent'))throw error;ctx.recordDecision({error:String(error)});}
+    ctx.bindTemplate('root',template);
+    yield* ctx.runAgent('root');
+    return (yield* ctx.runAgent('root')).candidate_answer;
+  }});`;
+  let writes=0,calls=0;
+  const meter=new MeteredProvider({async invoke(){calls++;return response('Recovered. \\boxed{7}');}});
+  const runner=new OrganizationRuntime(new DittoAgents(meter,model,[{name:'write_fixture',description:'Fixture effect',inputSchema:{type:'object'},validate(){},async execute(){writes++;return {status:'success',content:'effect-already-applied'};}}]),limitsSchema.parse({maxSteps:30,maxTokens:200000}));
+  const result=await runner.run({...initialStrategy,...seed,composition},{id:'recursive-program',prompt:'Synthetic recovery'});
+  assert.equal(result.answer,'\\boxed{7}');assert.equal(writes,1);assert.equal(calls,2);
+  assert.match(JSON.stringify(result.orchestration!.decisions),/Recursive runAgent/);
+});
 
 test('frozen dynamic policy changes internal graph and cross-agent routing only when new evidence requires it',async()=>{
   const seed=benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}],['dynamic-policy'])[0];

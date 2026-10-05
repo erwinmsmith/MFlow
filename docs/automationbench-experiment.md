@@ -99,3 +99,16 @@ python3 scripts/automation_experiment.py --benchmark automationbench \
 
 冻结的初始 bundle 位于 `SingleLLM/seed.json`，结果/进度位于 `SingleLLM/test/`。
 `--status` 显示该方法的通过率、部分得分、实际已知 token 与未知用量；无 search/optimizer 成本。
+
+## MFlow 编排执行修复（2026-10-05）
+
+v11 搜索中发现两类实际代码错误：Round 4 对同步 `ctx.spawnTemplate` 使用 `yield*`，
+以及生成程序经子 agent 返回同一个仍在执行的 root 程序，递归重复已执行的工作。
+共享编译入口现在用已有 TypeScript 解析器检查同步 helper 的错误委托，交由既有候选
+contract repair 在批量评测前纠正；源码字符串和注释不会被误判。共享 `runAgent` 入口
+拒绝同一成员、同一程序尚未返回时的重入，并在退出时清理记录；顺序复用、切换程序和
+派生其他成员仍可执行。搜索及 inference 使用同一检查和 Ditto 接口说明。
+
+修复必须使用新的代码快照和 run，不把旧分数并入新搜索。旧 Round 3 的 98.90% 是
+五次搜索验证的平均成绩，并非 test 成绩；仍保持搜索结束选取最优结构后才做最终 test。
+回归检查覆盖实际的同步 helper 错误及 root→child→root 递归，并验证已完成写操作不重放。

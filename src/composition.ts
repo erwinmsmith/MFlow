@@ -1,4 +1,5 @@
 import { createContext, Script } from 'node:vm';
+import ts from 'typescript';
 import { graph, loop, graphStep, ToolRegistry, type ExecutionGraph, type GraphInvocation, type GraphPlan,
   type LoopPlanDefinition, type NodeType } from '@codesoul-co/ditto';
 import { z } from 'zod';
@@ -112,6 +113,21 @@ const nodes = new Set<NodeType>(compositionNodes);
 function compile(source: string, context = createContext({ graph, loop, graphStep }, { codeGeneration: { strings: false, wasm: false } })) {
   if (typeof source !== 'string' || !source.trim())
     throw new PolicyContractError('Program must be a nonempty JavaScript source STRING whose body returns loop(...), not a function, generator or LoopPlan object');
+  // Parse code, not embedded program strings/comments: these helpers return values, not generators.
+  const synchronous = new Set(['spawn', 'spawnTemplate', 'bindProgram', 'bindTemplate', 'registerTool', 'reconfigure',
+    'recordDecision', 'profile', 'dormant', 'messages', 'textMessages', 'request', 'unwrap', 'decode', 'publish', 'publishText', 'failedAgent', 'formatMessages', 'answerKey']);
+  const inspect = (node: ts.Node) => {
+    if (ts.isYieldExpression(node) && node.asteriskToken && node.expression && ts.isCallExpression(node.expression)) {
+      const call = node.expression.expression;
+      const owner = ts.isPropertyAccessExpression(call) || ts.isElementAccessExpression(call) ? call.expression : undefined;
+      const name = ts.isPropertyAccessExpression(call) ? call.name.text
+        : ts.isElementAccessExpression(call) && ts.isStringLiteral(call.argumentExpression) ? call.argumentExpression.text : '';
+      if (owner && ts.isIdentifier(owner) && owner.text === 'ctx' && synchronous.has(name))
+        throw new PolicyContractError(`ctx.${name} is synchronous: call it directly, without yield*. Only ctx.runAgent and graphStep delegate generators.`);
+    }
+    ts.forEachChild(node, inspect);
+  };
+  inspect(ts.createSourceFile('composition.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
   // VM deadlines guard synchronous candidate code only; model execution is owned
   // by Ditto and has its separately configured deadline. This is not an OS sandbox.
   const evaluate = (code: string) => new Script(code).runInContext(context, { timeout: 250 });
@@ -143,6 +159,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   const templates = new Map((strategy.organization.agentTemplates ?? []).map(t => [t.id, t]));
   const definitions = new Map([...templates].map(([id, t]) => [id, compile(t.composition, machine.context).definition]));
   const programs = new Map<string, LoopPlanDefinition<unknown, unknown>>();
+  const running = new Map<string, Set<LoopPlanDefinition<unknown, unknown>>>();
   const population = new Map<string, { profile: AgentProfile; status: 'ACTIVE' | 'DORMANT'; depth: number; templateId?: string }>();
   const orchestration: NonNullable<Execution['orchestration']> = { graphs: [], lifecycle: [], programs: [], tools: [], toolCalls: [], decisions: [] };
   const outputs: Execution['outputs'] = [], toolEvents: unknown[] = [];
@@ -282,12 +299,17 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       const templateId = member(id).templateId;
       const definition = programs.get(id) ?? (templateId && definitions.get(templateId));
       if (!definition) throw new PolicyContractError(`Agent ${id} has no bound program. ctx.spawn(profile,parentId) only creates a profile for explicit graph nodes. Before runAgent, use ctx.bindProgram(id,sourceString), pass sourceString as spawn's third argument, or use ctx.spawnTemplate(templateId,id,parentId). Source must return loop(...); ctx.agents is an array property, not a function.`);
+      const active = running.get(id) ?? new Set<LoopPlanDefinition<unknown, unknown>>();
+      if (active.has(definition))
+        throw new GeneratedProgramError(`Recursive runAgent(${JSON.stringify(id)}) re-enters its active program. Execute that agent's graph nodes directly, bind a different program, or delegate to another agent; do not restart the active program.`);
+      active.add(definition); running.set(id, active);
       event(programs.has(id) ? 'RUN_PROGRAM' : 'RUN_TEMPLATE', id);
       const local = Object.assign(Object.create(api), { self: id, evidence, prompt });
       // Delegation yields native graphStep invocations to the same Ditto loop.
       // The outer VM deadline also covers nested generator execution/bindings.
       try { return agentOutputSchema.parse(yield* definition.plan(local)); }
       catch(error) { if(programs.has(id))throw new GeneratedProgramError(`Generated agent ${id}: ${String(error)}`);throw error; }
+      finally { active.delete(definition); if (!active.size) running.delete(id); }
     },
     reconfigure: (id: string, profile: AgentProfile) => {
       const parsed = prepareProfile(profile);
