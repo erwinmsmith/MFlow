@@ -123,6 +123,11 @@ MFlow v8 继续使用已有 arithmetic/Python 工具和原生节点。该扩展�
 
 ## DITTO-006：Context 可关闭的存储规模限制（待支持）
 
+2026-10-06 在 registry 0.1.2 上再次复现：单条 1,000,001 字节的 CONTEXT.LOAD
+仍抛出 ContextError；在 createDitto 实例化时，Number.MAX_SAFE_INTEGER 被范围校验拒绝，0 也被正数校验拒绝。v11 的实际搜索题曾因此触发整题重试；MFlow 现将原生 Context
+错误反馈给暂停中的阶段，由候选在同一任务世界内处理，避免自动丢弃成功的写操作。
+这项恢复不取消包的存储上限，不裁剪消息，也不提供自制 Context 实现；以下通用包需求仍未解决。
+
 2026-09-29 核查 registry 0.1.1：公开 `createContextWorker({policy})` 可配置 `maxInlineBytes` / `maxItems`，默认分别为 65,536 字节和 256 项；当前校验器仅接受 1..1,000,000 的整数，没有关闭限制的表示。`Infinity`、`null`、`Number.MAX_SAFE_INTEGER` 都不能作为不设限配置使用。
 
 复现：通过公开 createDitto/createContextWorker 创建 runtime，在 CONTEXT.LOAD 中加载超过 64 KiB 的单条消息，默认配置失败；提高到 1,000,000 后超过该值仍失败，不能声明不设存储上限。此限制不等于模型上下文窗口，也不应被当作候选质量差或推进搜索 round。

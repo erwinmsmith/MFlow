@@ -146,3 +146,30 @@ test('broken generated stages recover in the same world, preserve tool effects a
   assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='RUN_TEMPLATE'&&e.agentId==='root'));
   assert.ok(result.orchestration!.decisions!.some(d=>(d.decision as any).reason==='Execution repair exhausted'));
 });
+
+test('native Context failure reaches stage recovery without replaying successful writes',async()=>{
+  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['dynamic-policy'])[0];
+  for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['write_fixture'];
+  const bad=`return loop({id:'oversized-context',plan:function*(ctx){
+    yield* graphStep(graph('write').node('root/write','INTERACTION.ACT.TOOL',[],()=>({call:{id:'w',name:'write_fixture',arguments:{}}})),null);
+    yield* graphStep(graph('context').node('root/load','CONTEXT.LOAD',[],()=>({sources:[{role:'user',content:'x'.repeat(1000001)}]})),null);
+    throw new Error('Published Context limit should reject the oversized item');
+  }});`;
+  let writes=0,decisions=0;
+  const meter=new MeteredProvider({async invoke(input){
+    if(input.metadata?.nodeId==='root/policy'){
+      const state=JSON.parse(String(input.messages[1].content)).evidence;
+      if(decisions++===0)return response(JSON.stringify({stop:false,reason:'Execute fixture',gap:'Initial',answer:'',composition:bad}));
+      if(decisions===2){
+        assert.match(state.last.error,/inline byte limit/);
+        return response(JSON.stringify({stop:false,reason:'Recover in same world',gap:'Read existing effect',answer:'',composition:first}));
+      }
+      assert.equal(decisions,3);return response(JSON.stringify({stop:true,reason:'Observed completion',gap:'',composition:'',answer:'done'}));
+    }
+    assert.equal(writes,1);return response('Observed existing effect');
+  }});
+  const runner=new OrganizationRuntime(new DittoAgents(meter,model,[{name:'write_fixture',description:'Fixture effect',inputSchema:{type:'object'},validate(){},async execute(){writes++;return {status:'success',content:'applied'};}}]),limitsSchema.parse({maxSteps:30,maxTokens:200000}));
+  const result=await runner.run({...initialStrategy,...seed},{id:'context-recovery',prompt:'Synthetic context failure'});
+  assert.equal(writes,1);assert.equal(result.answer,'done');assert.equal(result.executionError,undefined);
+  assert.ok(result.orchestration!.decisions!.some(d=>(d.decision as any).recovery==='stage-feedback'));
+});

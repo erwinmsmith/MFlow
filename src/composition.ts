@@ -379,9 +379,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
   machine.context.api = api;
   machine.context.definition = machine.definition;
   machine.evaluate('iterator = definition.plan(api)');
-  const advance = (value?: unknown): IteratorResult<GraphInvocation, string> => {
+  const advance = (value?: unknown, failed = false): IteratorResult<GraphInvocation, string> => {
     machine.context.feedback = value;
-    try { return machine.evaluate('iterator.next(feedback)'); }
+    try { return machine.evaluate(failed ? 'iterator.throw(feedback)' : 'iterator.next(feedback)'); }
     catch (error) { throw new PolicyContractError(`Composition plan: ${String(error)}`); }
   };
   // Wrap bindings for contract enforcement and synchronous VM deadlines. Graph
@@ -436,48 +436,58 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     const native = loop({ id: machine.definition.id, maxIterations: Math.min(limits.maxSteps, machine.definition.maxIterations ?? limits.maxSteps), plan: function* (): GraphPlan<string> {
       let next = advance();
       while (!next.done) {
-        const invocation = next.value;
-        if (invocation?.kind !== 'graph' || !Array.isArray(invocation.graph?.tasks))
-          throw new PolicyContractError('Loop must yield public Ditto graphStep invocations');
-        let checked: ExecutionGraph<unknown, Record<string, unknown>> = graph(invocation.graph.id);
-        const bindings: Record<string, unknown> = {};
-        const topology = [];
-        for (const node of invocation.graph.tasks) {
-          if (!nodes.has(node.node)) throw new PolicyContractError(`Unconfigured node type ${node.node}`);
-          if (!node.id.includes('/')) throw new PolicyContractError('Node IDs must be agentId/localName');
-          const owner = member(node.id.split('/')[0]);
-          if (!owner.profile.nodes!.includes(node.node as typeof compositionNodes[number]))
-            throw new (programs.has(owner.profile.id)?GeneratedProgramError:PolicyContractError)(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
-          checked = checked.node(node.id, node.node, node.dependencies, (input, output) => {
-            const value = bind(node, input, output);
-            bindings[node.id] = task.imageParts?.length ? imageLog(value,task) : snapshotGraphData(value);
-            return value;
-          });
-          topology.push({ id: node.id, type: node.node, dependencies: [...node.dependencies] });
-        }
-        const result = { ...(yield* graphStep(checked, invocation.input, { concurrency: invocation.options.concurrency, signal })) };
-        // Return recoverable generation failures as node feedback. The searched
-        // policy decides whether to switch method, derive another member or keep
-        // an earlier complete answer. No partial output becomes a valid answer.
-        if (agents.provider.lastFailure) throw agents.provider.lastFailure;
-        for (const node of topology) {
-          const output = result[node.id] as any;
-          if (node.type.startsWith('INFER.')) {
-            const providerError = agents.provider.nodeFailures.get(node.id);
-            if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT'].includes(providerError.code))
-              result[node.id] = { status: 'error', error: { code: providerError.code, message: providerError.message } };
-            else if (output?.status !== 'success') {
-              if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'INVALID_INPUT'].includes(output?.error?.code))
-                throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
-            } else if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
-              result[node.id] = { status: 'error', error: { code: 'OUTPUT_LIMIT', message: 'Provider output limit reached; partial output is not evidence' } };
-            else if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))
-              result[node.id] = { status: 'error', error: { code: 'INCOMPLETE_MODEL_OUTPUT', message: 'Node produced no complete response' } };
+        let result: Record<string, unknown>;
+        try {
+          const invocation = next.value;
+          if (invocation?.kind !== 'graph' || !Array.isArray(invocation.graph?.tasks))
+            throw new PolicyContractError('Loop must yield public Ditto graphStep invocations');
+          let checked: ExecutionGraph<unknown, Record<string, unknown>> = graph(invocation.graph.id);
+          const bindings: Record<string, unknown> = {};
+          const topology = [];
+          for (const node of invocation.graph.tasks) {
+            if (!nodes.has(node.node)) throw new PolicyContractError(`Unconfigured node type ${node.node}`);
+            if (!node.id.includes('/')) throw new PolicyContractError('Node IDs must be agentId/localName');
+            const owner = member(node.id.split('/')[0]);
+            if (!owner.profile.nodes!.includes(node.node as typeof compositionNodes[number]))
+              throw new (programs.has(owner.profile.id)?GeneratedProgramError:PolicyContractError)(`Agent ${owner.profile.id} cannot execute node ${node.node}`);
+            checked = checked.node(node.id, node.node, node.dependencies, (input, output) => {
+              const value = bind(node, input, output);
+              bindings[node.id] = task.imageParts?.length ? imageLog(value,task) : snapshotGraphData(value);
+              return value;
+            });
+            topology.push({ id: node.id, type: node.node, dependencies: [...node.dependencies] });
           }
-          if (node.type === 'INTERACTION.ACT.TOOL') orchestration.toolCalls!.push({ agentId: node.id.split('/')[0], name: (bindings[node.id] as any).call.name, status: output?.status ?? 'error' });
-          if (node.type === 'INTERACTION.OBSERVE') toolEvents.push(output);
+          result = { ...(yield* graphStep(checked, invocation.input, { concurrency: invocation.options.concurrency, signal })) };
+          // Return recoverable generation failures as node feedback. The searched
+          // policy decides whether to switch method, derive another member or keep
+          // an earlier complete answer. No partial output becomes a valid answer.
+          if (agents.provider.lastFailure) throw agents.provider.lastFailure;
+          for (const node of topology) {
+            const output = result[node.id] as any;
+            if (node.type.startsWith('INFER.')) {
+              const providerError = agents.provider.nodeFailures.get(node.id);
+              if (providerError && ['DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT'].includes(providerError.code))
+                result[node.id] = { status: 'error', error: { code: providerError.code, message: providerError.message } };
+              else if (output?.status !== 'success') {
+                if (!['INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'INVALID_INPUT'].includes(output?.error?.code))
+                  throw new Error(`Ditto node ${node.id}: ${JSON.stringify(output?.error)}`);
+              } else if (output.output?.finishReason === 'length' || output.output?.stopReason === 'max_tokens')
+                result[node.id] = { status: 'error', error: { code: 'OUTPUT_LIMIT', message: 'Provider output limit reached; partial output is not evidence' } };
+              else if (['cancelled', 'error'].includes(output.output?.finishReason) || ['partial', 'failed'].includes(output.output?.status))
+                result[node.id] = { status: 'error', error: { code: 'INCOMPLETE_MODEL_OUTPUT', message: 'Node produced no complete response' } };
+            }
+            if (node.type === 'INTERACTION.ACT.TOOL') orchestration.toolCalls!.push({ agentId: node.id.split('/')[0], name: (bindings[node.id] as any).call.name, status: output?.status ?? 'error' });
+            if (node.type === 'INTERACTION.OBSERVE') toolEvents.push(output);
+          }
+          orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: snapshotGraphData(result) });
+        } catch (error) {
+          // Deliver native contract failures back to the suspended stage so its
+          // recovery uses the same world, rather than retrying the whole task.
+          if (agents.provider.lastFailure || !(error instanceof PolicyContractError || (error instanceof Error && error.name === 'ContextError'))) throw error;
+          orchestration.decisions!.push({ afterGraph: orchestration.graphs.length, decision: { executionError: String(error), recovery: 'stage-feedback' } });
+          next = advance(error, true);
+          continue;
         }
-        orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: snapshotGraphData(result) });
         next = advance(result);
       }
       if (typeof next.value !== 'string') throw new PolicyContractError('MAS loop must return the final answer string');
