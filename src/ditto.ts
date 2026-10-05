@@ -162,7 +162,7 @@ export class MeteredProvider implements ModelProvider {
       const cause = failure.cause as { code?: string; cause?: { code?: string } } | undefined;
       const transient = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT'].includes(
         String(cause?.code ?? cause?.cause?.code ?? failure.code)) ||
-        (failure.code === 'PROVIDER_FAILURE' && /^(?:\[PROVIDER_FAILURE\] )?terminated$/.test(failure.message)) ||
+        (failure.code === 'PROVIDER_FAILURE' && /^(?:\[PROVIDER_FAILURE\] )?(?:terminated|fetch failed)$/.test(failure.message)) ||
         (failure.code === 'PROVIDER_HTTP_ERROR' && /HTTP (?:429|500|502|503|504)(?:\D|$)/.test(failure.message));
       if (transient && attempt < 2 && !options.signal.aborted) {
         // Each attempt reserves/settles separately. No partial text is reused,

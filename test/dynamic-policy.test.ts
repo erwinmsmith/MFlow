@@ -75,3 +75,37 @@ test('late successful tools and programs remain visible after many ordinary feed
   assert.ok(summary.examples.some(r=>r.taskId==='late'));
   assert.equal(summary.reusableCandidates.tools.length,1);
 });
+
+test('broken generated stages recover in the same world, preserve tool effects and stop accumulating stale source',async()=>{
+  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['dynamic-policy'])[0];
+  for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['write_fixture'];
+  let decisions=0,writes=0;
+  const faulty=[
+    `return loop({id:'missing-binding',plan:function*(ctx){
+      yield* graphStep(graph('effect').node('root/write','INTERACTION.ACT.TOOL',[],()=>({call:{id:'w',name:'write_fixture',arguments:{}}}))
+        .node('root/observe','INTERACTION.OBSERVE',['root/write'],(_,out)=>({result:out['root/write']})),null);
+      ctx.spawn({...ctx.profile('root'),id:'child'});
+      return yield* ctx.runAgent('child');
+    }});`,
+    `return loop({id:'wrong-source-type',plan:function*(ctx){ctx.bindProgram('child',function*(){return 'invalid';});return yield* ctx.runAgent('child');}});`,
+    `return loop({id:'wrong-property-access',plan:function*(ctx){ctx.agents();return yield* ctx.runAgent('child');}});`,
+  ];
+  const meter=new MeteredProvider({async invoke(input){
+    if(input.metadata?.nodeId==='root/policy'){
+      const state=JSON.parse(String(input.messages[1].content)).evidence;
+      assert.ok(state.structure.programs.length<=1,'Only current root source belongs in the next design context');
+      if(decisions===1)assert.match(state.last.error,/no bound program/);
+      if(decisions===2)assert.match(state.last.error,/source STRING/);
+      assert.ok(decisions<3,'Must not repeat failed code indefinitely');
+      return response(JSON.stringify({stop:false,reason:'Repair fixture',gap:'Fixture binding',composition:faulty[decisions++],answer:''}));
+    }
+    assert.ok(JSON.stringify(input.messages).includes('effect-already-applied'));
+    return response('Recovered existing effect. \\boxed{7}');
+  }});
+  const runner=new OrganizationRuntime(new DittoAgents(meter,model,[{name:'write_fixture',description:'Fixture effect',inputSchema:{type:'object'},validate(){},async execute(){writes++;return {status:'success',content:'effect-already-applied'};}}]),limitsSchema.parse({maxSteps:40,maxTokens:200000}));
+  const result=await runner.run({...initialStrategy,...seed},{id:'broken-program',prompt:'Synthetic recovery check'});
+  assert.equal(result.answer,'\\boxed{7}');assert.equal(decisions,3);assert.equal(writes,1);
+  assert.equal(result.orchestration!.programs!.length,3,'Full audit source remains available to search');
+  assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='RUN_TEMPLATE'&&e.agentId==='root'));
+  assert.ok(result.orchestration!.decisions!.some(d=>(d.decision as any).reason==='Execution repair exhausted'));
+});

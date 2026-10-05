@@ -110,6 +110,8 @@ export const initialLibraryComposition = `return loop({ id: 'mas', plan: functio
 const nodes = new Set<NodeType>(compositionNodes);
 
 function compile(source: string, context = createContext({ graph, loop, graphStep }, { codeGeneration: { strings: false, wasm: false } })) {
+  if (typeof source !== 'string' || !source.trim())
+    throw new PolicyContractError('Program must be a nonempty JavaScript source STRING whose body returns loop(...), not a function, generator or LoopPlan object');
   // VM deadlines guard synchronous candidate code only; model execution is owned
   // by Ditto and has its separately configured deadline. This is not an OS sandbox.
   const evaluate = (code: string) => new Script(code).runInContext(context, { timeout: 250 });
@@ -232,7 +234,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get graphs() { return snapshotGraphData(orchestration.graphs); },
     get tools() { return structuredClone(orchestration.tools); },
     get structure() { return snapshotGraphData({ graphs: orchestration.graphs.map(({id,nodes})=>({id,nodes})),
-      programs: orchestration.programs, decisions: orchestration.decisions }); },
+      // Superseded source stays in the audit log; only current bindings belong in design state.
+      programs: [...new Map(orchestration.programs!.map(p=>[p.agentId,p])).values()].filter(p=>programs.has(p.agentId)),
+      decisions: orchestration.decisions }); },
     recordDecision: (decision: unknown) => { orchestration.decisions!.push({ afterGraph: orchestration.graphs.length, decision: z.json().parse(decision) }); },
     bindProgram: (id: string, composition: string) => {
       member(id); const definition = compile(composition, machine.context).definition;
@@ -277,7 +281,7 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     runAgent: function* (id: string, evidence: unknown = [], prompt = 'agent'): Generator<GraphInvocation, z.infer<typeof agentOutputSchema>, any> {
       const templateId = member(id).templateId;
       const definition = programs.get(id) ?? (templateId && definitions.get(templateId));
-      if (!definition) throw new PolicyContractError(`Agent ${id} has no bound program`);
+      if (!definition) throw new PolicyContractError(`Agent ${id} has no bound program. ctx.spawn(profile,parentId) only creates a profile for explicit graph nodes. Before runAgent, use ctx.bindProgram(id,sourceString), pass sourceString as spawn's third argument, or use ctx.spawnTemplate(templateId,id,parentId). Source must return loop(...); ctx.agents is an array property, not a function.`);
       event(programs.has(id) ? 'RUN_PROGRAM' : 'RUN_TEMPLATE', id);
       const local = Object.assign(Object.create(api), { self: id, evidence, prompt });
       // Delegation yields native graphStep invocations to the same Ditto loop.

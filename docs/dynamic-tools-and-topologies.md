@@ -189,3 +189,21 @@ execute the same program; runtime-generated members are fresh for each task and
 need not belong to the frozen template library. Test outcomes never enter the
 optimizer. The separately user-selected old round 9 test runs in the old v8
 snapshot; this changed search starts a fresh independent experiment.
+
+## 2026-10-05 生成程序恢复修复
+
+v10 的一题创建成员后未绑定内部程序，随后把函数当作源码、把 `ctx.agents` 属性当作函数使用。
+控制循环吞掉异常后反复重生成 556 次，最终触发供应商上下文上限；不能把这种记录当成成功派生。
+
+- `spawn(profile,parent)` 仍支持为显式跨 agent graph 创建成员；`runAgent` 必须有模板绑定或源码字符串。
+  程序编译拒绝函数、生成器和对象的隐式字符串转换，错误信息说明正确的绑定入口。
+- Ditto 指南和设计提示词明确属性读取、源码字符串、绑定与复用已有成员的区别。
+- 连续三个生成阶段异常后，初始动态策略使用 root 的原始模板恢复，携带已观察到的工具结果和输出，
+  保留同一任务世界并检查剩余工作。控制输出连续三次不合法或发生上下文超限时也走同一恢复入口。
+  这是代码错误恢复保护，不限制成功执行的阶段数、派生数量或搜索轮次。
+- `ctx.structure.programs` 只给设计阶段当前绑定的源码；完整历史仍保存在执行审计与搜索反馈中。
+- 临时 `fetch failed` 与已有 socket/502 恢复一致：最多重试当前模型调用两次，保留任务世界和未知用量记录，
+  不重放已完成的工具调用。鉴权、欠费仍停止而不在调用层重试。
+
+该修复改变初始控制程序与冻结指南，使用新的 v11 完整搜索；不将 v10 的重复验证分数混入新运行。
+已有基线从各自冻结快照和任务断点继续，已完成的 test 不重跑。
