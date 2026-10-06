@@ -282,7 +282,7 @@ def main():
                 bridge=None;start_bridge()
             for name,(index,at) in list(retrying.items()):
                 if time.monotonic()>=at:
-                    if name not in ('MFlow','SingleLLM'):
+                    if name not in ('MFlow','SingleLLM') and not math:
                         reset={'method':name.split('/')[0]}
                         if name=='AFlow':reset.update(taskPrefix='round_' if math else 'round-')
                         request=urllib.request.Request(env['MFLOW_BASELINE_ENDPOINT']+'/reset-method',data=json.dumps(reset).encode(),headers={'Content-Type':'application/json'})

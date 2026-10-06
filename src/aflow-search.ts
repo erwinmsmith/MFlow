@@ -150,6 +150,7 @@ export async function runAFlowSearch(options: {
     ...await gradingIdentity(tasks),
     dataHash: digest(tasks), source: lock, code, pythonImage: image, webSearch,
     controller: digest(await readFile(controller, 'utf8')),
+    controllerEvidence: digest(await readFile(resolve('scripts/search_evidence.py'), 'utf8')),
     pythonEnvironment: await pythonEnvironment(options.python),
     graderEnvironment: tasks.some((t) => t.metric === 'math') ? await pythonEnvironment(process.env.MFLOW_BENCH_PYTHON ?? 'python3') : undefined,
     grader: digest(await readFile('scripts/grade_math.py', 'utf8')),

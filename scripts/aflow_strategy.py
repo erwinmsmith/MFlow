@@ -10,6 +10,7 @@ import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
+from search_evidence import compact_evidence
 
 
 def main():
@@ -94,7 +95,7 @@ def main():
     def read_graph(number, path):
         strategy = json.loads((Path(path) / f'round_{number}/strategy.json').read_text())
         if static:return strategy['prompts'], strategy['composition']
-        return json.dumps(strategy['prompts']), json.dumps({'composition': strategy['composition'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)})
+        return json.dumps(strategy['prompts']), json.dumps(compact_evidence({'composition': strategy['composition'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)}), ensure_ascii=False, separators=(',', ':'))
 
     optimizer.graph_utils.write_graph_files = write_graph
     optimizer.graph_utils.read_graph_files = read_graph

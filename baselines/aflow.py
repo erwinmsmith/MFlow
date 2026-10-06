@@ -50,7 +50,8 @@ async def export_round(optimizer,directory,validation_n,data,initial=False):
     return score
 optimizer.evaluation_utils.evaluate_graph=export_round
 phase='pilot' if args.phase=='pilot' else 'search'
-recovered_initial={}
+recovered_search={}
+validation_repeat=0
 async def load_data(self,specific_indices=None):
     rows=tasks('test' if phase=='test' else 'search')
     if phase=='pilot':rows=rows[:2]
@@ -61,8 +62,8 @@ async def evaluate_all(self,data,agent,max_concurrent_tasks=1):
 BaseBenchmark.evaluate_all_problems=evaluate_all
 async def evaluate(self,problem,agent):
     round_name=Path(self.log_path).name
-    if phase=='search' and round_name=='round_1' and problem['id'] in recovered_initial:
-        row=recovered_initial[problem['id']]
+    if phase=='search' and (round_name,validation_repeat,problem['id']) in recovered_search:
+        row=recovered_search[round_name,validation_repeat,problem['id']]
         self.charged=getattr(self,'charged',0)+row['tokens']
         return problem['problem'],row['answer'],problem['solution'],row['score'],float(self.charged)
     execution_id=('observe-round/' if args.test_round else '')+round_name+'/'+problem['id']
@@ -75,13 +76,75 @@ async def evaluate(self,problem,agent):
         except Exception as e:
             status='execution_error: '+repr(e)
         score=grade(problem['task'],str(output));charged=usage('AFlow',phase,execution_id)
-        save_row((test_out if phase=='test' else RUNS/'AFlow'/phase)/'results.jsonl',{'taskId':problem['id'],'round':round_name,'score':score,'answer':output,'tokens':charged,'status':status,'seconds':time.monotonic()-started})
+        save_row((test_out if phase=='test' else RUNS/'AFlow'/phase)/'results.jsonl',{'taskId':problem['id'],'round':round_name,'repeat':validation_repeat,'score':score,'answer':output,'tokens':charged,'status':status,'seconds':time.monotonic()-started})
         if score==0 and phase=='search':self.log_mismatch(problem['problem'],problem['solution'],output,output)
         print(json.dumps({'phase':phase,'round':round_name,'taskId':problem['id'],'score':score,'tokens':charged}),flush=True)
         self.charged=getattr(self,'charged',0)+charged
         return problem['problem'],output,problem['solution'],score,float(self.charged)
     finally:SCOPE.reset(token)
 MATHBenchmark.evaluate_problem=evaluate
+def install_search_resume(out,workflows):
+    """Checkpoint candidate identity and RNG; cache rows by round/pass/task."""
+    checkpoint_path=out/'controller.json'
+    checkpoint=json.loads(checkpoint_path.read_text()) if checkpoint_path.exists() else {'round':1,'phase':'generating'}
+    def persist():
+        checkpoint['random']=random.getstate()
+        state=np.random.get_state();checkpoint['numpy']=[state[0],state[1].tolist(),int(state[2]),int(state[3]),float(state[4])]
+        temp=checkpoint_path.with_suffix('.tmp');temp.write_text(json.dumps(checkpoint)+'\n');temp.replace(checkpoint_path)
+    if 'random' in checkpoint:
+        def tuples(x):return tuple(tuples(v) for v in x) if isinstance(x,list) else x
+        random.setstate(tuples(checkpoint['random']))
+        state=checkpoint['numpy'];np.random.set_state((state[0],np.array(state[1],dtype=np.uint32),*state[2:]))
+    # Legacy interrupted candidates need an explicit, audited recovery checkpoint.
+    elif recovered_search and any(int(k[0].split('_')[-1])>1 for k in recovered_search):
+        raise RuntimeError('Legacy candidate needs controller.json with verified parent, experience and workflow hashes')
+    original_create=optimizer.experience_utils.create_experience_data
+    def create(parent,modification):
+        experience=original_create(parent,modification)
+        directory=workflows/f'round_{optimizer.round+1}'
+        checkpoint.update(round=optimizer.round,phase='evaluating',experience=experience,
+            files={n:hashlib.sha256((directory/n).read_bytes()).hexdigest() for n in ('graph.py','prompt.py')})
+        persist();return experience
+    optimizer.experience_utils.create_experience_data=create
+    original_evaluate=optimizer.evaluation_utils.evaluate_graph
+    async def evaluate_round(optimizer,directory,validation_n,data,initial=False):
+        global validation_repeat
+        number=optimizer.round if initial else optimizer.round+1
+        data[:]=[r for r in data if r['round']!=number]
+        from scripts.evaluator import Evaluator
+        original_graph=Evaluator.graph_evaluate
+        validation_repeat=-1
+        async def graph_evaluate(self,*args,**kwargs):
+            global validation_repeat
+            validation_repeat+=1
+            return await original_graph(self,*args,**kwargs)
+        Evaluator.graph_evaluate=graph_evaluate
+        try:return await original_evaluate(optimizer,directory,validation_n,data,initial)
+        finally:Evaluator.graph_evaluate=original_graph
+    optimizer.evaluation_utils.evaluate_graph=evaluate_round
+    original_optimize=optimizer._optimize_graph
+    async def optimize_round():
+        try:
+            if checkpoint['phase']=='evaluating':
+                directory=workflows/f'round_{optimizer.round+1}'
+                for name,digest in checkpoint['files'].items():
+                    if hashlib.sha256((directory/name).read_bytes()).hexdigest()!=digest:raise SystemExit('Interrupted candidate changed')
+                optimizer.graph=optimizer.graph_utils.load_graph(optimizer.round+1,str(workflows))
+                data=optimizer.data_utils.load_results(str(workflows))
+                score=await evaluate_round(optimizer,str(directory),optimizer.validation_rounds,data)
+                optimizer.experience_utils.update_experience(str(directory),checkpoint['experience'],score)
+            else:
+                checkpoint.update(round=optimizer.round,phase='generating');persist()
+                score=await original_optimize()
+        except Exception:
+            checkpoint.update(round=optimizer.round+1,phase='generating');persist()
+            raise
+        checkpoint.update(round=optimizer.round+1,phase='generating');persist()
+        return score
+    optimizer._optimize_graph=optimize_round
+    optimizer.round=checkpoint['round']
+    optimizer.max_rounds=max(0,native['maxRounds']-(optimizer.round-1))
+
 async def main():
     global phase
     workflows='workspace/MATH/workflows'
@@ -107,18 +170,19 @@ async def main():
         return
     if (out/'search/results.jsonl').exists():
         saved=[json.loads(s) for s in (out/'search/results.jsonl').read_text().splitlines()]
-        if len(saved)!=119 or {r['taskId'] for r in saved}!={t['id'] for t in tasks('search')} or any(r['round']!='round_1' for r in saved) or Path(workflows,'round_2/graph.py').exists():
-            raise RuntimeError('Interrupted candidate search requires inspection; refuse duplicate evaluations')
-        recovered_initial.update({r['taskId']:r for r in saved})
-        # Rebuild the failed metadata write from paid results, without repeating model calls.
-        Path(workflows,'results.json').write_text('[]\n')
+        allowed={t['id'] for t in tasks('search')}
+        for row in saved:
+            key=(row['round'],row.get('repeat',0),row['taskId'])
+            if row['taskId'] not in allowed or key in recovered_search:raise RuntimeError('Invalid or duplicate search row')
+            recovered_search[key]=row
+    install_search_resume(out,Path(workflows))
     # Execute the official top-level optimizer, including its convergence/round controls.
     await asyncio.to_thread(optimizer.optimize,'Graph')
     stop='official_optimizer_returned'
     records=json.loads(Path(workflows,'results.json').read_text())
     # Only official completed 119-task validation records are eligible.
     logged=[json.loads(s) for s in (out/'search/results.jsonl').read_text().splitlines()]
-    complete=[r for r in records if sum(x['round']==f"round_{r['round']}" for x in logged)==119]
+    complete=[r for r in records if sum(x['round']==f"round_{r['round']}" for x in logged)==len(tasks('search'))*native['validationRounds']]
     if not complete:raise RuntimeError('No fully evaluated AFlow candidate')
     best=max(complete,key=lambda r:(r['score'],-r['round']));number=best['round']
     files={n:hashlib.sha256(Path(workflows,f'round_{number}',n).read_bytes()).hexdigest() for n in ['graph.py','prompt.py']}

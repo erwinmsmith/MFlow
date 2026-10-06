@@ -17,6 +17,10 @@ def guard_transport(call, transport_error):
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
             raise InfrastructureUnavailable(str(error)) from None
         except transport_error as error:
+            # Older frozen adapters classified model faults as transport errors.
+            # Let native answer retries handle these; outages must still escape.
+            if any('['+code+']' in str(error) for code in ('DEGENERATE_OUTPUT', 'INVALID_MODEL_OUTPUT', 'INCOMPLETE_MODEL_OUTPUT', 'MODEL_CONTEXT_LIMIT')):
+                raise RuntimeError(str(error)) from None
             # Preserve the original method's handling of a model output limit.
             if str(error).startswith('Provider context/output ceiling reached'):
                 raise
