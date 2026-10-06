@@ -6,6 +6,7 @@ import { OrganizationRuntime } from '../src/runtime.js';
 import { initialStrategy, limitsSchema } from '../src/types.js';
 import { organizationEvidence, summarizeOrganizations } from '../src/organization.js';
 import { validateComposition } from '../src/composition.js';
+import { ProviderFailure } from '../src/provider-progress.js';
 
 const model={model:'fixture',baseUrl:'https://invalid.example',temperature:0,seed:42};
 const response=(content:string)=>({message:{role:'assistant' as const,content},finishReason:'stop' as const,usage:{totalTokens:1}});
@@ -172,4 +173,48 @@ test('native Context failure reaches stage recovery without replaying successful
   const result=await runner.run({...initialStrategy,...seed},{id:'context-recovery',prompt:'Synthetic context failure'});
   assert.equal(writes,1);assert.equal(result.answer,'done');assert.equal(result.executionError,undefined);
   assert.ok(result.orchestration!.decisions!.some(d=>(d.decision as any).recovery==='stage-feedback'));
+});
+
+test('provider rejection of generated tool history repairs the stage without replaying writes',async()=>{
+  for(const message of ["Messages with role 'tool' must be a response to a preceding message with 'tool_calls'", "An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'"]){
+    const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['dynamic-policy'])[0];
+    for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['write_fixture'];
+    const bad=`return loop({id:'history-error',plan:function*(ctx){
+      yield* graphStep(graph('write').node('root/write','INTERACTION.ACT.TOOL',[],()=>({call:{id:'w',name:'write_fixture',arguments:{}}})),null);
+      yield* graphStep(graph('invalid-history').node('root/bad','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',ctx.textMessages('root'),false,'text')),null);
+      throw new Error('Rejected history must reach stage recovery');
+    }});`;
+    let writes=0,decisions=0,rejections=0;
+    const meter=new MeteredProvider({async invoke(input){
+      if(input.metadata?.nodeId==='root/bad'){rejections++;throw new ProviderFailure('PROVIDER_HTTP_ERROR','HTTP 400: '+message);}
+      if(input.metadata?.nodeId==='root/policy'){
+        const state=JSON.parse(String(input.messages[1].content)).evidence;
+        if(decisions++===0)return response(JSON.stringify({stop:false,reason:'Fixture',gap:'Initial',answer:'',composition:bad}));
+        if(decisions===2){assert.match(state.last.error,/Invalid tool-message history/);return response(JSON.stringify({stop:false,reason:'Repair history',gap:'Read effect',answer:'',composition:first}));}
+        return response(JSON.stringify({stop:true,reason:'Complete',gap:'',composition:'',answer:'done'}));
+      }
+      assert.equal(writes,1);return response('Observed existing effect');
+    }});
+    const runner=new OrganizationRuntime(new DittoAgents(meter,model,[{name:'write_fixture',description:'Fixture effect',inputSchema:{type:'object'},validate(){},async execute(){writes++;return {status:'success',content:'applied'};}}]),limitsSchema.parse({maxSteps:30,maxTokens:200000}));
+    const result=await runner.run({...initialStrategy,...seed},{id:'history-recovery',prompt:'Synthetic history failure'});
+    assert.equal(result.answer,'done');assert.equal(writes,1);assert.equal(rejections,1);assert.equal(meter.lastFailure,undefined);
+  }
+});
+
+test('failed template fallback preserves execution after generated bindings are removed',async()=>{
+  const seed=benchmarkSeeds([{benchmark:'math',metric:'math'}],['dynamic-policy'])[0];
+  for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['write_fixture'];
+  const template=seed.organization.agentTemplates!.find(t=>t.id===seed.organization.initialBindings!.root)!;
+  template.composition=`return loop({id:'context-fallback',plan:function*(ctx){yield* graphStep(graph('context').node('root/load','CONTEXT.LOAD',[],()=>({sources:[{role:'user',content:'x'.repeat(1000001)}]})),null);}});`;
+  let writes=0,decisions=0;
+  const meter=new MeteredProvider({async invoke(){
+    const write=decisions++===0?`yield* graphStep(graph('effect').node('root/write','INTERACTION.ACT.TOOL',[],()=>({call:{id:'w',name:'write_fixture',arguments:{}}})),null);`:'';
+    assert.ok(decisions<=3);
+    return response(JSON.stringify({stop:false,reason:'Fixture',gap:'Broken stage',answer:'',composition:`return loop({id:'bad',plan:function*(ctx){${write}ctx.agents();}});`}));
+  }});
+  const runner=new OrganizationRuntime(new DittoAgents(meter,model,[{name:'write_fixture',description:'Fixture effect',inputSchema:{type:'object'},validate(){},async execute(){writes++;return {status:'success',content:'applied'};}}]),limitsSchema.parse({maxSteps:30,maxTokens:200000}));
+  const result=await runner.run({...initialStrategy,...seed},{id:'failed-fallback',prompt:'Synthetic context fallback'});
+  assert.match(result.executionError!,/inline byte limit/);assert.equal(writes,1);
+  assert.equal(result.orchestration!.programs!.length,3);assert.equal(result.orchestration!.toolCalls!.length,1);
+  assert.ok(result.orchestration!.lifecycle.some(e=>e.action==='RECONFIGURE'&&e.agentId==='root'));
 });

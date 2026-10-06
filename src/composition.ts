@@ -481,6 +481,13 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
           }
           orchestration.graphs.push({ id: checked.id, nodes: topology, inputs: bindings, outputs: snapshotGraphData(result) });
         } catch (error) {
+          const failure = agents.provider.lastFailure;
+          if (failure?.code === 'PROVIDER_HTTP_ERROR' && /HTTP 400: (?:Messages with role 'tool' must be a response|An assistant message with 'tool_calls' must be followed)/.test(failure.message)) {
+            // Generated history is a stage contract error, not a provider outage.
+            // Never invent missing tool results or silently discard observations.
+            agents.provider.lastFailure = undefined;
+            error = new GeneratedProgramError(`Invalid tool-message history: ${failure.message}. Preserve the assistant message with metadata.actionRequests and append each actual OBSERVE message with its matching actionRequestId before the next inference. Recover from the existing world; do not repeat successful writes.`);
+          }
           // Deliver native contract failures back to the suspended stage so its
           // recovery uses the same world, rather than retrying the whole task.
           if (agents.provider.lastFailure || !(error instanceof PolicyContractError || (error instanceof Error && error.name === 'ContextError'))) throw error;
@@ -496,7 +503,9 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     const answer = await runtime.loop(native, undefined, { signal });
     return finish(answer);
   } catch (error) {
-    if(!agents.provider.lastFailure && programs.size>0 && error instanceof PolicyContractError)return finish('',String(error));
+    // bindTemplate removes the active generated binding during recovery, but
+    // must not erase the episode's generated-code provenance or world snapshot.
+    if(!agents.provider.lastFailure && orchestration.programs!.length>0 && error instanceof PolicyContractError)return finish('',String(error));
     throw agents.provider.lastFailure ?? error;
   }
   finally { agents.provider.endEpisode(); await runtime.close(); }
