@@ -10,6 +10,8 @@ import { benchmarkSeed } from '../src/aflow-seed.js';
 import { DittoAgents, MeteredProvider } from '../src/ditto.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { grade, checkScoring, gradingIdentity } from '../src/grading.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 test('shared catalog resolves text views and fails closed for environment-only benchmarks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'mflow-hub-'));
@@ -92,4 +94,32 @@ test('HumanEval+ official checker scores both complete and incorrect Python insi
   assert.equal((await grade(task, 'def has_close_elements(numbers, threshold):\n    return False')).score, 0);
   const identity = await gradingIdentity(tasks);
   assert.match(identity.evalplusImage!, /^sha256:/);
+});
+
+test('DROP and MBPP CLI seeds run one tool-free Ditto agent without search or reference access', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'mflow-single-text-'));
+  try {
+    for (const [benchmark, answer] of [['drop', 'Alice'], ['mbpp', 'def add(a, b):\n    return a + b']] as const) {
+      const out = join(dir, `${benchmark}.json`);
+      await promisify(execFile)(process.execPath, ['dist/src/cli.js', 'seed', '--benchmark', benchmark,
+        '--initialization', 'single', '--out', out], { env: { ...process.env, MFLOW_API_KEY: '', MFLOW_MODEL: 'fixture' } });
+      const bundle = JSON.parse(await readFile(out, 'utf8'));
+      assert.deepEqual(bundle.selectionTaskIds, []);
+      assert.equal(bundle.strategy.organization.toolCreation, false);
+      assert.deepEqual(bundle.strategy.organization.initialAgents[0].tools, []);
+      assert.match(bundle.strategy.prompts.agent, benchmark === 'mbpp' ? /complete executable Python/ : /supplied passage/);
+      let calls = 0;
+      const provider = new MeteredProvider({ async invoke(input) {
+        calls++;
+        assert.equal(input.actions?.length ?? 0, 0);
+        assert.ok(!JSON.stringify(input).includes('HIDDEN_REFERENCE'));
+        return { message: { role: 'assistant', content: answer }, finishReason: 'stop', usage: { totalTokens: 10 } };
+      } });
+      const result = await new OrganizationRuntime(new DittoAgents(provider, bundle.model), bundle.config.episode, bundle.pool)
+        .run(bundle.strategy, { id: 'fixture', prompt: benchmark === 'mbpp' ? 'Implement add(a, b).' : 'Passage: Alice owns a cat. Question: Who owns a cat?' });
+      assert.equal(calls, 1);
+      assert.equal(result.agents.length, 1);
+      assert.equal(result.answer, answer);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

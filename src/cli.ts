@@ -118,10 +118,13 @@ async function run() {
   }
   if (command === 'seed') {
     const name = benchmarkName(required('benchmark'));
-    if (name !== 'hle' && name !== 'automationbench') throw new Error('seed supports hle and automationbench');
+    const metrics = { drop: 'drop', humaneval: 'python', mbpp: 'python', gsm8k: 'numeric',
+      math: 'math', humaneval_plus: 'evalplus', hle: 'hle', automationbench: 'automationbench' } as const;
+    if (!(name in metrics)) throw new Error('seed requires a supported executable benchmark');
     const { benchmarkSeed, benchmarkSeeds } = await import('./aflow-seed.js');
     const { unrestrictedConfig, aflowConfigSchema } = await import('./aflow-search.js');
-    const input: Parameters<typeof benchmarkSeed>[0] = [{ benchmark: name, metric: name }];
+    const benchmark = name as keyof typeof metrics;
+    const input: Parameters<typeof benchmarkSeed>[0] = [{ benchmark, metric: metrics[benchmark] }];
     const seed = values.initialization ? benchmarkSeeds(input, [values.initialization])[0] : benchmarkSeed(input);
     // Direct baselines use only the benchmark's supplied tools; MAS search enables creation.
     seed.organization.toolCreation = false;
@@ -410,7 +413,7 @@ async function run() {
   console.log(`MFlow (Node 24+, published Ditto 0.1.2)
   doctor
   benchmarks --name all [--verify]
-  seed --benchmark hle|automationbench --out runs/seed.json
+  seed --benchmark <name> [--initialization single] --out runs/seed.json
   prepare --input tasks.jsonl --out data/prepared --seed 42
   search --search data/benchmarks/math/search.jsonl --config configs/aflow-search.json --out runs/search-1 [--test data/benchmarks/math/test.jsonl] [--resume]
   legacy-search --search data/prepared/search.jsonl --config configs/search.json --out runs/legacy-1

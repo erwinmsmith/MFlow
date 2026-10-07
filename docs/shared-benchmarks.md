@@ -79,6 +79,19 @@ npm run mflow -- search --benchmark gsm8k --config configs/aflow-search.json --o
 npm run mflow -- evaluate --benchmark gsm8k --bundle runs/gsm8k-search/best.json --out runs/gsm8k-test
 ```
 
+直接单模型对照可复用同一执行器，无需搜索：
+
+```sh
+npm run mflow -- seed --benchmark drop --initialization single --out runs/drop-single/seed.json
+npm run mflow -- evaluate --benchmark drop --bundle runs/drop-single/seed.json --out runs/drop-single/test --concurrency 16
+# MBPP 将 drop 换成 mbpp；需要本地 python:3.12-alpine 评分镜像。
+```
+
+DROP/MBPP 的 single 使用任务专用输出契约，只执行一个 root，不派生、不提供工具、
+不创建工具。MBPP 的隐藏测试仅由评分器执行，不回传模型。DROP 报告平均 F1 和 F1=1
+的比例；MBPP 报告单次生成的测试通过率。模型参数和提示词保存在 seed bundle，原始
+调用用量（含重试）保存在 `test/task-usage`。中断后用相同 evaluate 命令加 `--resume`。
+
 显式 `--search` / `--test` 路径仍支持；与 `--benchmark` 同时提供时，显式路径优先。
 加载器接受 `benchmark:math/search`、`benchmark:humaneval+/test`，并发脚本也可使用。
 GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据”误认成“执行已接通”。
