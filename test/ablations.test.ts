@@ -47,3 +47,38 @@ for (const variant of ['single', 'fixed-full', 'fixed-uniform'] as const) {
     assert.equal(result.agents.length, variant === 'single' ? 1 : 4);
   });
 }
+
+for (const variant of ['fixed-heterogeneous', 'fixed-homogeneous'] as const) {
+  test(`${variant} keeps roles and shares evidence through the same fixed two-agent route`, async () => {
+    const original = source();
+    const solver = original.organization!.agentTemplates!.find(t => t.id === 'solver')!;
+    const verifier = structuredClone(original.organization!.agentTemplates!.find(t => t.id === 'independent')!);
+    verifier.id = 'verifier';
+    verifier.profile.objective = 'Independently verify without writing.';
+    verifier.profile.private_context = 'Read-only verifier instructions.';
+    verifier.profile.tools = [];
+    original.organization!.agentTemplates = [solver, verifier];
+    const candidate = ablationStrategy(original, variant), calls: SampleInput[] = [];
+    assert.deepEqual(candidate.prompts, original.prompts);
+    if (variant === 'fixed-heterogeneous') assert.deepEqual(candidate.organization, original.organization);
+    else for (const template of candidate.organization!.agentTemplates!) {
+      assert.equal(template.composition, solver.composition);
+      assert.deepEqual(template.profile.tools, solver.profile.tools);
+      assert.deepEqual(template.profile.nodes, solver.profile.nodes);
+      assert.equal(template.profile.reasoning, solver.profile.reasoning);
+      const inherited: typeof solver = original.organization!.agentTemplates!.find(t => t.id === template.id)!;
+      assert.equal(template.profile.objective, inherited.profile.objective);
+      assert.equal(template.profile.private_context, inherited.profile.private_context);
+    }
+    const result = await run(candidate, { async invoke(input) {
+      calls.push(input);
+      if (calls.length > 1) assert.ok(JSON.stringify(input.messages).includes('OBSERVED-RECORD-123'));
+      return { message: { role: 'assistant', content: 'OBSERVED-RECORD-123: complete. \\boxed{5}' }, finishReason: 'stop', usage: { totalTokens: 20 } };
+    } });
+    assert.deepEqual(calls.map(c => c.metadata?.agentId), ['root', 'verifier', 'root']);
+    assert.equal(result.agents.length, 2);
+    assert.equal(result.answer, String.raw`\boxed{5}`);
+    assert.ok(!JSON.stringify(calls).includes('HIDDEN-REFERENCE'));
+    assert.equal(original.organization!.agentTemplates[1].profile.tools.length, 0);
+  });
+}

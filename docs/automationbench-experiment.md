@@ -125,3 +125,45 @@ DITTO-006 的包能力需求仍待支持。按用户要求，修复版保持准�
 两项回归检查覆盖上述路径。按用户要求，当前题目继续执行，修复通过带校验和的应用模块
 替换记录供下一次自动续跑使用；已完成结果保留，仅重试未提交结果的题目。冻结的 Round 3
 策略、提示词和 Ditto guide 不变，修复版本单独记录，不将这批 test 结果用于搜索。
+
+## Round 3 固定异构 / 同构 MAS 对照（2026-10-07）
+
+用户要求比较已搜索候选的固定 MAS。以冻结的 Round 3 `s3` bundle 为来源，
+不重新搜索，也不从 test 轨迹挑选生成的 subagent。其模板库只有 solver、verifier。
+两组都固定执行 root/solver → verifier → root 修复，共两个成员、三次成员程序执行；
+每个成员内部仍可多轮调用模型与工具。此路由是消融设计，并非另行搜索出的最优静态结构。
+
+| 变体 | 内部程序与能力 |
+|---|---|
+| `fixed-heterogeneous` | 保留 solver、verifier 各自冻结的 graph/loop、节点、工具权限与 reasoning 配置 |
+| `fixed-homogeneous` | 两者统一使用 solver 的 graph/loop、节点、工具权限与 reasoning 配置；保留各自职责和私有指令 |
+
+两组都有相同的证据流：verifier 读取执行结果并只读检查，root 读取验证结果，仅修复未完成工作。
+固定外层路由不调用动态派生工厂；原工具创建开关、工具库和所有全局提示词保留。
+同构不是完全相同的角色提示词。原两模板的图拓扑已经接近，主要差异是执行权限和角色配置，
+因此不能将成绩差异单独解释为 graph 拓扑的影响。
+
+使用同一组 600 道公开 test、DeepSeek Flash、temperature 0、seed 42、Ditto 0.1.2，
+每题官方世界隔离，评分与原动态 Round 3 一致。沿用 v11 冻结 actor、原 Ditto guide 和
+已校验的 `8d1907c` 应用 composition 修复；不改 Ditto 包。两个变体各并发 16 道题。
+源 bundle SHA256：`e264b1f603a36857d1b6ad90a46544f4330caad52f34a8c8265f7f856d746756`。
+这是既有 test 上的消融，不是新的独立 holdout；结果不进入后续搜索或提示词选择。
+
+准备命令（分别使用不存在的新 OUT 目录）：
+
+```sh
+node scripts/prepare_ablations.mjs --source "$SOURCE" --out "$OUT" --variant fixed-heterogeneous
+# 另一独立 OUT 使用 --variant fixed-homogeneous。
+# 从源实验的冻结 actor 目录、私有环境及 repair loader 启动：
+node --env-file-if-exists=.env dist/src/cli.js evaluate --benchmark automationbench \
+  --bundle "$BUNDLE" --out "$TEST_OUT" --concurrency 16
+# 中断后相同命令加 --resume，保留所有已完成题（包括错题）。
+```
+
+每组的 `task-usage/*.json` 保存所有模型请求、失败与重试用量；`summary.json` 保存最终
+已知 token、未知 usage 请求数和准确率。输入、输出、缓存输入的分项来自原始 usage，
+缓存输入属于输入的一部分，不重复相加。未知请求的预算预留值不当作实际用量，存在未知
+usage 时实际总 token 只能报告下限。新增 test 成本与原搜索成本分开记录。
+运行索引、冻结 bundle、修复收据及重启脚本位于独立实验目录，入口记录在
+`runs/current-experiments.json` 的 `localDeepSeek.automationbenchMFlowAblations`。
+仅保留必要的成绩、用量、结构证据与恢复文件，定期清理过期请求诊断。

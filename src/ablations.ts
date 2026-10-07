@@ -1,16 +1,17 @@
 import { strategySchema, type Strategy } from './types.js';
 
 /** Frozen routing ablations; profiles, agent programs and prompts stay inherited. */
-export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform'): Strategy {
+export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform' | 'fixed-heterogeneous' | 'fixed-homogeneous'): Strategy {
   const templates = source.organization?.agentTemplates ?? [];
-  const required = variant === 'single' ? ['solver'] : ['solver', 'reviewer', 'independent', 'checker'];
+  const paired = variant === 'fixed-heterogeneous' || variant === 'fixed-homogeneous';
+  const required = variant === 'single' ? ['solver'] : paired ? ['solver', 'verifier'] : ['solver', 'reviewer', 'independent', 'checker'];
   if (source.organization?.initialBindings?.root !== 'solver' ||
       source.organization.initialAgents.length !== 1 || !source.prompts ||
       required.some(id => !templates.some(template => template.id === id)))
     throw new Error('Ablation requires the frozen solver-bound root and requested templates');
   const candidate = structuredClone(source);
-  if (variant === 'fixed-uniform') {
-    const shared = templates.find(template => template.id === 'independent')!;
+  if (variant === 'fixed-uniform' || variant === 'fixed-homogeneous') {
+    const shared = templates.find(template => template.id === (paired ? 'solver' : 'independent'))!;
     for (const template of candidate.organization!.agentTemplates!) {
       template.composition = shared.composition;
       Object.assign(template.profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
@@ -21,6 +22,15 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
   const composition = variant === 'single' ? String.raw`return loop({id:'single',plan:function*(ctx){
     const result=yield* ctx.runAgent('root','','agent');
     return result.candidate_answer;
+  }});` : paired ? String.raw`return loop({id:'fixed-pair',plan:function*(ctx){
+    const first=yield* ctx.runAgent('root','','agent');
+    ctx.spawnTemplate('verifier','verifier','root');
+    const verification=yield* ctx.runAgent('verifier',{candidate:first.candidate_answer,outputs:ctx.outputs,
+      instruction:'Independently re-read the affected records via api_search/api_fetch and confirm each postcondition. Report observed identifiers and any mismatch. Do not perform any write.'},'agent');
+    ctx.dormant('verifier');
+    const final=yield* ctx.runAgent('root',{previous:ctx.outputs,verification,
+      instruction:'Inspect current state and recover only unfinished work using your bound program. Preserve all observed successful effects; never repeat a successful write. Return a complete answer or an explicit blocker.'},'agent');
+    return final.candidate_answer || first.candidate_answer;
   }});` : String.raw`function solution(output){
     return output.artifacts.filter(a=>a.type==='solution').map(a=>a.content).join('\n');
   }
