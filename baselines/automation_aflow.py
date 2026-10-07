@@ -136,6 +136,7 @@ def main():
     if args.test_round is None:
         sys.argv=['scripts/aflow_strategy.py',endpoint(),str(SOURCES/'AFlow'),str(RUNS/'AFlow')]
         SCOPE.set(('AFlow','search','optimizer'))
+        sys.path.insert(0,str(ROOT/'scripts'))  # run_path does not add the script's directory.
         runpy.run_path(str(ROOT/'scripts/aflow_strategy.py'),run_name='__main__')
     else:
         activate(RUNS/'AFlow',SOURCES/'AFlow')

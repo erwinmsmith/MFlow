@@ -129,6 +129,17 @@ sys.path.insert(0,str(Path('baselines').resolve()))
 import automation_aflow as a
 from bench_common import SCOPE,benchmark_rpc
 seed=json.loads(sys.argv[1]);task=json.loads(sys.argv[2]);out=a.RUNS/'AFlow'
+# Exercise the real executable entry's import path, before any controller calls.
+class EntryChecked(Exception):pass
+def enter(*args,**kwargs):
+ import search_evidence
+ raise EntryChecked()
+old_path=sys.path[:]
+with patch.object(sys,'argv',['automation_aflow.py']),patch.object(a.runpy,'run_path',side_effect=enter):
+ try:a.main()
+ except EntryChecked:pass
+ else:raise AssertionError('Entry fixture was not reached')
+sys.path[:]=old_path
 a.prepare(out,a.SOURCES/'AFlow')
 folder=out/f'workspace/{a.DATASET}/workflows/round_1';folder.mkdir(parents=True)
 a.write_static(folder,seed['composition'],seed['prompts'],1)
