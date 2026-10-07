@@ -190,10 +190,20 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
     provenance: 'Dataset-specific editable MFlow seed; official AFlow optimization controller; no MATH round-12 initialization or test data' };
 }
 
-/** Multiple measured roots; selection and all descendants use search data only. */
+/** Editable starting programs; the search configuration selects one root. */
 export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], names?: string[]) {
   const seed = structuredClone(benchmarkSeed(tasks));
   seed.organization.toolCreation = true;
+  const textBenchmark=['drop','mbpp'].includes(tasks[0].benchmark ?? '');
+  const exploration = textBenchmark ? (tasks[0].benchmark === 'drop'
+    ? 'Explore passage evidence extraction, entity/coreference resolution, temporal comparison, counting and arithmetic as complementary responsibilities. Consider a direct solver, parallel independent evidence branches, a decomposition tree, or cross-checking only where the observed gap calls for it. External knowledge cannot replace the supplied passage.'
+    : 'Explore specification analysis, algorithm design, implementation, edge-case generation and independent executable checking as complementary responsibilities. Consider direct solving, parallel alternative algorithms, a decomposition tree, or cross-review where useful. Use only public examples and self-created checks, never hidden grading tests.') : '';
+  // Grant execution capabilities to the dynamic root; this does not instantiate extra agents.
+  const dynamicOrganization=structuredClone(seed.organization);
+  if(textBenchmark)for(const p of [...dynamicOrganization.initialAgents,...dynamicOrganization.agentTemplates!.map(t=>t.profile)]){
+    p.tools=['arithmetic','python'];p.nodes=[...compositionNodes];
+  }
+  const policyPrompt=dynamicPolicyPrompt+(textBenchmark?'\nTASK CONTRACT: '+seed.organization.initialAgents[0].expected_output+'\nEXPLORATION: '+exploration+'\nAll agents may create parameterized tools while executing, using their granted capabilities. Read the supplied Ditto node guide and choose node configuration, evidence routing and dependencies for each distinct role. Preserve the final answer contract when stopping; summarize observations only for workflow tasks.':'');
   const extended=['automationbench','hle'].includes(tasks[0].metric);
   const academic=tasks[0].metric!=='automationbench';
   const availableTools=[...new Set(seed.organization.agentTemplates!.flatMap(t=>t.profile.tools))];
@@ -341,8 +351,8 @@ ${JSON.stringify({profile:{id:'specialist',...seed.organization.agentTemplates![
     {name:'tree',...seed,prompts:planningPrompts,organization:treeOrganization,composition:tree},
     {name:'cross-review',...seed,prompts:planningPrompts,organization:parallel,composition:diamond}];
   const dynamic = all.filter(s=>s.name!=='adaptive').map(s=>({...s,name:'dynamic-'+s.name,
-    prompts:{...s.prompts,factory:dynamicPolicyPrompt},composition:dynamicPolicyComposition(s.composition)}));
-  all.push({name:'dynamic-policy',...seed,prompts:{...seed.prompts,factory:dynamicPolicyPrompt},composition:dynamicPolicyComposition()},...dynamic);
+    prompts:{...s.prompts,factory:policyPrompt},composition:dynamicPolicyComposition(s.composition)}));
+  all.push({name:'dynamic-policy',...seed,organization:dynamicOrganization,prompts:{...seed.prompts,factory:policyPrompt},composition:dynamicPolicyComposition()},...dynamic);
   if(!extended)all.unshift({name:'default',...seed});
   if (names?.some(name => !all.some(s => s.name === name)) || names?.length === 0) throw new Error('Unknown or empty MAS initialization');
   return names ? names.map(name => all.find(s => s.name === name)!) : all.filter(s => !s.name.startsWith('dynamic-') && (extended || s.name !== 'review'));

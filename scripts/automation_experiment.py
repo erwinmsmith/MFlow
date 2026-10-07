@@ -74,7 +74,7 @@ def status(out):
     jobs=read(out/'jobs.json',{})
     manifest=read(out/'experiment-manifest.json',{})
     planned=manifest.get('searchCount',119 if manifest.get('benchmark')=='math' else 200)
-    report={'run':str(out),'protocol':{k:manifest[k] for k in ('benchmark','model','datasetProtocol','searchCount','testCount','judgeModel','toolProtocol') if k in manifest},'jobs':jobs.get('jobs',{}),'methods':{}}
+    report={'run':str(out),'protocol':{k:manifest[k] for k in ('benchmark','model','datasetProtocol','searchCount','testCount','judgeModel','toolProtocol','scoreMetric') if k in manifest},'jobs':jobs.get('jobs',{}),'methods':{}}
     report['schedule']=read(out/'scheduler.json',{})
     overrides=read(out/'method-outputs.json',{})
     recovery=read(out/'recovery.json')
@@ -86,7 +86,7 @@ def status(out):
         controller=read(folder/('search/controller.json' if method=='MFlow' else 'controller.json'),{})
         entry.update({k:controller[k] for k in ('round','phase','stopReason','seedRound','parentRound') if k in controller})
         frozen=read(folder/('search/summary.json' if method=='MFlow' else 'frozen.json'),{})
-        entry['frozen']={k:v for k,v in frozen.items() if k in ('round','selectedRound','validationAccuracy','validationScore','stopReason')}
+        entry['frozen']={k:v for k,v in frozen.items() if k in ('round','selectedRound','validationAccuracy','validationMeanF1','validationScore','stopReason')}
         if method in ('MFlow','AFlow'):
             entry['roundTests']=[]
             for candidate in sorted((folder/('search/round-candidates' if method=='MFlow' else 'round-candidates')).glob('round-*.json'),key=lambda p:int(p.stem.split('-')[-1])):
@@ -117,15 +117,17 @@ def status(out):
         for phase in ('pilot','search','test'):
             file=folder/phase/('test.jsonl' if method in ('MFlow','SingleLLM') else 'results.jsonl')
             if file.exists():
-                totals={'evaluations':0,'correct':0,'tokens':0};partial=0
+                totals={'evaluations':0,'correct':0,'tokens':0};partial=0;f1=[]
                 for row in jsonl(file):
                     totals['evaluations']+=1;totals['correct']+=row['score'];totals['tokens']+=row.get('tokens',row.get('execution',{}).get('tokens',0));partial+=row.get('partialCredit',0)
+                    if 'f1' in row:f1.append(row['f1'])
                     if method=='AFlow' and phase=='search':
                         current=entry.get('currentValidation',{})
                         if (current.get('round'),current.get('pass'))!=(row['round'],row.get('repeat',0)):
                             current={'round':row['round'],'pass':row.get('repeat',0),'completed':0,'planned':planned,'correct':0};entry['currentValidation']=current
                         current['completed']+=1;current['correct']+=row['score']
                 if totals['evaluations']:totals.update(passRate=totals['correct']/totals['evaluations'],meanPartialCredit=partial/totals['evaluations'])
+                if f1:totals['meanF1']=sum(f1)/len(f1)
                 entry[phase]=totals
             progress=read(folder/phase/'status.json')
             if progress:entry[phase+'Status']=progress
@@ -167,7 +169,7 @@ def status(out):
 
 def main():
     global ROOT
-    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle'],default='automationbench');p.add_argument('--run')
+    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle','drop','mbpp'],default='automationbench');p.add_argument('--run')
     p.add_argument('--execution-root',type=Path,help='Use an existing immutable actor snapshot with this separately recorded scheduler')
     p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
     p.add_argument('--methods',nargs='+',choices=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents','SingleLLM'],default=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],help='Resume or run only selected methods; final test follows completed search')
@@ -175,11 +177,10 @@ def main():
     p.add_argument('--port',type=int,help='Independent Ditto baseline bridge port');a=p.parse_args()
     if a.concurrency is not None and a.concurrency<1 or a.legacy_concurrency<1:p.error('Concurrency must be positive')
     if a.port is not None and not 1<=a.port<=65535:p.error('Invalid bridge port')
-    if 'SingleLLM' in a.methods and a.benchmark!='automationbench':p.error('SingleLLM currently supports AutomationBench')
     if a.execution_root is not None:ROOT=a.execution_root.resolve()
     math=a.benchmark=='math';hle=a.benchmark=='hle'
     profile='hb-baselines.json' if os.environ.get('MFLOW_MODEL')=='qwen3.5-9b' else 'hb-deepseek-baselines.json'
-    protocol='configs/'+(profile if math else 'hle-baselines.json' if hle else 'automationbench-baselines.json')
+    protocol='configs/'+(profile if math else f'{a.benchmark}-baselines.json')
     config=read(ROOT/protocol)
     a.run=a.run or config['runDirectory']
     out=ROOT/a.run
@@ -189,7 +190,7 @@ def main():
     search_config=read(ROOT/search_file,{})
     if a.concurrency is not None:config['concurrency']=search_config['concurrency']=a.concurrency
     config['runDirectory']=a.run
-    port=str(a.port or (8199 if hle else 8198 if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 8197))
+    port=str(a.port or (8200 if a.benchmark=='drop' else 8201 if a.benchmark=='mbpp' else 8199 if hle else 8198 if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 8197))
     env={**os.environ,'MFLOW_BASELINE_PROTOCOL':str(out/'baseline-config.json'),'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
@@ -199,6 +200,12 @@ def main():
     if hle:
         lock=next(v for v in read(ROOT/'data/extended-benchmarks.lock.json').values() if v['protocol']==config['datasetProtocol'])
         manifest.update(datasetProtocol=lock['protocol'],searchCount=lock['splits']['search']['count'],testCount=lock['splits']['test']['count'],judgeModel=config['judgeModel'],toolProtocol=config['toolProtocol'])
+    if a.benchmark in ('drop','mbpp'):
+        lock=read(ROOT/'data/aflow.lock.json')
+        manifest.update(datasetProtocol=lock['protocol'],
+            searchCount=lock['files'][a.benchmark+'_validate.jsonl']['count'],testCount=lock['files'][a.benchmark+'_test.jsonl']['count'],
+            scoreMetric='F1' if a.benchmark=='drop' else 'pass@1',toolProtocol='arithmetic-python; task-local evidence only')
+        manifest['transport']['searchProvider']='task-local'
     saved=read(out/'experiment-manifest.json')
     if saved and saved!=manifest:raise RuntimeError('Immutable experiment code/config changed')
     if saved and not a.resume:raise RuntimeError('Run exists; use --resume')
@@ -222,7 +229,7 @@ def main():
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
     single=out/'SingleLLM';bundle=single/'seed.json';single_test=single/'test'
-    commands['SingleLLM']=([] if bundle.exists() else [node+['seed','--benchmark','automationbench','--initialization','single','--out',str(bundle)]])+[node+['evaluate','--benchmark','automationbench','--bundle',str(bundle),'--out',str(single_test),'--concurrency',str(config.get('concurrency',8))]+(['--resume'] if (single_test/'manifest.json').exists() else [])]
+    commands['SingleLLM']=([] if bundle.exists() else [node+['seed','--benchmark',a.benchmark,'--initialization','single','--out',str(bundle)]])+[node+['evaluate','--benchmark',a.benchmark,'--bundle',str(bundle),'--out',str(single_test),'--concurrency',str(config.get('concurrency',8))]+(['--resume'] if (single_test/'manifest.json').exists() else [])]
     commands={name:commands[name] for name in dict.fromkeys(a.methods)}
     # Scheduling can change without replacing actor code or invalidating search checkpoints.
     # Archive/restart the prior supervisor before switching this receipt.

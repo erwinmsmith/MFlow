@@ -40,13 +40,21 @@
       "scripts/utils/lcb_runner.py": "2eb02806a204ce7db1c507a6ae5f8ab2f82593eae67e14f5d126e6a266a182ed",
       "scripts/utils/sanitize.py": "fddecd7539967b5a516cebec3b8fe2afa4d5271f06f566c551237032113b8ad9",
       "scripts/workflow.py": "947535de89ad2b0a209c91612d3a8bd78c0ee0d8e609bac0fb4c2e7a0ccbe496",
+      "workspace/DROP/workflows/template/op_prompt.py": "1717c2b2bc9e9235aedd13403b6319c52e60566a5a5ded4a77d7f33f3f149c25",
+      "workspace/DROP/workflows/template/operator.json": "6d4a8ebfc133494e9912aeb098e910ca2afb9fe9df1e0a2d6923c8b8fe058941",
+      "workspace/DROP/workflows/template/operator.py": "7dadc76b5554f4a65f4e086d17bff88de46108882be290f309ff33c491c4ee7e",
+      "workspace/DROP/workflows/template/operator_an.py": "a5b5011829bb7e78c816727b7cca0f9df35709c16e25bbaed1f7793f6f842916",
       "workspace/MATH/workflows/round_1/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "workspace/MATH/workflows/round_1/graph.py": "1a733a6bfca722d24c4eb24b078dcbe79041926639f8a161a819456dc3b223ae",
       "workspace/MATH/workflows/round_1/prompt.py": "89758a63470c31c0a5d9613cd97d88d07c1c4fde8793f165fa8de5773892e5cf",
       "workspace/MATH/workflows/template/op_prompt.py": "21a5276dcce3ebeb6a531b34be36c7b6fb62c035eba040a77284f6069b97da81",
       "workspace/MATH/workflows/template/operator.json": "35182bb00a4a152b31eef3a67f623e1ad4cd17b32d20c92c415c646d97359591",
       "workspace/MATH/workflows/template/operator.py": "a05a930c03a0ef3e04f6f78f79da644e386b5fb1f4af8c63079c9f73be33b92b",
-      "workspace/MATH/workflows/template/operator_an.py": "d7c6015d35021585f9794aa496c55004098cbd5f308ff91a39000c550848c05d"
+      "workspace/MATH/workflows/template/operator_an.py": "d7c6015d35021585f9794aa496c55004098cbd5f308ff91a39000c550848c05d",
+      "workspace/MBPP/workflows/template/op_prompt.py": "a34db0732d938ebe35ff5c49eb95d1a5aca0a423884ea5588631c0815ec65e60",
+      "workspace/MBPP/workflows/template/operator.json": "b168a98cb6bdb98e63585bdbed962f47db164571a73401d4a0a2bef75cba8294",
+      "workspace/MBPP/workflows/template/operator.py": "9b476daee9e3715f5867749d3df7259f817d52944c27344d3af075abcfaf4de8",
+      "workspace/MBPP/workflows/template/operator_an.py": "254ae11ce34d1a2a8408ce40b2470ac3798e35c7a20752bc56db703776f828cc"
     }
   },
   "DyLAN": {

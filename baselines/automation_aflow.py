@@ -12,15 +12,16 @@ import sys
 from pathlib import Path
 from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, endpoint, tasks, call, benchmark_rpc, usage, save_row, freeze_run, TransportFailure
 
-DATASET='HLE' if PROTOCOL.get('benchmark')=='hle' else 'AutomationBench'
+DATASET={'hle':'HLE','drop':'DROP','mbpp':'MBPP'}.get(PROTOCOL.get('benchmark'),'AutomationBench')
 EXECUTION_TOOLS=contextvars.ContextVar('aflow_execution_tools',default=True)
 
 def prepare(out,source):
     target=out/f'workspace/{DATASET}/workflows/template'
     target.mkdir(parents=True,exist_ok=True)
     for name in ['operator.py','operator_an.py','operator.json','op_prompt.py']:
-        text=(source/'workspace/MATH/workflows/template'/name).read_text().replace('workspace.MATH','workspace.'+DATASET)
-        if name=='op_prompt.py':
+        template=DATASET if DATASET in ('DROP','MBPP') else 'MATH'
+        text=(source/f'workspace/{template}/workflows/template'/name).read_text().replace('workspace.'+template,'workspace.'+DATASET)
+        if name=='op_prompt.py' and DATASET not in ('DROP','MBPP'):
             text=text.replace('math problem','academic question' if DATASET=='HLE' else 'business workflow').replace('\\boxed{answer}','Explanation: reasoning; Answer: precise answer; Confidence: 0-100%' if DATASET=='HLE' else 'Final Summary: completed effects').replace('mathematical','academic' if DATASET=='HLE' else 'workflow')
             text=text.replace('Carefully evaluate these solutions and identify the answer that appears most frequently across them. This consistency in answers is crucial for determining the most reliable solution.',
                 'Select the solution best supported by the original question, exact assumptions and decisive evidence. Agreement is useful only when independently justified; do not prefer a shared error.' if DATASET=='HLE' else
@@ -59,6 +60,7 @@ def write_static(directory,graph,prompts,number):
             raise ValueError('Workflow imports and host execution are unavailable')
         if isinstance(node,ast.Attribute) and (node.attr.startswith('_') or node.attr in {'os','sys','subprocess','requests','socket','client','create_subprocess_exec','create_subprocess_shell'}):
             raise ValueError('Workflow private/host capabilities are unavailable')
+        if DATASET in ('DROP','MBPP') and isinstance(node,ast.Attribute) and isinstance(node.value,ast.Name) and node.value.id=='operator' and node.attr not in ('Custom','ScEnsemble'):raise ValueError('Only Custom and ScEnsemble are exposed; hidden tests and host execution are unavailable')
         if isinstance(node,ast.Attribute) and node.attr=='Programmer' and DATASET!='HLE':raise ValueError('Programmer is unavailable for API workflows')
     for node in ast.parse(prompts).body:
         if not isinstance(node,ast.Assign) or not isinstance(node.value,ast.Constant) or not isinstance(node.value.value,str) or any(not isinstance(t,ast.Name) for t in node.targets):
@@ -123,7 +125,7 @@ async def evaluate_static(number,repeat,strategy,concurrency,phase='search'):
                 failure=error;raise
     results=await asyncio.gather(*(run(t) for t in rows),return_exceptions=True)
     if failure is not None:raise failure
-    return {'score':sum(r['score'] for r in results)/len(results),'meanPartialCredit':sum(r['partialCredit'] for r in results)/len(results),'meanTokens':sum(r['tokens'] for r in results)/len(results),'tokens':sum(r['tokens'] for r in results),
+    return {'score':sum(r.get('f1',r['score']) for r in results)/len(results),'passRate':sum(r['score'] for r in results)/len(results),**({'meanF1':sum(r['f1'] for r in results)/len(results)} if DATASET=='DROP' else {}),'meanPartialCredit':sum(r['partialCredit'] for r in results)/len(results),'meanTokens':sum(r['tokens'] for r in results)/len(results),'tokens':sum(r['tokens'] for r in results),
             'organizationSummary':{'staticWorkflow':number,'evaluated':len(results)},
             'failures':[{'taskId':r['taskId'],'question':t['prompt'],'prediction':r['answer'],'partialCredit':r['partialCredit'],**({'referenceAnswer':t['answer']} if DATASET=='HLE' and phase=='search' else {})} for r,t in zip(results,rows) if not r['score']]}
 
@@ -148,7 +150,7 @@ def main():
     AsyncLLM.__call__=lambda self,prompt:sample(prompt,self.sys_msg)
     result=asyncio.run(evaluate_static(number,0,{},PROTOCOL['concurrency'],phase='test'))
     output=args.test_out or RUNS/'AFlow/test'
-    (output/'summary.json').write_text(json.dumps({'method':'AFlow','count':len(tasks('test')),'passRate':result['score'],'meanPartialCredit':result['meanPartialCredit'],'tokens':result['tokens'],'selectedRound':number,'purpose':'observation-only' if args.test_round else 'final-selected-by-search'},indent=2)+'\n')
+    (output/'summary.json').write_text(json.dumps({'method':'AFlow','count':len(tasks('test')),'passRate':result['passRate'],**({'meanF1':result['meanF1']} if 'meanF1' in result else {}),'meanPartialCredit':result['meanPartialCredit'],'tokens':result['tokens'],'selectedRound':number,'purpose':'observation-only' if args.test_round else 'final-selected-by-search'},indent=2)+'\n')
 
 if __name__=='__main__':
     # The controller imports this module too. Share one stage ContextVar for search and final test.

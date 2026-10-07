@@ -61,8 +61,10 @@ test('recursive agent programs unwind before repeating effects, then permit reco
   assert.match(JSON.stringify(result.orchestration!.decisions),/Recursive runAgent/);
 });
 
-test('frozen dynamic policy changes internal graph and cross-agent routing only when new evidence requires it',async()=>{
-  const seed=benchmarkSeeds([{benchmark:'automationbench',metric:'automationbench'}],['dynamic-policy'])[0];
+for(const taskFamily of [{benchmark:'automationbench' as const,metric:'automationbench' as const},{benchmark:'drop' as const,metric:'drop' as const},{benchmark:'mbpp' as const,metric:'python' as const}])test(taskFamily.benchmark+' frozen dynamic policy changes internal graph and cross-agent routing only when evidence requires it',async()=>{
+  const seed=benchmarkSeeds([taskFamily],['dynamic-policy'])[0];
+  assert.deepEqual(seed.organization.initialAgents.map(a=>a.id),['root']);
+  if(taskFamily.benchmark!=='automationbench'){assert.match(seed.prompts.factory,/EXPLORATION:/);assert.match(seed.prompts.factory,/Ditto node guide/);assert.ok(seed.organization.initialAgents[0].nodes?.includes('INTERACTION.ACT.TOOL'));}
   for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=['arithmetic'];
   const candidate={...initialStrategy,...seed},frozen=JSON.parse(JSON.stringify(candidate));
   for(const task of ['simple','complex','complex']){

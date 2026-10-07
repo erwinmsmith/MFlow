@@ -108,6 +108,58 @@ GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据�
 - 当前执行标识 v3.6.1。旧 bundle/运行继续使用当时保存的旧 runtime；不能用当前 build
   静默恢复旧搜索或重解释历史结果。manifest、数据锁和镜像 ID 会阻止不兼容恢复。
 
+### DROP / MBPP 全方法适配（2026-10-08）
+
+统一入口 `scripts/automation_experiment.py --benchmark drop|mbpp` 支持 MFlow、AFlow、
+DyLAN、EvoAgent、AutoAgents、SingleLLM。沿用 `aflow-fixed-v1` 的完整划分：
+
+| benchmark | search | test | 选择目标 / test 指标 |
+| --- | ---: | ---: | --- |
+| DROP | 200 | 800 | 平均 F1；另报 F1=1 的比例 |
+| MBPP | 86 | 341 | 单次最终代码通过率（pass@1） |
+
+每种方法验证相同 split 哈希。保留上游 DROP 的 5 组已登记 prompt 重叠，
+不能将它描述为完全无重叠的数据集；不重新划分或将 test 成绩用于选择。
+
+- **算法保持不变**：MFlow 仍是一棵树、一个 single-agent root；父节点采样、经验反馈、
+  单次修改、5 次重复验证、收敛停止、冻结最佳候选及最终 test 均复用现有控制器。
+  AFlow 沿用同一原生优化控制器；DyLAN 的辩论/剪枝/一致性、EvoAgent 的专家演化、
+  AutoAgents 的 Manager/observer/Action 流程未替换。三者直接完整 test。
+- **多样性来自搜索分支**：DROP 鼓励证据定位、指代/时间关系、计数及独立计算；
+  MBPP 鼓励规格分析、不同算法、边界检查及可执行验证。可搜索并行、树状、交叉复核及
+  异构内部 graph，不新建多个初始化搜索树，也不强制派生。test 使用冻结后的同一动态策略、
+  模板与 Ditto node 说明，仍可创建新 subagent/工具。
+- **任务输出与环境**：DROP 输出简洁答案，MBPP 输出原始完整 Python；移除数学 boxed
+  提示与数学答案提取。AFlow 使用官方 DROP/MBPP 的 Custom、ScEnsemble 算子及提示模板。
+  DROP 的 ScEnsemble 仅接收 solutions，MBPP 另接收 problem。
+- **工具与数据边界**：所有框架的执行 actor 可通过发布版 Ditto 使用 arithmetic/Python；
+  MFlow 可按现有权限规则创建/共享工具。Python 禁网、隔离执行、保留时间和资源保护。
+  AutoAgents 的自定义搜索只返回当前题的公开内容，不联网寻找答案。
+  AFlow 不开放读取数据集测试的原生 Test 算子；MBPP hidden tests 仅用于最终评分，
+  执行阶段只用公开例子或自主构造的检查。SingleLLM 保持原来的单调用、无工具设置。
+- **结果与恢复**：沿用逐题结果、token 账本、冻结配置和 supervisor 恢复；DROP 状态输出另含
+  meanF1。只在搜索完成后 test，不运行逐轮观察 test。这里的离线检查验证工程接线，
+  不代表这些方法在两套数据上的真实准确率。
+
+保持此前 DeepSeek Flash 参数：temperature=0，thinking disabled，seed=42（DeepSeek
+请求不发送 seed），max output=393216；不增加搜索轮数、总 token 或 agent 数量额度。
+DROP 默认模型并发 32，MBPP 16；legacy 进程并发单独设置以控制内存。
+需先准备两个原生 Python 环境（`../MFlow-baselines/.venv-aflow`、`.venv-legacy`）、
+注册表发布的 Ditto 包及本地 `python:3.12-alpine` 镜像。桥接器启动时先验证数据与评分环境。
+
+```sh
+# 在代码快照目录、配置好私有 .env 后运行；以下命令会启动付费实验。
+export MFLOW_MODEL=deepseek-flash
+export BENCHMARK_HOME=/Users/erwin/Downloads/codespace/Benchmarks
+python3 scripts/automation_experiment.py --benchmark drop --run runs/drop-comparison \
+  --methods MFlow AFlow DyLAN EvoAgent AutoAgents SingleLLM --legacy-concurrency 4
+python3 scripts/automation_experiment.py --benchmark mbpp --run runs/mbpp-comparison \
+  --methods MFlow AFlow DyLAN EvoAgent AutoAgents SingleLLM --legacy-concurrency 2
+# 独立端口默认为 DROP 8200 / MBPP 8201；查询不启动实验。
+python3 scripts/automation_experiment.py --benchmark drop --run runs/drop-comparison --status
+# 相同快照和配置下断点续跑：原启动命令附加 --resume。
+```
+
 ## HLE 与 AutomationBench
 
 ```sh

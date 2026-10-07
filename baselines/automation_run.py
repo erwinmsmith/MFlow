@@ -69,6 +69,6 @@ def main():
                 status('incomplete' if failed else 'running')
     if failed:raise RuntimeError('Infrastructure failure; fix and resume the saved run')
     status('completed')
-    (out/'summary.json').write_text(json.dumps({'method':a.method,'count':len(rows),'correct':sum(r['score'] for r in rows),'passRate':sum(r['score'] for r in rows)/len(rows),'meanPartialCredit':sum(r['partialCredit'] for r in rows)/len(rows),'tokens':sum(r['tokens'] for r in rows)},indent=2)+'\n')
+    (out/'summary.json').write_text(json.dumps({'method':a.method,'count':len(rows),'correct':sum(r['score'] for r in rows),'passRate':sum(r['score'] for r in rows)/len(rows),'meanPartialCredit':sum(r['partialCredit'] for r in rows)/len(rows),**({'meanF1':sum(r['f1'] for r in rows)/len(rows)} if rows and 'f1' in rows[0] else {}),'tokens':sum(r['tokens'] for r in rows)},indent=2)+'\n')
 
 if __name__=='__main__':main()

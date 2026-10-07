@@ -1,7 +1,7 @@
 """Run the unmodified official MATH script for each canonical problem."""
 import ast, importlib.util, json, os, re, runpy, sys, tempfile
 from pathlib import Path
-from bench_common import SOURCES, RUNS, PROTOCOL, call
+from bench_common import SOURCES, RUNS, PROTOCOL, call, text_instruction, text_answer_key
 class DyLAN:
     def __init__(self):
         self.path=SOURCES/'DyLAN/code/MATH/llmlp_gen_math_listwise_deeper_markov.py'
@@ -11,6 +11,10 @@ class DyLAN:
     def final(self):
         if PROTOCOL.get('benchmark')=='automationbench':
             return self.answers[-1] if self.answers else ''
+        if PROTOCOL.get('benchmark') in ('drop','mbpp'):
+            if not self.answers:return ''
+            keys=[text_answer_key(s) for s in self.answers]
+            return self.answers[max(range(len(keys)),key=lambda i:keys.count(keys[i]))]
         if PROTOCOL.get('benchmark')=='hle':
             if not self.answers:return ''
             keys=[re.split(r'Confidence:',s.rsplit('Answer:',1)[-1],flags=re.I)[0].strip().casefold() for s in self.answers]
@@ -23,7 +27,7 @@ class DyLAN:
         self.answers=[]
         def generate(**kwargs):
             messages=kwargs['messages'];ranking='Please choose the best 2 solutions' in messages[-1]['content']
-            content=call(messages,tools=False) if PROTOCOL.get('benchmark') in ('automationbench','hle') and ranking else call(messages)
+            content=call(messages,tools=False) if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp') and ranking else call(messages)
             if 'Please choose the best 2 solutions' not in messages[-1]['content']:self.answers.append(content)
             return {'choices':[{'message':{'content':content}}]}
         previous=openai.ChatCompletion.create;openai.ChatCompletion.create=generate
@@ -35,18 +39,19 @@ class DyLAN:
                 # The upstream script stores this unused reference in its output; real gold stays in the evaluator.
                 (data/'0.json').write_text(json.dumps({'problem':prompt,'level':'Level 5','type':'MATH','solution':r'\boxed{0}'}))
                 os.chdir(scratch);sys.argv=[str(self.path),str(data),'0','0',PROTOCOL['model'],PROTOCOL['model']]
-                if PROTOCOL.get('benchmark') in ('automationbench','hle'):
+                if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp'):
                     academic=PROTOCOL.get('benchmark')=='hle'
                     # Adapt prompt/answer IO only; official debate, pruning and consensus remain intact.
                     tree=ast.parse(self.path.read_text())
                     for node in ast.walk(tree):
                         if isinstance(node,ast.Constant) and isinstance(node.value,str):
-                            node.value=node.value.replace('Follow the given examples and answer the mathematics problem.',('Solve the expert academic question, including supplied images. Check the decisive assumption or inference; use previous solutions critically. End with Explanation: reasoning, Answer: exact answer or option letter, Confidence: 0-100%.' if academic else 'Inspect and complete the requested API workflow. Use previous agents as evidence; verify current state and repair missing effects without duplicating writes. End with Final Summary: followed by factual completed effects.'))
+                            node.value=node.value.replace('Follow the given examples and answer the mathematics problem.',(text_instruction() or ('Solve the expert academic question, including supplied images. Check the decisive assumption or inference; use previous solutions critically. End with Explanation: reasoning, Answer: exact answer or option letter, Confidence: 0-100%.' if academic else 'Inspect and complete the requested API workflow. Use previous agents as evidence; verify current state and repair missing effects without duplicating writes. End with Final Summary: followed by factual completed effects.')))
                     for node in tree.body:
                         if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='EXAMPLES' for t in node.targets):node.value=ast.Constant('')
                     # Override imported math normalization before the untouched __main__ controller.
                     index=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.If) and ast.unparse(n.test)=="__name__ == '__main__'")
                     normalizer="import re\nextract_math_answer=lambda s: re.split(r'Confidence:',s.rsplit('Answer:',1)[-1],flags=re.I)[0].strip().casefold()\nis_equiv=lambda a,b: a==b" if academic else "extract_math_answer=lambda s: s.rsplit('Final Summary:',1)[-1].strip().lower()\nis_equiv=lambda a,b: a==b"
+                    if text_instruction():normalizer="from bench_common import text_answer_key\nextract_math_answer=text_answer_key\nis_equiv=lambda a,b: a==b"
                     tree.body[index:index]=ast.parse(normalizer).body
                     result={'__name__':'__main__','__file__':str(self.path)};exec(compile(ast.fix_missing_locations(tree),str(self.path),'exec'),result)
                 else:result=runpy.run_path(str(self.path),run_name='__main__')

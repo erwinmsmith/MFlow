@@ -1,7 +1,7 @@
 """Official Manager/observers/Group/CustomAction with Ditto model and search transport."""
 import asyncio, importlib, os, re, sys, types
 from pathlib import Path
-from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, call, save_row, search_web
+from bench_common import ROOT, SOURCES, RUNS, SCOPE, PROTOCOL, call, save_row, search_web, text_instruction
 from repairs import install_autoagents_repairs
 automation_capabilities = '''AutomationBench execution capability: every actor running native CustomAction can call api_search, api_fetch and base64_encode through the provider's Ditto function tools. api_fetch performs real reads and writes in this task's simulated world, not just a proposed specification. Role design and observer steps cannot execute tools themselves, but must plan executable actors. Keep tools fields and text Action names in the original AutoAgents catalogue; the API function tools are separate from that catalogue. SearchAndSummarize's custom engine discovers API documentation; use actor api_fetch calls to read records and perform writes. Do not describe API work as impossible for lack of tools. Preserve native output formats and confirm actual effects before claiming completion.'''
 class AutoAgents:
@@ -14,10 +14,11 @@ class AutoAgents:
             async def aask(self,prompt,system_msgs=None):
                 workflow=PROTOCOL.get('benchmark')=='automationbench'
                 academic=PROTOCOL.get('benchmark')=='hle'
-                design=(workflow or academic) and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
+                design=(workflow or academic or bool(text_instruction())) and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
                 messages=[{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]
                 if workflow:messages.insert(0,{'role':'system','content':automation_capabilities})
                 if academic:messages.insert(0,{'role':'system','content':'Academic execution capability: native CustomAction actors can inspect the original question images and call arithmetic, isolated Python and web_search via Ditto function tools. Design subject-specific specialists and complementary methods. Role/observer steps plan and assess; tools fields remain in the original AutoAgents Action catalogue. SearchAndSummarize supplies external evidence. The final response must preserve Explanation, Answer and Confidence (0-100%) sections.'})
+                if text_instruction():messages.insert(0,{'role':'system','content':text_instruction()+' Native CustomAction actors can use arithmetic and isolated Python through Ditto. SearchAndSummarize retrieves only the original task evidence; no internet or hidden tests. Design complementary task-specific roles. Keep native Action catalogue names and observer/manager schemas unchanged.'})
                 content=call(messages+[{'role':'user','content':prompt}],tools=not design)
                 owner.remember_roles(content)
                 return content

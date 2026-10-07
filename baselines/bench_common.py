@@ -13,6 +13,20 @@ class BudgetStop(BaseException):
 class TransportFailure(BaseException):pass
 class ModelOutputFailure(RuntimeError):pass
 
+def text_instruction():
+    if PROTOCOL.get('benchmark')=='drop':
+        return 'Answer using only the supplied passage and question. Resolve entities and time references, distinguish counts from totals and compare the requested quantities. Return only the concise final answer, with multiple spans separated by |; no derivation, Markdown or boxed answer. Control and ranking stages must follow their requested schema.'
+    if PROTOCOL.get('benchmark')=='mbpp':
+        return 'Implement the Python task with the requested function signature, imports and return type. Check boundary cases and side effects with public examples or self-created tests only. Return complete executable Python, without Markdown, explanations or boxed answers. Control and ranking stages must follow their requested schema.'
+    return ''
+
+def text_answer_key(answer):
+    if PROTOCOL.get('benchmark')=='mbpp':
+        import ast
+        try:return ast.dump(ast.parse(answer.strip()))
+        except SyntaxError:return answer.strip()
+    return ' '.join(answer.casefold().split())
+
 def endpoint():return os.environ.get('MFLOW_BASELINE_ENDPOINT',f"http://127.0.0.1:{os.environ.get('MFLOW_BASELINE_PORT','8197')}")
 
 def bridge_request(route,body):
@@ -59,9 +73,15 @@ def tasks(split):
         rows=[json.loads(s) for s in path.read_text().split('\n') if s.strip()]
         if len(rows)!=entry['count']:raise ValueError('Pinned shared split count mismatch')
         return rows
-    path=ROOT/f'data/benchmarks/math/{split}.jsonl'
+    benchmark=PROTOCOL.get('benchmark','math')
+    if benchmark in ('drop','mbpp'):
+        home=Path(os.environ.get('BENCHMARK_HOME',ROOT.parent/'Benchmarks')).resolve()
+        record=json.loads((home/'catalog.json').read_text())['benchmarks'][benchmark]
+        path=(home/record['views'][record['defaultProtocol']]['path']/f'{split}.jsonl').resolve()
+        if not path.is_relative_to(home):raise ValueError('Benchmark path escapes shared home')
+    else:path=ROOT/f'data/benchmarks/{benchmark}/{split}.jsonl'
     lock=json.loads((ROOT/'data/aflow.lock.json').read_text())
-    entry=lock["files"][f"math_{'validate' if split=='search' else 'test'}.jsonl"]
+    entry=lock["files"][f"{benchmark}_{'validate' if split=='search' else 'test'}.jsonl"]
     if hashlib.sha256(path.read_bytes()).hexdigest()!=entry["convertedSha256"]:raise ValueError("Pinned split hash mismatch")
     rows=[json.loads(s) for s in path.read_text().split('\n') if s.strip()]
     if len(rows)!=entry["count"]:raise ValueError("Pinned split count mismatch")
@@ -92,7 +112,7 @@ def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""
     files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',PROTOCOL_PATH,ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
     if PROTOCOL.get('benchmark')!='automationbench':files += [ROOT/'dist/src/python-tool.js',ROOT/'scripts/resume_aflow_test.py']
-    if PROTOCOL.get('benchmark') in ('automationbench','hle'):files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
+    if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp'):files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
     manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':len(tasks('test')),'validationCount':len(tasks('search')),'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
     manifest['transport']={'endpoint':endpoint(),'executionNamespace':os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE',''),'usagePath':str(Path(os.environ.get('MFLOW_BASELINE_USAGE_PATH',RUNS/'usage.jsonl')).resolve())}
     if os.environ.get('MFLOW_BASELINE_TRANSPORT_ROOT'):
