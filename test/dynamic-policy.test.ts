@@ -75,6 +75,10 @@ for(const taskFamily of [{benchmark:'automationbench' as const,metric:'automatio
         if(stage===0){assert.deepEqual(data.members.map((a:any)=>a.profile.id),['root']);return response(JSON.stringify({stop:false,reason:'Need evidence',gap:'Initial execution',answer:'',composition:`return loop({id:'spawn-stage',plan:function*(ctx){ctx.spawn({...ctx.profile('root'),id:'specialist',nodes:['INFER.REASONING.SAMPLE'],tools:['arithmetic']},'root',${JSON.stringify(first)});return yield* ctx.runAgent('specialist');}});`}));}
         assert.ok(data.evidence.outputs.some((o:any)=>o.agentId==='specialist'));
         if(task==='complex'&&stage===1)return response(JSON.stringify({stop:false,reason:'Observed unresolved gap',gap:'Cross-check',answer:'',composition:`return loop({id:'revise-stage',plan:function*(ctx){ctx.reconfigure('specialist',{...ctx.profile('specialist'),capability:'Independent evidence cross-check'});ctx.bindProgram('specialist',${JSON.stringify(second)});return yield* ctx.runAgent('specialist');}});`}));
+        if(task==='complex') {
+          assert.ok(data.evidence.observations.some((o:any)=>o.nodeId==='specialist/observe' && JSON.stringify(o.result).includes('6')));
+          assert.deepEqual(data.evidence.nodeFailures,[]);
+        }
         return response(JSON.stringify({stop:true,reason:'Evidence complete',gap:'',composition:'',answer:'done'}));
       }
       if(input.metadata?.nodeId==='specialist/check')assert.ok(JSON.stringify(input.messages).includes('6'));
@@ -105,6 +109,32 @@ test('native verifier input errors are observable and a generated stage can repa
   const meter=new MeteredProvider({async invoke(){throw new Error('Invalid node input must not call model');}});
   const execution=await new OrganizationRuntime(new DittoAgents(meter,model,[]),limitsSchema.parse({maxSteps:10})).run(candidate,{id:'invalid',prompt:'Fixture'});
   assert.equal(execution.answer,'INVALID_INPUT');
+});
+
+test('returned node failures count as broken stages and reach the next policy decision',async()=>{
+  const seed=benchmarkSeeds([{benchmark:'mbpp',metric:'python'}],['dynamic-policy'])[0];
+  for(const p of [...seed.organization.initialAgents,...seed.organization.agentTemplates!.map(t=>t.profile)])p.tools=[];
+  let decisions=0;
+  const broken=`return loop({id:'broken',plan:function*(ctx){
+    const out=yield* graphStep(graph('bad-input').node('root/check','INFER.REASONING.REFLECT',[],()=>({criteria:'invalid'})),null);
+    return ctx.failedAgent('root',out['root/check'].error);
+  }});`;
+  const meter=new MeteredProvider({async invoke(input){
+    if(input.metadata?.nodeId==='root/policy'){
+      const state=JSON.parse(String(input.messages[1].content)).evidence;
+      if(decisions){
+        assert.match(state.last.error,/INVALID_INPUT/);
+        assert.ok(state.nodeFailures.some((f:any)=>f.nodeId==='root/check' && f.error.code==='INVALID_INPUT'));
+      }
+      assert.ok(decisions++<3,'Returned errors must not reset the failed-stage protection');
+      return response(JSON.stringify({stop:false,reason:'Repair',gap:'Failed node',composition:broken,answer:''}));
+    }
+    return response('def solve(): return 7');
+  }});
+  const result=await new OrganizationRuntime(new DittoAgents(meter,model),limitsSchema.parse({maxSteps:40,maxTokens:200000}))
+    .run({...initialStrategy,...seed},{id:'failure-fixture',prompt:'Implement solve.'});
+  assert.equal(decisions,3);
+  assert.equal(result.answer,'def solve(): return 7');
 });
 
 test('late successful tools and programs remain visible after many ordinary feedback examples',()=>{

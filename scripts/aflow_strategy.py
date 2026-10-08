@@ -10,7 +10,7 @@ import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
-from search_evidence import compact_evidence
+from search_evidence import compact_evidence, paired_outcomes
 
 
 def main():
@@ -95,7 +95,7 @@ def main():
     def read_graph(number, path):
         strategy = json.loads((Path(path) / f'round_{number}/strategy.json').read_text())
         if static:return strategy['prompts'], strategy['composition']
-        return json.dumps(strategy['prompts']), json.dumps(compact_evidence({'composition': strategy['composition'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)}), ensure_ascii=False, separators=(',', ':'))
+        return json.dumps(strategy['prompts']), json.dumps(compact_evidence({'selected_parent_round': number, 'composition': strategy['composition'], 'organization': strategy['organization'], 'parent_execution': execution_context(number, path)}), ensure_ascii=False, separators=(',', ':'))
 
     optimizer.graph_utils.write_graph_files = write_graph
     optimizer.graph_utils.read_graph_files = read_graph
@@ -128,6 +128,7 @@ def main():
                     node_types.update((example.get('organization') or {}).get('nodeCalls', {}))
             history.append({'round': number, 'parentRound': experience.get('father node'),
                             'score': sum(scores) / len(scores), 'modification': experience.get('modification', 'Single-agent root'),
+                            'pairedSearchOutcomes': paired_outcomes(execution_context(experience['father node'], workflows), summaries) if 'father node' in experience else None,
                             'actions': actions, 'executedNodeTypes': sorted(node_types),
                             'templates': [{'id': t['id'], 'nodes': t['profile'].get('nodes', []),
                                            'reasoning': t['profile'].get('reasoning'), 'tools': t['profile'].get('tools', [])}
@@ -155,7 +156,12 @@ def main():
         begin = system.index('The prompt you need to generate')
         end = system.index('Considering information loss', begin)
         system = system[:begin] + 'Generate the complete JSON map of agent, factory, review, integrate and retrieve prompts. All five fields are editable.\n' + system[end:]
-        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members, their internal graphs/loops, the complete agentTemplates library, initialBindings and dynamic MAS routing from this parent, and make one focused change. The candidate jointly defines the MAS and its reusable agents; template-only optimization must not discard the outer derivation policy. Do not copy task answers or episodic memory into reusable profiles. Return composition and organization only as executable fields; parent_execution is evidence.\n' + user + '\nsearch_branch_history: ' + json.dumps(branch_history()) + '\n' + init['interface'] + '\nReturn modification, organization, composition and prompts according to the response schema. The strategy dynamically composes heterogeneous agents using native graphs and loops. Preserve and evolve their different internal node structures and cross-agent bindings; do not embed benchmark answers.'
+        evidence_rules = '''
+PARENT IDENTITY: selected_parent_round and the supplied graph/prompts are the authoritative starting artifact. A modification description in experience/history describes another trial; it is not the parent's current source. State which parent binding or control condition changes and verify that it actually exists in the supplied source. Preserve unrelated parent code and dynamic routing.
+DIAGNOSIS: distinguish gradingFeedback (search evaluator result), nodeFailures (execution/interface faults), tool observations (only checks actually run), and speculative agent claims. A verifier that repeats the same assumptions cannot resolve an ambiguous specification. Address observed implementation or interpretation failures with suitable reasoning, evidence routing or node changes; do not default every error to adding a verifier. Never copy search assertions, task IDs, reference constants or solutions into reusable programs or prompts.
+REGRESSIONS: inspect pairedSearchOutcomes for both repaired and newly harmed search tasks across repetitions. Avoid re-proposing a previously unsuccessful structural edit under a new role name. If revisiting one, identify the concrete changed mechanism and the observed failure it repairs. Missing historical comparisons are unknown, not evidence of no regression. Tool execution evidence lives in graphs/observations, not ctx.outputs (which contains published AgentOutput objects).
+'''
+        return system + '\nParent execution contains measured capability configurations and evolving graphs. Preserve useful population members, their internal graphs/loops, the complete agentTemplates library, initialBindings and dynamic MAS routing from this parent, and make one focused change. The candidate jointly defines the MAS and its reusable agents; template-only optimization must not discard the outer derivation policy. Do not copy task answers or episodic memory into reusable profiles. Return composition and organization only as executable fields; parent_execution is evidence.\n' + user + '\nsearch_branch_history: ' + json.dumps(branch_history()) + '\n' + init['interface'] + evidence_rules + '\nReturn modification, organization, composition and prompts according to the response schema. The strategy dynamically composes heterogeneous agents using native graphs and loops. Preserve and evolve their different internal node structures and cross-agent bindings; do not embed benchmark answers.'
 
     optimizer.graph_utils.create_graph_optimize_prompt = prompt
 

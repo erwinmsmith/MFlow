@@ -5,7 +5,7 @@ import { availableParallelism } from 'node:os';
 import { mkdtemp, writeFile, readFile, copyFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Sandbox, createLocalSandboxExecutor } from "@codesoul-co/ditto";
-import { score } from "./data.js";
+import { score, assertDatasetRole } from "./data.js";
 import type { Task } from "./types.js";
 import { evalplusEnvironment } from './benchmark-hub.js';
 import { extraBenchmarkIdentity } from './benchmark-hub.js';
@@ -187,7 +187,7 @@ export async function gradingIdentity(tasks: Task[]) {
     evalplusGrader: createHash('sha256').update(await readFile('scripts/grade_evalplus.py')).digest('hex') };
 }
 
-async function gradePython(task: Task, answer: string): Promise<0 | 1> {
+async function gradePython(task: Task, answer: string, searchFeedback: boolean): Promise<{ score: 0 | 1; gradingFeedback?: string }> {
   const ref = task.reference!;
   let code = cleanCode(answer, !!ref.prefix);
   if (ref.prefix && !code.startsWith(ref.prefix) &&
@@ -216,7 +216,10 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
     // 137 is the candidate's timeout/OOM kill, not a Docker startup failure.
     if (!result.stdout.startsWith(started) || [125, 126, 127].includes(result.exitCode))
       throw new GradingFailure({ code: `DOCKER_${result.exitCode}`, stderr: result.stderr.slice(0, 500) });
-    return result.exitCode === 0 && result.stdout.trimEnd().endsWith(marker) ? 1 : 0;
+    const passed = result.exitCode === 0 && result.stdout.trimEnd().endsWith(marker);
+    return { score: passed ? 1 : 0, ...(!passed && searchFeedback ? {
+      gradingFeedback: `Search-only Python evaluation failed (exit ${result.exitCode}).\n${result.stderr.slice(-4000) || 'No Python traceback; candidate timed out, exhausted memory, or did not finish the evaluation.'}`,
+    } : {}) };
   } catch (error) {
     if (error instanceof GradingFailure) throw error;
     throw new GradingFailure({ code: error instanceof Error ? error.name : 'UNKNOWN', stderr: String(error).slice(-1000) });
@@ -255,7 +258,9 @@ async function gradeEvalplus(task: Task, answer: string): Promise<0 | 1> {
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
-export async function grade(task: Task, answer: string, execution?: Execution, agents?: DittoAgents): Promise<{ score: 0 | 1; f1?: number; partialCredit?: number; confidence?: number; judge?: unknown }> {
+export async function grade(task: Task, answer: string, execution?: Execution, agents?: DittoAgents, feedback?: 'search'): Promise<{ score: 0 | 1; f1?: number; partialCredit?: number; confidence?: number; judge?: unknown; gradingFeedback?: string }> {
+  // Grader assertions may inform mutation only on the search split, never an episode.
+  if (feedback === 'search') assertDatasetRole([task], 'search');
   if (task.metric === 'automationbench' || task.metric === 'hle') {
     try { return task.metric === 'automationbench' ? await gradeAutomation(task, execution) : await gradeHLE(task, answer, agents); }
     catch (error) { throw new GradingFailure({ code: 'EXTENDED_GRADER', stderr: String(error).slice(-1000) }); }
@@ -267,7 +272,7 @@ export async function grade(task: Task, answer: string, execution?: Execution, a
   }
   if (task.metric === "exact" || task.metric === "numeric") return { score: score(task, answer) };
   if (task.metric === "drop") return dropScore(answer, task.reference!.answers!);
-  if (task.metric === "python") return { score: await gradePython(task, answer) };
+  if (task.metric === "python") return gradePython(task, answer, feedback === 'search');
   if (task.metric === 'evalplus') return { score: await gradeEvalplus(task, answer) };
   return { score: await gradeMath(task, answer) };
 }

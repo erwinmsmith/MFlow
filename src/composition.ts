@@ -251,6 +251,13 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
     get graphs() { return snapshotGraphData(orchestration.graphs); },
     get tools() { return structuredClone(orchestration.tools); },
     get structure() { return snapshotGraphData({ graphs: orchestration.graphs.map(({id,nodes})=>({id,nodes})),
+      // Route actual observations without cloning model requests and their nested histories.
+      observations: orchestration.graphs.flatMap(g=>g.nodes.filter(n=>n.type==='INTERACTION.OBSERVE')
+        .map(n=>({graphId:g.id,nodeId:n.id,result:(g.outputs as Record<string, unknown>)[n.id]}))),
+      nodeFailures: orchestration.graphs.flatMap(g=>g.nodes.flatMap(n=>{
+        const result=(g.outputs as Record<string,{status?:string;error?:unknown}>)[n.id];
+        return ['error','failed'].includes(result?.status ?? '') ? [{graphId:g.id,nodeId:n.id,error:result.error}] : [];
+      })),
       // Superseded source stays in the audit log; only current bindings belong in design state.
       programs: [...new Map(orchestration.programs!.map(p=>[p.agentId,p])).values()].filter(p=>programs.has(p.agentId)),
       decisions: orchestration.decisions }); },

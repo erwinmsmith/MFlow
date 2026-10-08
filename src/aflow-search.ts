@@ -182,7 +182,7 @@ export async function runAFlowSearch(options: {
     }
     return parsed;
   };
-  type Row = { taskId: string; score: number; f1?: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; toolEvidence?: unknown[]; error?: string; organization?: ReturnType<typeof organizationEvidence> };
+  type Row = { taskId: string; score: number; f1?: number; answer: string; tokens: number; actualTokens?: number | null; solutionEvidence?: { agentId: string; artifacts: unknown[] }[]; toolEvidence?: unknown[]; error?: string; gradingFeedback?: string; organization?: ReturnType<typeof organizationEvidence> };
   async function evaluation(number: number, repeat: number, strategy: Strategy) {
     const dir = join(out, `round-${number}`, `pass-${repeat}`);
     await mkdir(dir, { recursive: true });
@@ -230,7 +230,7 @@ export async function runAFlowSearch(options: {
         return undefined;
       });
       try {
-        if (execution) row = { taskId: task.id, ...await grade(task, execution.answer, execution, agents), answer: execution.answer,
+        if (execution) row = { taskId: task.id, ...await grade(task, execution.answer, execution, agents, 'search'), answer: execution.answer,
           tokens: agents.provider.tokens, actualTokens: execution.actualTokens, organization: organizationEvidence(execution),
           error: execution.executionError, toolEvidence: execution.toolEvents,
           solutionEvidence: execution.outputs.map(({ agentId, output }) => ({ agentId, artifacts: output.artifacts })) };
@@ -246,10 +246,10 @@ export async function runAFlowSearch(options: {
     });
     const organizations = rows.map(r => ({ taskId: r.taskId, score: r.score, organization: r.organization }));
     await save(join(dir, 'organizations.json'), organizations);
-    return { organizationSummary: summarizeOrganizations(organizations), score: mean(rows.map((r) => r.f1 ?? r.score)), meanTokens: mean(rows.map((r) => r.tokens)),
+    return { organizationSummary: { ...summarizeOrganizations(organizations), taskScores: rows.map(r => ({ taskId: r.taskId, score: r.f1 ?? r.score })) }, score: mean(rows.map((r) => r.f1 ?? r.score)), meanTokens: mean(rows.map((r) => r.tokens)),
       tokens: rows.reduce((n, r) => n + r.tokens, 0),
       failures: rows.flatMap((r, i) => r.score ? [] : [{ taskId: r.taskId, question: tasks[i].prompt,
-        expected_output: tasks[i].answer, prediction: r.answer, solutionEvidence: r.solutionEvidence, toolEvidence:r.toolEvidence, error: r.error, organization: r.organization }]) };
+        expected_output: tasks[i].answer, prediction: r.answer, gradingFeedback: r.gradingFeedback, solutionEvidence: r.solutionEvidence, toolEvidence:r.toolEvidence, error: r.error, organization: r.organization }]) };
   }
   const server = createServer(async (req, res) => {
     try {

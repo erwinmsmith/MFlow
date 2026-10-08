@@ -131,6 +131,9 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       assert.ok(input.messages[0].content.includes('agentTemplates'));
       assert.ok(input.messages[0].content.includes('RUN_TEMPLATE'));
       assert.ok(input.messages[0].content.includes('search_branch_history'));
+      assert.ok(input.messages[0].content.includes('selected_parent_round'));
+      assert.ok(input.messages[0].content.includes('pairedSearchOutcomes'));
+      assert.ok(input.messages[0].content.includes('PARENT IDENTITY'));
       assert.ok(!input.messages[0].content.includes('no more than 5 lines'));
       assert.ok(!input.messages[0].content.includes('complexity should not exceed 10'));
 
@@ -194,6 +197,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(parentContext.strategy.composition, aflowInspiredComposition);
     assert.equal(parentContext.execution.length, 2);
     assert.equal(parentContext.execution[0].evaluated, 4);
+    assert.deepEqual(parentContext.execution[0].taskScores.map((r:any)=>r.score),[1,1,1,1]);
     assert.equal(bundle.config.prefixCache, false);
     // Observer telemetry is deliberately poisoned; it must not alter final selection.
     const observedOut=join(dir,'round-tests/round-2');

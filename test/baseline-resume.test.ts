@@ -51,6 +51,19 @@ assert compact_evidence({'$evidence_ref':0,'x':'y'*300})=={'$evidence_ref':0,'x'
 `]);
 });
 
+test('search comparisons retain regressions and omit incomplete or missing historical task scores',()=>{
+  execFileSync('python3',['-c',`
+from scripts.search_evidence import paired_outcomes
+def row(a,b):return {'taskScores':[{'taskId':'a','score':a},{'taskId':'b','score':b}]}
+result=paired_outcomes([row(0,1),row(1,1)],[row(1,1),row(1,0)])
+assert result['pairedTasks']==2
+assert result['improved']==[{'taskId':'a','before':0.5,'after':1.0}]
+assert result['regressed']==[{'taskId':'b','before':1.0,'after':0.5}]
+assert paired_outcomes([{},{}],[row(1,1),row(1,1)])['pairedTasks']==0
+assert paired_outcomes([row(0,1),{}],[row(1,1),row(1,0)])['pairedTasks']==0
+`]);
+});
+
 test('MATH candidate recovery keeps completed pass rows and verifies frozen code',()=>{
   execFileSync('python3',['-c',`
 import ast,asyncio,hashlib,json,random,tempfile,types,sys

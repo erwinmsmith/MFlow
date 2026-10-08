@@ -36,6 +36,20 @@ test('nonterminating candidate code scores zero and leaves no grading container'
   assert.equal(containers(), before);
 });
 
+test('Python failure diagnostics are search-only and never change the score', async t => {
+  const task = taskSchema.parse({id:'diagnostic-fixture',prompt:'Implement solve.',answer:'',metric:'python',
+    benchmark:'mbpp',aflowSplit:'validate',reference:{tests:['assert solve() == 42']}});
+  await assert.rejects(grade({...task,aflowSplit:'test'},'def solve(): return 0',undefined,undefined,'search'),/cannot be used for search/);
+  try { await checkScoring([task]); } catch { t.skip('Docker Python required'); return; }
+  const answer = 'def solve(): return 0';
+  assert.deepEqual(await grade(task,answer),{score:0});
+  const feedback=await grade(task,answer,undefined,undefined,'search');
+  assert.equal(feedback.score,0);
+  assert.match(feedback.gradingFeedback!,/AssertionError/);
+  assert.match(feedback.gradingFeedback!,/assert solve\(\) == 42/);
+  assert.deepEqual(await grade(task,'def solve(): return 42',undefined,undefined,'search'),{score:1});
+});
+
 test('grading failure and recovery reuse exactly the committed model answer', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'mflow-grade-recovery-'));
   let modelCalls = 0;

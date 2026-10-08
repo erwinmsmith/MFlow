@@ -139,6 +139,10 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
     factory: FACTORY_PROMPT,
     retrieve: 'Choose a relevant reusable agent and assign a concrete objective complementary to the current unresolved issue.',
   };
+  if (code) {
+    const guidance = '\nPreserve the requested function name, argument order, return type and stated behavior. Separate requirements explicitly given in the task from your assumptions; public examples exist only if the task actually contains them. Use self-created tests as hypotheses, not an oracle for ambiguous wording. Keep any Python checks finite and executable with loops rather than enumerated cases. An empty or successful tool response proves no assertions beyond those actually executed. Change an existing candidate only for a concrete specification mismatch or counterexample, and check the revised implementation before replacing it. Return complete solution code, without a test harness or debugging output.';
+    for (const key of ['agent', 'review', 'integrate'] as const) prompts[key] += guidance;
+  }
   const organization = structuredClone(textOrganization);
   for (const profile of [...organization.initialAgents, ...organization.agentTemplates!.map(t => t.profile)]) {
     profile.objective = code ? 'Implement the requested Python function correctly.' : workflow ? 'Execute and verify the requested business workflow.' : academic ? 'Solve the academic question accurately.' : 'Answer the supplied reading-comprehension question accurately.';

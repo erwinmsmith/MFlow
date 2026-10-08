@@ -2,6 +2,25 @@
 import json
 
 
+def paired_outcomes(parent, child):
+    """Compare per-task means across full search repetitions, never test rows."""
+    def means(passes):
+        values = {}
+        for summary in passes:
+            for row in summary.get('taskScores', []):
+                values.setdefault(row['taskId'], []).append(row['score'])
+        return {key: sum(scores) / len(scores) for key, scores in values.items()
+                if len(scores) == len(passes)}
+    before, after = means(parent), means(child)
+    shared = sorted(before.keys() & after.keys())
+    changed = [{'taskId': key, 'before': before[key], 'after': after[key]}
+               for key in shared if abs(after[key] - before[key]) > 1e-12]
+    return {'pairedTasks': len(shared),
+            'improved': [row for row in changed if row['after'] > row['before']],
+            'regressed': [row for row in changed if row['after'] < row['before']],
+            'note': 'Search per-task repetition means; comparisons describe association, not proof of causality. Missing historical taskScores are not zero scores.'}
+
+
 def compact_evidence(value):
     dumps = lambda v: json.dumps(v, ensure_ascii=False, separators=(',', ':'))
     counts = {}
