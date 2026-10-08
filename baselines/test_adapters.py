@@ -295,11 +295,16 @@ class AdapterTests(unittest.TestCase):
         class Programmer:
             def __init__(self,*args):pass
             async def exec_code(self,*args):raise AssertionError('host execution')
+            async def code_generate(self, result):return result
         operator=types.SimpleNamespace(Programmer=Programmer,run_code=namespace['run_code'])
         original=operator.Programmer.exec_code
         token=common.SCOPE.set(('AFlow','pilot','fixture'))
         try:
             install_aflow_python(operator)
+            install_aflow_python(operator)
+            generated=asyncio.run(operator.Programmer().code_generate({'response':'def solve(): return 0.5'}))
+            self.assertEqual(generated['code'],generated['response'])
+            self.assertEqual(asyncio.run(operator.Programmer().code_generate({'code':'original','response':'other'}))['code'],'original')
             with patch.object(operator,'run_code',side_effect=AssertionError('host execution')),patch.dict(os.environ,{'MFLOW_BASELINE_PORT':'8198'}),patch.object(common.urllib.request,'urlopen') as send:
                 send.return_value.__enter__.return_value=io.StringIO('{"status":"success","content":"debug\\n[\\"Success\\",\\"1/2\\"]\\n"}')
                 self.assertEqual(asyncio.run(operator.Programmer(None).exec_code('def solve(): return 0.5')),('Success','1/2'))

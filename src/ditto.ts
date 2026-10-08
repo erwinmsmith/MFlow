@@ -345,7 +345,8 @@ export class DittoAgents {
       try { return parseJSON(content, schema); }
       catch (error) {
         if (!repair) throw error;
-        return (await this.structured(`${kind}-format-repair`, FORMAT_PROMPT, { output: content }, schema, limits, undefined, false)).value;
+        return (await this.structured(`${kind}-format-repair`, FORMAT_PROMPT,
+          { instruction, payload, output: content, error: String(error) }, schema, limits, undefined, false)).value;
       }
     };
     const runtime = this.runtime(profile?.tools ?? [], limits.timeoutMs);
@@ -356,13 +357,13 @@ export class DittoAgents {
         role: "system" as const,
         content:
           instruction +
-          "\nReturn one JSON object only, matching this schema:\n" +
+          "\nReturn one JSON INSTANCE matching the schema below. The schema describes the output; do not return the schema itself. Populate its fields with the requested substantive result.\n" +
           JSON.stringify(z.toJSONSchema(schema)),
       },
       { role: "user" as const, content: JSON.stringify({ kind, payload }) },
     ],imageTask);
     const model = { provider: "mflow", model: this.model.model,
-      ...(this.model.providerOptions ? { providerOptions: this.model.providerOptions } : {}) };
+      providerOptions: { ...this.model.providerOptions, response_format: { type: 'json_object' } } };
     const generation = {
       temperature: this.model.temperature,
       ...(new URL(this.model.baseUrl).hostname === "api.deepseek.com"

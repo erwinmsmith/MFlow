@@ -225,7 +225,7 @@ def main():
     }
     if math:
         commands.update({
-          'AFlow':[[aflow,'baselines/aflow.py','--phase','search-test']],
+          'AFlow':[[aflow,os.environ.get('MFLOW_AFLOW_RUNNER','baselines/aflow.py'),'--phase','search-test']],
           **{m:[[legacy,'baselines/run.py',m,'--phase','test']] for m in ('DyLAN','EvoAgent','AutoAgents')},
         })
     single=out/'SingleLLM';bundle=single/'seed.json';single_test=single/'test'

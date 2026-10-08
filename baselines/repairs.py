@@ -9,6 +9,16 @@ def install_aflow_python(*modules):
     import inspect
     from bench_common import execute_python
     for module in modules:
+        if not getattr(module.Programmer, '_mflow_code_contract', False):
+            generate = module.Programmer.code_generate
+            async def code_generate(self, *args, _generate=generate, **kwargs):
+                result = await _generate(self, *args, **kwargs)
+                # Native CodeFormatter emits response; Programmer consumes code.
+                if 'code' not in result and isinstance(result.get('response'), str):
+                    return {**result, 'code': result['response']}
+                return result
+            module.Programmer.code_generate = code_generate
+            module.Programmer._mflow_code_contract = True
         native='import json,sys,traceback,logging\nlogger=logging.getLogger("aflow")\n'+inspect.getsource(module.run_code)
         async def execute(self,code,timeout=30,*,_native=native):
             result=await asyncio.to_thread(execute_python,_native+'\nprint(json.dumps(run_code('+repr(code)+')))')

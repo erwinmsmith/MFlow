@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withGenerationGuidance, installGenerationGuidance } from '../src/generation-guidance.js';
+import { withGenerationGuidance, installGenerationGuidance, failedPythonProbes } from '../src/generation-guidance.js';
 
 test('finite-program guidance preserves model settings, tools, input and response schema', () => {
   const body = {model:'fixture',temperature:0,max_tokens:393216,stream:true,
@@ -22,7 +22,7 @@ test('finite-program guidance preserves model settings, tools, input and respons
 
 test('live installation leaves an in-flight request intact and changes only future requests', async () => {
   const original=globalThis.fetch;
-  const key=Symbol.for('mflow.generation-guidance');
+  const key=Symbol.for('mflow.generation-guidance.finite-programs-v2');
   const globals=globalThis as typeof globalThis & {[key:symbol]:unknown};
   let finish!: (response:Response)=>void;
   const bodies:string[]=[];
@@ -34,7 +34,22 @@ test('live installation leaves an in-flight request intact and changes only futu
     oldFinish(new Response('existing answer'));
     assert.equal(await (await old).text(),'existing answer');assert.equal(bodies[0],init.body);
     const next=fetch('https://fixture.invalid',init);finish(new Response('new answer'));await next;
-    assert.match(bodies[1],/finite-programs-v1/);
+    assert.match(bodies[1],/finite-programs-v2/);
     assert.equal((state as {modifiedRequests:number}).modifiedRequests,1);
   } finally {globalThis.fetch=original;delete globals[key];}
+});
+
+
+test('failed Python probe enumeration stops while changed implementations and successful sweeps remain allowed', () => {
+  const history=(n:number,success=false,change=false)=>Array.from({length:n},(_,i)=>[
+    {role:'assistant',tool_calls:[{id:String(i),function:{name:'python',arguments:JSON.stringify({code:`def f(n):\n    return ${change?i:1} + f(n//2)\nprint(f(${i+1}))\n`})}}]},
+    {role:'tool',tool_call_id:String(i),content:success?'success': 'failed: PYTHON_EXECUTION: RecursionError'}]).flat();
+  assert.equal(failedPythonProbes(history(20)),20);
+  assert.equal(failedPythonProbes(history(20,true)),0);
+  assert.equal(failedPythonProbes(history(20,false,true)),1);
+  const body={tools:[{function:{name:'python'}}],messages:history(4)};
+  assert.match(String(withGenerationGuidance({body:JSON.stringify(body)})?.body),/Changing only the probe input/);
+  body.messages.unshift({role:'system',content:'[MFLOW finite-programs-v2] existing'} as any);
+  assert.match(String(withGenerationGuidance({body:JSON.stringify(body)})?.body),/Changing only the probe input/);
+  assert.throws(()=>withGenerationGuidance({body:JSON.stringify({...body,messages:history(5)})}),{code:'DEGENERATE_OUTPUT'});
 });

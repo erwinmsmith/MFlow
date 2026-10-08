@@ -120,22 +120,23 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     let body = ''; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
     const isText = input.response_format?.type === 'text';
-    const payload = isText ? {} : JSON.parse(input.messages[1].content);
+    const payload = isText ? {} : JSON.parse(input.messages.find((m: {content: string}) => m.content.startsWith('{') && m.content.includes('"kind"')).content);
+    const instruction = input.messages.map((m: {content: string}) => m.content).join('\n');
     let value;
     if (payload.kind === 'aflow-optimizer') {
       proposals++;
-      assert.ok(input.messages[0].content.includes('parent_execution'));
-      assert.ok(input.messages[0].content.includes('initialAgents'));
-      assert.ok(input.messages[0].content.includes('nodeCalls'));
-      assert.ok(input.messages[0].content.includes('composition'));
-      assert.ok(input.messages[0].content.includes('agentTemplates'));
-      assert.ok(input.messages[0].content.includes('RUN_TEMPLATE'));
-      assert.ok(input.messages[0].content.includes('search_branch_history'));
-      assert.ok(input.messages[0].content.includes('selected_parent_round'));
-      assert.ok(input.messages[0].content.includes('pairedSearchOutcomes'));
-      assert.ok(input.messages[0].content.includes('PARENT IDENTITY'));
-      assert.ok(!input.messages[0].content.includes('no more than 5 lines'));
-      assert.ok(!input.messages[0].content.includes('complexity should not exceed 10'));
+      assert.ok(instruction.includes('parent_execution'));
+      assert.ok(instruction.includes('initialAgents'));
+      assert.ok(instruction.includes('nodeCalls'));
+      assert.ok(instruction.includes('composition'));
+      assert.ok(instruction.includes('agentTemplates'));
+      assert.ok(instruction.includes('RUN_TEMPLATE'));
+      assert.ok(instruction.includes('search_branch_history'));
+      assert.ok(instruction.includes('selected_parent_round'));
+      assert.ok(instruction.includes('pairedSearchOutcomes'));
+      assert.ok(instruction.includes('PARENT IDENTITY'));
+      assert.ok(!instruction.includes('no more than 5 lines'));
+      assert.ok(!instruction.includes('complexity should not exceed 10'));
 
       value = { organization: {...initialOrganization,toolLibrary:[{name:'generated_sum',description:'Add parameters',parameters:[{name:'values',description:'Numbers',type:'array',required:true}],implementation:{kind:'sequence',steps:[{tool:'arithmetic',arguments:{operation:'add',values:{$input:'/values'}}}]}}]}, modification: `Change the agent instructions (${proposals}).`, composition: aflowInspiredComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
       if (invalidComposition) value.composition = "return loop({id:'bad',plan:function*(ctx){ctx.profile(ctx.self);return '';}});";

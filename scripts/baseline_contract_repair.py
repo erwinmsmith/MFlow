@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import runpy
 
 receipt = json.loads(Path(os.environ['MFLOW_BASELINE_CONTRACT_REPAIR']).read_text())
 original = Path(receipt['original'])
@@ -18,6 +19,6 @@ spec = importlib.util.spec_from_file_location('repairs', receipt['replacement'])
 module = importlib.util.module_from_spec(spec)
 sys.modules['repairs'] = module
 spec.loader.exec_module(module)
-import automation_run
-if __name__ == '__main__':
-    automation_run.main()
+entrypoint=receipt.get('entrypoint','automation_run')
+if entrypoint not in ('automation_run','aflow'):raise ValueError('Unexpected baseline entrypoint')
+if __name__ == '__main__':runpy.run_module(entrypoint,run_name='__main__')

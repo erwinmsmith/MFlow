@@ -161,6 +161,23 @@ test('optimizer context preserves full parent feedback above Ditto default 64 Ki
   assert.equal(result.value.candidate_answer,'ok');assert.equal(fake.inputs.length,1);
 });
 
+test('structured schema echoes repair with the original request and validation error', async()=>{
+  const {agentOutputSchema}=await import('../src/types.js');
+  const fake=new ScriptedProvider(input=>{
+    assert.deepEqual(input.model.providerOptions?.response_format,{type:'json_object'});
+    assert.match(String(input.messages[0].content),/do not return the schema itself/);
+    if(fake.inputs.length===1)return {type:'object',properties:{}};
+    const payload=JSON.parse(String(input.messages.find(m=>String(m.content).includes('"payload"'))!.content)).payload;
+    assert.equal(payload.instruction,'ORIGINAL-INSTRUCTION');
+    assert.deepEqual(payload.payload,{evidence:'ORIGINAL-EVIDENCE'});
+    assert.match(payload.error,/candidate_answer/);
+    return output('repaired');
+  });
+  const agents=new DittoAgents(new MeteredProvider(fake),model);
+  const result=await agents.structured('aflow-optimizer','ORIGINAL-INSTRUCTION',{evidence:'ORIGINAL-EVIDENCE'},agentOutputSchema,limitsSchema.parse({}));
+  assert.equal(result.value.candidate_answer,'repaired');assert.equal(fake.inputs.length,2);
+});
+
 test('agent Context uses published maximums instead of default storage cutoffs',async()=>{
   const {graph}=await import('@codesoul-co/ditto');
   const runtime=new DittoAgents(new MeteredProvider(new ScriptedProvider()),model).runtime([],1000);
