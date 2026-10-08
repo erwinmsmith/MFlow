@@ -35,11 +35,12 @@ export function createPythonTool(image: string): RegisteredTool {
         error: { code: 'PYTHON_ARGUMENTS', message: 'Invalid Python arguments' } };
       const { code } = parsed.data;
       const container = `mflow-tool-${randomUUID()}`;
+      const started = `MFLOW_STARTED_${randomUUID()}\n`;
       const result = await context.services.sandbox.run({ command: dockerCommand, args: [
         'run', '--rm', '--init', '--name', container, '--network', 'none', '--read-only', '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '256m',
         '--cpus', '1', '--user', '65534:65534', '--tmpfs', '/tmp:rw,nosuid,size=16m',
-        image, 'timeout', '-s', 'KILL', '30', 'python', '-B', '-I', '-c', code,
+        image, 'sh', '-c', 'printf "%s" "$1"; exec timeout -s KILL 30 python -B -I -c "$2"', 'tool', started, code,
       ] }, context.signal).catch(error => {
         // Preserve user/runtime cancellation. A local command deadline is a
         // tool failure the agent can observe and correct, not a lost episode.
@@ -50,9 +51,12 @@ export function createPythonTool(image: string): RegisteredTool {
         // Cleanup must survive cancellation of the original tool request.
         await context.services.sandbox.run({ command: dockerCommand, args: ['rm', '-f', container] }).catch(() => {});
       });
+      if (result && (!result.stdout.startsWith(started) || [125, 126, 127].includes(result.exitCode)))
+        return { status: 'failed', content: 'TOOL_INFRASTRUCTURE: Python container did not start. Resume after the execution service recovers.',
+          error: { code: 'TOOL_INFRASTRUCTURE', message: result.stderr.slice(-1000) } };
       if (!result || [124, 137, 143].includes(result.exitCode)) return { status: 'failed', content: 'Python sandbox timed out or was killed. Diagnose termination and change the computation before retrying; an unchanged retry cannot make progress.',
         error: { code: 'PYTHON_TIMEOUT', message: 'Python execution timed out' } };
-      return result.exitCode === 0 ? { status: 'success', content: result.stdout } :
+      return result.exitCode === 0 ? { status: 'success', content: result.stdout.slice(started.length) } :
         { status: 'failed', content: result.stderr, error: { code: 'PYTHON_EXECUTION', message: `Python exited ${result.exitCode}` } };
     },
   };

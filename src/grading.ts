@@ -203,6 +203,7 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
   const script = `${preamble}${code}\n${ref.setup ?? ""}\n${test}\nprint(${JSON.stringify(marker)})\n`;
   const dir = await mkdtemp(join(process.cwd(), ".benchmark-sandbox-"));
   const container = `mflow-grade-${randomUUID()}`;
+  const started = `MFLOW_STARTED_${randomUUID()}\n`;
   try {
     await writeFile(join(dir, "check.py"), script, { mode: 0o444 });
     const result = await sandbox(60_000).run({ command: docker, args: [
@@ -210,10 +211,10 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
       "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "256m",
       "--cpus", "1", "--user", "65534:65534", "--mount", `type=bind,source=${dir},target=/work,readonly`,
       "--workdir", "/work", "--tmpfs", "/tmp:rw,nosuid,size=16m", image,
-      "timeout", "-s", "KILL", "10", "python", "-B", "-I", "/work/check.py",
+      "sh", "-c", 'printf "%s" "$1"; exec timeout -s KILL 10 python -B -I /work/check.py', "grader", started,
     ] });
     // 137 is the candidate's timeout/OOM kill, not a Docker startup failure.
-    if ([125, 126, 127].includes(result.exitCode))
+    if (!result.stdout.startsWith(started) || [125, 126, 127].includes(result.exitCode))
       throw new GradingFailure({ code: `DOCKER_${result.exitCode}`, stderr: result.stderr.slice(0, 500) });
     return result.exitCode === 0 && result.stdout.trimEnd().endsWith(marker) ? 1 : 0;
   } catch (error) {

@@ -192,7 +192,7 @@ const server=createServer(async(req,res)=>{
     const result=await runtime.run(plan,input);
     if(result.sample.status!=='success')throw new ProviderFailure(result.sample.error?.code??'INVALID_MODEL_OUTPUT',result.sample.error?.message??'Ditto sample failed');
     res.end(JSON.stringify(result.sample.output));
-  }catch(error){res.statusCode=502;res.end(JSON.stringify({error:String(error)}));}
+  }catch(error){res.statusCode=502;res.end(JSON.stringify({error:String(error).includes('TOOL_INFRASTRUCTURE')?'[TOOL_INFRASTRUCTURE] Python service unavailable; resume after recovery':String(error)}));}
 });
 server.requestTimeout=0;server.timeout=0;
 server.listen(port,'127.0.0.1',()=>{

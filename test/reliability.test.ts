@@ -105,6 +105,15 @@ test('sandbox command deadlines become failed observations but caller cancellati
   await assert.rejects(tool.execute({ code: 'print(1)' }, context), /Command timed out/);
 });
 
+test('container startup failures stop inference before another model request', async () => {
+  const tool = createPythonTool('fixture-image');
+  const context = { services: { sandbox: { run: async () => ({exitCode:1,stdout:'',stderr:'Docker unavailable'}) } } } as unknown as WorkerContext<unknown, unknown>;
+  const outcome = await tool.execute({code:'print(1)'},context);
+  assert.equal(outcome.error?.code,'TOOL_INFRASTRUCTURE');
+  const provider = observableProvider({async invoke(){assert.fail('must not call model');}},{});
+  await assert.rejects(provider.invoke({...input,messages:[{role:'tool',content:String(outcome.content)}]}, {signal:new AbortController().signal}), /TOOL_INFRASTRUCTURE/);
+});
+
 test('partial socket failure retries the identical request with separate unknown and known cost', async () => {
   let attempts = 0;
   const seen: SampleInput[] = [];

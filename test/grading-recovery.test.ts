@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkpointExecution } from '../src/evaluation.js';
@@ -10,6 +10,19 @@ import { grade, checkScoring } from '../src/grading.js';
 import { taskSchema } from '../src/types.js';
 import { execFileSync } from 'node:child_process';
 import { dockerCommand } from '../src/python-tool.js';
+
+test('Docker connection failure with exit 1 is infrastructure, not a wrong answer', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'mflow-docker-outage-'));
+  const docker = join(dir, 'docker');
+  try {
+    await writeFile(docker, '#!/bin/sh\necho "Cannot connect to the Docker daemon" >&2\nexit 1\n', {mode:0o755});
+    execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import {grade,GradingFailure} from ${JSON.stringify(new URL('../src/grading.js', import.meta.url).href)};
+      await assert.rejects(grade({id:'fixture',metric:'python',reference:{tests:['assert solve() == 1']}}, 'def solve(): return 1'),GradingFailure);
+    `], {env:{...process.env,MFLOW_DOCKER:docker}});
+  } finally { await rm(dir,{recursive:true,force:true}); }
+});
 
 test('nonterminating candidate code scores zero and leaves no grading container', async t => {
   const task = taskSchema.parse({id:'timeout-fixture',prompt:'fixture',answer:'',metric:'python',

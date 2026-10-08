@@ -110,6 +110,8 @@ export function observableProvider(provider: ModelProvider, options: TransportOp
     const publish = async () => { progress.updatedAt = new Date().toISOString(); await options.onProgress?.({ ...progress }); };
     await publish();
     try {
+      if (input.messages.some(m => m.role === 'tool' && JSON.stringify(m.content).includes('TOOL_INFRASTRUCTURE')))
+        throw new ProviderFailure('TOOL_INFRASTRUCTURE', 'Python execution service failed; resume the episode after recovery');
       const cycles = repeatedToolCycles(input.messages), computations = repeatedToolCycles(input.messages, true);
       const repeats = Math.max(cycles, computations);
       if (repeats >= 4) {
