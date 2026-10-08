@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Agent } from 'undici';
+import { withGenerationGuidance } from './generation-guidance.js';
 import type { ModelProvider, SampleOutput, SampleInput } from '@codesoul-co/ditto/worker/infer';
 
 // Ditto/caller AbortSignal owns the deadline, including time queued for local inference.
 const modelDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 export const modelFetch: typeof globalThis.fetch = async (input, init) => {
+  init = withGenerationGuidance(init);
   // Check the resolved wire format, including provider-level defaults. Ditto
   // still owns serialization and transport; this only supplies the required
   // JSON instruction when a generated node omitted it.
