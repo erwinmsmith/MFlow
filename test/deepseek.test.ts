@@ -92,10 +92,14 @@ test("DeepSeek requests use the published Ditto provider with supported fields",
     assert.equal(body.max_completion_tokens, undefined);
     assert.deepEqual(body.thinking, { type: "disabled" });
     assert.deepEqual(body.response_format, { type: "json_object" });
+    const jsonMessages = body.messages as { content: string }[];
+    assert.match(jsonMessages[0].content, /JSON object/);
+    assert.equal(jsonMessages.at(-1)!.content, 'Reply OK');
     await provider.invoke({model:{provider:'mflow',model:'deepseek-flash',providerOptions:{response_format:{type:'text'}}},
       messages:[{role:'user',content:'Solve in prose'}],generation:{temperature:0,maxTokens:40}}, {signal:AbortSignal.timeout(1000)});
     assert.deepEqual(body.response_format,{type:'text'});
     assert.deepEqual(body.thinking,{type:'disabled'});
+    assert.deepEqual(body.messages,[{role:'user',content:'Solve in prose'}]);
 
   } finally {
     globalThis.fetch = previous;

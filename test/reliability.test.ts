@@ -8,6 +8,7 @@ import { OrganizationRuntime } from '../src/runtime.js';
 import { aflowInspiredComposition, textOrganization, textPrompts } from '../src/aflow-seed.js';
 import { initialStrategy, limitsSchema } from '../src/types.js';
 import type { WorkerContext } from '@codesoul-co/ditto/worker';
+import { createDitto, createInferWorker, createInteractionWorker, runReactFlow } from '@codesoul-co/ditto';
 
 const input: SampleInput = { model: { model: 'fixture' }, messages: [{ role: 'user', content: 'synthetic task' }], metadata: { nodeId: 'root/sample' } };
 const response = (answer: string) => ({ message: { role: 'assistant' as const, content: `Synthetic derivation. \\boxed{${answer}}` },
@@ -56,6 +57,41 @@ test('identical completed tool cycles get recovery guidance then fail without an
   await provider.invoke({...input,messages:messages(4)}, {signal:AbortSignal.timeout(1000)});
   await assert.rejects(provider.invoke({...input,messages:messages(5)}, {signal:AbortSignal.timeout(1000)}), {code:'DEGENERATE_OUTPUT'});
   assert.equal(calls,1);
+});
+
+test('native Ditto tool loop stops unchanged Python despite different random counterexamples', async () => {
+  let calls = 0, executions = 0, warned = false;
+  const provider = observableProvider({async invoke(request) {
+    calls++;
+    warned ||= String(request.messages.at(-1)?.content).includes('Randomized tests');
+    return {message:{role:'assistant',content:''},finishReason:'action_request',usage:{totalTokens:1},
+      actionRequests:[{id:'call-'+calls,name:'python',arguments:{code:'unchanged synthetic random test'}}]};
+  }}, {});
+  const runtime = createDitto({sandbox:{tools:['python']},workers:[
+    createInferWorker({providers:{fixture:provider}}),
+    createInteractionWorker({tools:[{name:'python',description:'fixture',inputSchema:{type:'object'},validate(){},
+      async execute(){return {status:'failed',content:`AssertionError: random counterexample ${++executions}`,
+        error:{code:'PYTHON_EXECUTION',message:'Python exited 1'}};}}]}),
+  ]});
+  try {
+    const result = await runReactFlow(runtime,{model:{provider:'fixture',model:'fixture'},messages:input.messages,
+      actions:[{name:'python',description:'fixture',inputSchema:{type:'object'},target:{kind:'tool',toolName:'python'}}],
+      constraints:{maxSteps:100,maxActionCalls:100,maxTotalTokens:10000,timeoutMs:5000}},{timeoutMs:5000});
+    assert.equal(calls,5,JSON.stringify(result)); assert.equal(executions,5); assert.equal(warned,true);
+    assert.notEqual(result.status,'completed');
+    assert.match(JSON.stringify(result.error),/Unchanged tool computation/);
+  } finally { await runtime.close(); }
+});
+
+test('computation guard allows corrected code and changing external state', () => {
+  const history = (name: string, changed: boolean): SampleInput['messages'] => Array.from({length:20},(_,i)=>[
+    {role:'assistant' as const,content:'',metadata:{actionRequests:[{id:String(i),name,arguments:{code:changed?String(i):'same'}}]}},
+    {role:'tool' as const,content:`observation ${i}`,metadata:{actionRequestId:String(i),name}},
+  ]).flat();
+  assert.equal(repeatedToolCycles(history('python',false)),1);
+  assert.equal(repeatedToolCycles(history('python',false),true),20);
+  assert.equal(repeatedToolCycles(history('python',true),true),1);
+  assert.equal(repeatedToolCycles(history('api_fetch',false),true),1);
 });
 
 test('sandbox command deadlines become failed observations but caller cancellation propagates', async () => {

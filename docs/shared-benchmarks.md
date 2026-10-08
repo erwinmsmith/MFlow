@@ -298,3 +298,20 @@ usage. Completed rows are not selectively rerun; interrupted uncommitted work ma
 restart and its earlier usage remains in the ledger. Thus results are an explicitly
 recorded repaired continuation, not a claim that all rows used one unchanged
 runtime. Any new clean comparison should use the repaired version for every method.
+
+Follow-up on 2026-10-08: AFlow MBPP repeated the same randomized Python test
+hundreds of times; changing random counterexamples defeated action-plus-result
+matching. The transport guard now also detects unchanged `python`/`arithmetic`
+arguments, including short multi-action cycles. Four repetitions produce explicit
+recovery guidance; continued repetition fails the node as `DEGENERATE_OUTPUT`.
+Changed code/arguments remain unrestricted, and stateful external tools are excluded
+from this additional check. A failed task remains a failure, not a fabricated final
+answer. Progress records identify which cycle check triggered. The regression uses
+Ditto's public `runReactFlow`, real infer/interaction workers and a scripted fixture
+provider; it verifies execution behavior only, not model quality.
+
+For generated nodes choosing JSON mode, the resolved HTTP request now receives the
+required JSON output instruction when absent. Existing schemas, text-mode calls,
+model parameters, native search and MAS mutation procedures are preserved. This
+prevents deterministic missing-JSON HTTP 400 errors from restarting a whole search
+pass. A second checksum-recorded repair receipt preserves the earlier repair history.
