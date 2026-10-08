@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ModelProvider, SampleInput } from '@codesoul-co/ditto/worker/infer';
 import { MeteredProvider, DittoAgents, arithmeticTool } from '../src/ditto.js';
-import { observableProvider, ProviderFailure, repeatedOutput } from '../src/provider-progress.js';
+import { observableProvider, ProviderFailure, repeatedOutput, repeatedToolCycles } from '../src/provider-progress.js';
 import { createPythonTool } from '../src/python-tool.js';
 import { OrganizationRuntime } from '../src/runtime.js';
 import { aflowInspiredComposition, textOrganization, textPrompts } from '../src/aflow-seed.js';
@@ -40,6 +40,22 @@ test('larger exact cycles are found even when an internal phrase is the nearest 
   assert.ok(cycle.length > 2048);
   assert.equal(repeatedOutput(cycle.repeat(10)), true);
   assert.equal(repeatedOutput(Array.from({length:6000},(_,i)=>`Distinct synthetic row ${i}: ${i*37}\n`).join('')), false);
+});
+
+test('identical completed tool cycles get recovery guidance then fail without another paid call', async () => {
+  const messages = (n: number, changing = false): SampleInput['messages'] => Array.from({length:n}, (_, i) => [
+    {role:'assistant' as const,content:'',metadata:{actionRequests:[{id:String(i),name:'python',arguments:{code:`print(${changing ? i : 1})`}}]}},
+    {role:'tool' as const,content:'1',metadata:{actionRequestId:String(i),name:'python'}},
+  ]).flat();
+  assert.equal(repeatedToolCycles(messages(20, true)), 1);
+  let calls = 0;
+  const provider = observableProvider({async invoke(request) {
+    calls++; assert.match(String(request.messages.at(-1)!.content), /Execution diagnostic/);
+    return response('1');
+  }}, {});
+  await provider.invoke({...input,messages:messages(4)}, {signal:AbortSignal.timeout(1000)});
+  await assert.rejects(provider.invoke({...input,messages:messages(5)}, {signal:AbortSignal.timeout(1000)}), {code:'DEGENERATE_OUTPUT'});
+  assert.equal(calls,1);
 });
 
 test('sandbox command deadlines become failed observations but caller cancellation propagates', async () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Agent } from 'undici';
-import type { ModelProvider, SampleOutput } from '@codesoul-co/ditto/worker/infer';
+import type { ModelProvider, SampleOutput, SampleInput } from '@codesoul-co/ditto/worker/infer';
 
 // Ditto/caller AbortSignal owns the deadline, including time queued for local inference.
 const modelDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
@@ -56,6 +56,26 @@ export function repeatedOutput(tail: string): boolean {
   return false;
 }
 
+/** Only identical completed action/result cycles count; useful new work has no quota. */
+export function repeatedToolCycles(messages: SampleInput['messages']): number {
+  const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, stable(v)])) : value;
+  const calls = new Map<string, unknown>(), completed: string[] = [];
+  for (const message of messages.slice(-64)) {
+    const metadata = message.metadata as { actionRequests?: { id: string; name: string; arguments: unknown }[]; actionRequestId?: string } | undefined;
+    for (const call of metadata?.actionRequests ?? []) calls.set(call.id, [call.name, stable(call.arguments)]);
+    if (message.role === 'tool' && metadata?.actionRequestId && calls.has(metadata.actionRequestId))
+      completed.push(JSON.stringify([calls.get(metadata.actionRequestId), message.content]));
+  }
+  let best = 0;
+  for (let period = 1; period <= 4; period++) {
+    let count = 1;
+    while (completed.length >= (count + 1) * period && completed.slice(-period).every((s, i) => s === completed[completed.length - (count + 1) * period + i])) count++;
+    best = Math.max(best, count);
+  }
+  return best;
+}
+
 /** Consume the published provider's stream; Ditto owns SSE parsing, tool assembly and cancellation. */
 export function observableProvider(provider: ModelProvider, options: TransportOptions): ModelProvider {
   return { async invoke(input, callOptions) {
@@ -70,6 +90,9 @@ export function observableProvider(provider: ModelProvider, options: TransportOp
     const publish = async () => { progress.updatedAt = new Date().toISOString(); await options.onProgress?.({ ...progress }); };
     await publish();
     try {
+      const cycles = repeatedToolCycles(input.messages);
+      if (cycles >= 5) throw new ProviderFailure('DEGENERATE_OUTPUT', 'Identical tool calls and observations repeated after recovery guidance; no execution progress');
+      if (cycles >= 4) input = { ...input, messages: [...input.messages, { role: 'user', content: 'Execution diagnostic: the same tool action/result cycle has repeated four times without new evidence. Use the existing observations to finish, or materially change the method/arguments to address the failure. Do not repeat the unchanged cycle.' }] };
       let result: SampleOutput | undefined, lastSaved = 0;
       if (options.stream) {
         if (!provider.stream) throw new ProviderFailure('STREAM_UNAVAILABLE', 'Published provider has no stream interface');

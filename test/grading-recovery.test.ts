@@ -6,6 +6,22 @@ import { join } from 'node:path';
 import { checkpointExecution } from '../src/evaluation.js';
 import { GradingFailure } from '../src/grading.js';
 import type { Execution } from '../src/types.js';
+import { grade, checkScoring } from '../src/grading.js';
+import { taskSchema } from '../src/types.js';
+import { execFileSync } from 'node:child_process';
+import { dockerCommand } from '../src/python-tool.js';
+
+test('nonterminating candidate code scores zero and leaves no grading container', async t => {
+  const task = taskSchema.parse({id:'timeout-fixture',prompt:'fixture',answer:'',metric:'python',
+    reference:{tests:['assert solve() == 1']}});
+  try { await checkScoring([task]); } catch { t.skip('Docker Python required'); return; }
+  const containers = () => execFileSync(dockerCommand, ['ps','-aq','--filter','label=mflow.grading-task=timeout-fixture'], {encoding:'utf8'}).trim();
+  const before = containers();
+  const started = Date.now();
+  assert.deepEqual(await grade(task, 'def solve():\n    while True: pass'), {score:0});
+  assert.ok(Date.now()-started < 60000);
+  assert.equal(containers(), before);
+});
 
 test('grading failure and recovery reuse exactly the committed model answer', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'mflow-grade-recovery-'));

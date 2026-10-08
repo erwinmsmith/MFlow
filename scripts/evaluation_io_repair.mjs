@@ -13,6 +13,9 @@ for (const [receiptPath, module] of [
   [process.env.MFLOW_MODEL_OPTIONS_REPAIR, 'ditto.js'],
   [process.env.MFLOW_SEARCH_STORAGE_REPAIR, 'aflow-search.js'],
   [process.env.MFLOW_BRIDGE_STORAGE_REPAIR, 'bridge.mjs'],
+  [process.env.MFLOW_GRADING_REPAIR, 'grading.js'],
+  [process.env.MFLOW_PYTHON_TOOL_REPAIR, 'python-tool.js'],
+  [process.env.MFLOW_PROVIDER_PROGRESS_REPAIR, 'provider-progress.js'],
 ]) {
   if (!receiptPath) continue;
   const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));

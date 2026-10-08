@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import type { TaskInput } from './types.js';
 import { resolve } from 'node:path';
 import { Sandbox, createLocalSandboxExecutor, createWebSearchTool, type RegisteredTool } from '@codesoul-co/ditto';
@@ -33,8 +34,9 @@ export function createPythonTool(image: string): RegisteredTool {
       if (!parsed.success) return { status: 'failed', content: 'Python requires exactly one field: code, a non-empty string containing Python source. Supply corrected arguments.',
         error: { code: 'PYTHON_ARGUMENTS', message: 'Invalid Python arguments' } };
       const { code } = parsed.data;
+      const container = `mflow-tool-${randomUUID()}`;
       const result = await context.services.sandbox.run({ command: dockerCommand, args: [
-        'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+        'run', '--rm', '--init', '--name', container, '--network', 'none', '--read-only', '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '256m',
         '--cpus', '1', '--user', '65534:65534', '--tmpfs', '/tmp:rw,nosuid,size=16m',
         image, 'timeout', '-s', 'KILL', '30', 'python', '-B', '-I', '-c', code,
@@ -44,8 +46,11 @@ export function createPythonTool(image: string): RegisteredTool {
         if (context.signal?.aborted) throw error;
         if (error instanceof Error && error.name === 'TimeoutError') return undefined;
         throw error;
+      }).finally(async () => {
+        // Cleanup must survive cancellation of the original tool request.
+        await context.services.sandbox.run({ command: dockerCommand, args: ['rm', '-f', container] }).catch(() => {});
       });
-      if (!result) return { status: 'failed', content: 'Python sandbox command timed out. Simplify the computation before calling the tool again.',
+      if (!result || [124, 137, 143].includes(result.exitCode)) return { status: 'failed', content: 'Python sandbox timed out or was killed. Diagnose termination and change the computation before retrying; an unchanged retry cannot make progress.',
         error: { code: 'PYTHON_TIMEOUT', message: 'Python execution timed out' } };
       return result.exitCode === 0 ? { status: 'success', content: result.stdout } :
         { status: 'failed', content: result.stderr, error: { code: 'PYTHON_EXECUTION', message: `Python exited ${result.exitCode}` } };

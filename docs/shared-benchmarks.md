@@ -258,3 +258,43 @@ numpy 1.26.4 / psutil 7.2.2。实验固定镜像 ID，不能只记录可变 tag�
   HumanEval+ 的正确/错误代码通过真实隔离 checker，未调用收费模型。
 - 未启动新搜索、test 或模拟器付费调用。后续外部工具使用 Ditto 公开注册与 Interaction；
   普通逐任务隔离不要求复制事务基础设施，有通用包缺口再记录 Ditto 需求。
+
+### DROP/MBPP execution repair (2026-10-08)
+
+The search object remains the complete MAS candidate: outer composition and dynamic
+spawn/routing policy, initial single-root profile/binding, heterogeneous agent
+programs/templates and their node capabilities, reusable tools and prompts. Native
+AFlow parent sampling, experience filtering, five validation repeats and convergence
+are unchanged. Each child inherits its selected historical parent's complete
+artifact and measured executions; rounds are tree extensions, not independent
+initializations. Only search feedback selects the final frozen candidate; test runs
+once after search and executes that same dynamic policy from a single root.
+
+Engineering failures found in the first DROP/MBPP run:
+
+- An optimizer placed an agent-local program (`ctx.self`) in the outer MAS. Runtime
+  `PolicyContractError` during search evaluation now becomes a persisted failed
+  candidate row and optimizer feedback. Provider/grader infrastructure failures
+  still suspend evaluation without fabricating a score. The optimizer receives an
+  explicit outer-MAS versus bound-agent return/context contract reminder.
+- BusyBox timeout running as container PID 1 left Python graders alive after the
+  Docker client deadline. Python tools/graders now use Docker `--init`, unique names
+  and independent cleanup. Candidate timeout/OOM exit 137 scores zero; Docker startup
+  failures and client timeouts remain resumable infrastructure errors. An already
+  saved answer is regraded without a new model generation.
+- Exact repeated action/result cycles receive recovery guidance, then an execution
+  error if they continue unchanged. Different arguments or observations remain
+  unrestricted; no search, token, context or useful-action budget was introduced.
+- AutoAgents role JSON/reference serialization repair now stops after three failed
+  repair calls. Control/ranking/formatting calls no longer receive the benchmark's
+  final-answer-only instruction, which conflicts with their native schemas.
+
+Continuation uses checksum-verified application-module repair receipts on the
+original frozen snapshots (`scripts/evaluation_io_repair.mjs` and
+`scripts/baseline_contract_repair.py`). No Ditto package or upstream baseline source
+is patched. Each run retains `runtime-repairs.json`, the exact replacements and
+checksums, original manifests, controller/RNG state, completed rows and all prior
+usage. Completed rows are not selectively rerun; interrupted uncommitted work may
+restart and its earlier usage remains in the ledger. Thus results are an explicitly
+recorded repaired continuation, not a claim that all rows used one unchanged
+runtime. Any new clean comparison should use the repaired version for every method.

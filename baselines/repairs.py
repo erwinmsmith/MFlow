@@ -103,10 +103,13 @@ def install_autoagents_repairs(call,save_event):
     async def publish(self,message):
         if 'Manager' in message.role and message.instruct_content is not None:
             text=canonical_sections(message.instruct_content)
+            failures=0
             while True:
                 try:validate_role_plan(text);break
                 except ValueError as error:
                     save_event('roles_format_repair',str(error))
+                    failures+=1
+                    if failures>3:raise ValueError('AutoAgents role serialization remained invalid after three repairs') from error
                     text=call([{'role':'system','content':'Repair serialization and role-reference consistency. Preserve the execution plan and intended roles. Return the same ## sections with valid complete role JSON objects. Restore definitions of roles referenced by the plan from previous drafts. Do not solve the task or add unplanned roles.'},{'role':'user','content':json.dumps({'current':text,'previousRoleDrafts':history,'error':str(error)})}],tools=False)
             message.content=text
         return await original(self,message)
@@ -120,7 +123,10 @@ def install_autoagents_repairs(call,save_event):
         self.next_state=[i for i,action in enumerate(self._actions) if normalize(str(action).removesuffix('_Action')) in header]
         if not self.next_state:
             names=[str(action).removesuffix('_Action') for action in self._actions]
+            failures=0
             while not self.next_state:
+                if failures>=3:raise ValueError('AutoAgents role references remained invalid after three repairs')
+                failures+=1
                 save_event('role_reference_repair',self.next_step)
                 reply=call([{'role':'system','content':'Normalize abbreviated role references in an existing execution plan. Return ONLY a JSON array of exact registered role names that the step already refers to. Do not add roles or redesign the plan.'},{'role':'user','content':json.dumps({'step':self.next_step,'registeredRoles':self.roles,'exactNames':names})}],tools=False)
                 try:

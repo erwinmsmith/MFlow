@@ -178,7 +178,7 @@ const server=createServer(async(req,res)=>{
     const input={model:{provider:'baseline',model:config.model},messages:body.messages,generation:{temperature:config.temperature,maxTokens:config.maxOutputTokens},metadata:{method:body.method,phase:body.phase,taskId:body.taskId}};
     const session=sessions.get(scopeKey(body));
     if(hle)input.messages=withTaskImages(input.messages,session?.input);
-    if(session&&body.tools===false)input.messages=[{role:'system',content:instruction+'\nThis is a control/design stage. Do not execute actions or claim new effects. Preserve the requested control schema instead of the final-answer format. Design complementary task-specific roles using the capabilities listed above.'},...input.messages];
+    if(session&&body.tools===false)input.messages=[{role:'system',content:'Task family: '+dataset+'. This is a control/design/serialization stage. Follow the requested ranking, role or repair schema exactly; the task final-answer format does not apply to this stage. Do not solve the benchmark task, execute actions or claim new effects. Available execution tools for role design: '+session.tools.map(t=>t.name).join(', ')+'.'},...input.messages];
     if((automation||hle||textBenchmark)&&body.tools!==false&&!session)throw new Error('Start the task before execution');
     if(session&&body.tools!==false){
       input.messages=[{role:'system',content:instruction+'\nRespect the current framework stage: planning, ranking, role design and retention checks should produce their required format without writes. Execution/refinement stages may execute and repair. Shared preceding tool observations:\n'+JSON.stringify(session.observations)},...input.messages];

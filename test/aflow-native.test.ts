@@ -115,7 +115,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
   const dir = await mkdtemp(join(tmpdir(), 'mflow-native-test-'));
   const oldKey = process.env.MFLOW_API_KEY;
   process.env.MFLOW_API_KEY = 'offline-fixture';
-  let agents = 0, proposals = 0;
+  let agents = 0, proposals = 0, invalidComposition = false;
   const server = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
@@ -135,6 +135,7 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
       assert.ok(!input.messages[0].content.includes('complexity should not exceed 10'));
 
       value = { organization: {...initialOrganization,toolLibrary:[{name:'generated_sum',description:'Add parameters',parameters:[{name:'values',description:'Numbers',type:'array',required:true}],implementation:{kind:'sequence',steps:[{tool:'arithmetic',arguments:{operation:'add',values:{$input:'/values'}}}]}}]}, modification: `Change the agent instructions (${proposals}).`, composition: aflowInspiredComposition, prompts: { ...programPrompts, agent: 'NATIVE-CANDIDATE-MARKER' } };
+      if (invalidComposition) value.composition = "return loop({id:'bad',plan:function*(ctx){ctx.profile(ctx.self);return '';}});";
     } else {
       agents++;
       const candidate = JSON.stringify(input.messages).includes('NATIVE-CANDIDATE-MARKER') || JSON.stringify(input.messages).includes('wrong');
@@ -222,6 +223,16 @@ test('official AFlow controller fully repeats candidates, freezes selection, and
     assert.equal(stopped.round, 8);
     assert.equal(proposals, 8);
     assert.equal(agents, 96);
+    invalidComposition = true;
+    const broken = { ...options, out: join(dir, 'invalid-candidate') };
+    await runAFlowSearch(broken);
+    const invalidRow = JSON.parse(await readFile(join(broken.out, 'round-2/pass-0/0.json'), 'utf8'));
+    assert.equal(invalidRow.score, 0);
+    assert.match(invalidRow.error, /Unknown agent undefined/);
+    assert.equal(JSON.parse(await readFile(join(broken.out, 'best.json'), 'utf8')).strategy.id, 's1');
+    const callsAfterFailure = agents;
+    await runAFlowSearch({ ...broken, resume: true });
+    assert.equal(agents, callsAfterFailure);
   } finally {
     server.close(); await rm(dir, { recursive: true, force: true });
     if (oldKey === undefined) delete process.env.MFLOW_API_KEY; else process.env.MFLOW_API_KEY = oldKey;

@@ -202,19 +202,27 @@ async function gradePython(task: Task, answer: string): Promise<0 | 1> {
     : "";
   const script = `${preamble}${code}\n${ref.setup ?? ""}\n${test}\nprint(${JSON.stringify(marker)})\n`;
   const dir = await mkdtemp(join(process.cwd(), ".benchmark-sandbox-"));
+  const container = `mflow-grade-${randomUUID()}`;
   try {
     await writeFile(join(dir, "check.py"), script, { mode: 0o444 });
-    const result = await sandbox().run({ command: docker, args: [
-      "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+    const result = await sandbox(60_000).run({ command: docker, args: [
+      "run", "--rm", "--init", "--name", container, "--label", `mflow.grading-task=${task.id}`, "--network", "none", "--read-only", "--cap-drop", "ALL",
       "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "256m",
       "--cpus", "1", "--user", "65534:65534", "--mount", `type=bind,source=${dir},target=/work,readonly`,
       "--workdir", "/work", "--tmpfs", "/tmp:rw,nosuid,size=16m", image,
       "timeout", "-s", "KILL", "10", "python", "-B", "-I", "/work/check.py",
     ] });
-    if (result.exitCode >= 125)
-      throw new Error(`Docker grading failed: ${result.stderr.slice(0, 500)}`);
+    // 137 is the candidate's timeout/OOM kill, not a Docker startup failure.
+    if ([125, 126, 127].includes(result.exitCode))
+      throw new GradingFailure({ code: `DOCKER_${result.exitCode}`, stderr: result.stderr.slice(0, 500) });
     return result.exitCode === 0 && result.stdout.trimEnd().endsWith(marker) ? 1 : 0;
+  } catch (error) {
+    if (error instanceof GradingFailure) throw error;
+    throw new GradingFailure({ code: error instanceof Error ? error.name : 'UNKNOWN', stderr: String(error).slice(-1000) });
   } finally {
+    // Killing the Docker client does not stop its container. Use a fresh command
+    // deadline even when the grading command timed out.
+    await sandbox().run({ command: docker, args: ['rm', '-f', container] }).catch(() => {});
     await rm(dir, { recursive: true, force: true });
   }
 }

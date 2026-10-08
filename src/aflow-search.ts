@@ -223,7 +223,9 @@ export async function runAFlowSearch(options: {
           }
         }
       }).catch(error => {
-        if (!(error instanceof GenerationExhausted)) throw error;
+        // An invalid searched program is candidate feedback, not a provider or
+        // grader outage. Persist it once so resume does not retry it forever.
+        if (!(error instanceof GenerationExhausted || error instanceof PolicyContractError)) throw error;
         row.error = error.message;
         return undefined;
       });
@@ -262,7 +264,7 @@ export async function runAFlowSearch(options: {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
         try {
-          let proposal = (await agents.structured('aflow-optimizer', input.prompt, {}, proposalSchema, runtimeConfig.episode)).value;
+          let proposal = (await agents.structured('aflow-optimizer', input.prompt + '\nContract reminder: the outer MAS receives the global ctx, not an agent-local ctx; ctx.self/evidence/prompt exist only inside a bound agent program. Outer code starts with root and returns an answer string; runAgent returns AgentOutput directly (candidate_answer, artifacts, open_deficits), not {output:...}. Preserve and evolve the parent dynamic derivation policy together with MAS routing, agent profiles and internal graphs. Do not accidentally replace the outer MAS with a solver template.', {}, proposalSchema, runtimeConfig.episode)).value;
           for (let attempt = 0; ; attempt++) {
             try { const { modification: _, ...artifact } = proposal; candidate({ id: `s${input.round}`, ...artifact }); break; }
             catch (error) {
