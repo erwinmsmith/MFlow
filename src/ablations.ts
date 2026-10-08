@@ -1,17 +1,23 @@
 import { strategySchema, type Strategy } from './types.js';
 
 /** Frozen routing ablations; profiles, agent programs and prompts stay inherited. */
-export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform' | 'fixed-heterogeneous' | 'fixed-homogeneous'): Strategy {
+export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform' | 'fixed-heterogeneous' | 'fixed-homogeneous' | 'fixed-drop-heterogeneous' | 'fixed-drop-homogeneous'): Strategy {
   const templates = source.organization?.agentTemplates ?? [];
+  const drop = variant === 'fixed-drop-heterogeneous' || variant === 'fixed-drop-homogeneous';
   const paired = variant === 'fixed-heterogeneous' || variant === 'fixed-homogeneous';
-  const required = variant === 'single' ? ['solver'] : paired ? ['solver', 'verifier'] : ['solver', 'reviewer', 'independent', 'checker'];
+  const required = variant === 'single' ? ['solver'] : drop ? ['solver', 'independent', 'calculator', 'span_extractor', 'normalizer'] : paired ? ['solver', 'verifier'] : ['solver', 'reviewer', 'independent', 'checker'];
   if (source.organization?.initialBindings?.root !== 'solver' ||
       source.organization.initialAgents.length !== 1 || !source.prompts ||
       required.some(id => !templates.some(template => template.id === id)))
     throw new Error('Ablation requires the frozen solver-bound root and requested templates');
   const candidate = structuredClone(source);
-  if (variant === 'fixed-uniform' || variant === 'fixed-homogeneous') {
-    const shared = templates.find(template => template.id === (paired ? 'solver' : 'independent'))!;
+  if (drop) for (const template of candidate.organization!.agentTemplates!) {
+    // R26 treated Ditto's final Message as text, publishing "[object Object]".
+    if (['independent','span_extractor'].includes(template.id))
+      template.composition = template.composition.replaceAll('String(r.result).trim()', 'String(r.result.content).trim()');
+  }
+  if (variant === 'fixed-uniform' || variant === 'fixed-homogeneous' || variant === 'fixed-drop-homogeneous') {
+    const shared = templates.find(template => template.id === (paired || drop ? 'solver' : 'independent'))!;
     for (const template of candidate.organization!.agentTemplates!) {
       template.composition = shared.composition;
       Object.assign(template.profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
@@ -22,6 +28,20 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
   const composition = variant === 'single' ? String.raw`return loop({id:'single',plan:function*(ctx){
     const result=yield* ctx.runAgent('root','','agent');
     return result.candidate_answer;
+  }});` : drop ? String.raw`return loop({id:'fixed-drop-library',plan:function*(ctx){
+    const first=yield* ctx.runAgent('root','','agent');
+    const candidates=[{role:'solver',output:first}];
+    for(const id of ['independent','calculator','span_extractor']){
+      ctx.spawnTemplate(id,id,'root');
+      const output=yield* ctx.runAgent(id,'','agent');
+      candidates.push({role:id,output});ctx.dormant(id);
+    }
+    const final=yield* ctx.runAgent('root',{candidates},'integrate');
+    const answer=final.candidate_answer || first.candidate_answer;
+    ctx.spawnTemplate('normalizer','normalizer','root');
+    const normalized=yield* ctx.runAgent('normalizer',answer,'agent');
+    ctx.dormant('normalizer');
+    return normalized.candidate_answer || answer;
   }});` : paired ? String.raw`return loop({id:'fixed-pair',plan:function*(ctx){
     const first=yield* ctx.runAgent('root','','agent');
     ctx.spawnTemplate('verifier','verifier','root');
