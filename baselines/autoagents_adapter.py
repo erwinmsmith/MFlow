@@ -12,13 +12,13 @@ class AutoAgents:
         class LLM:
             def __init__(self,*args,**kwargs):pass
             async def aask(self,prompt,system_msgs=None):
-                workflow=PROTOCOL.get('benchmark')=='automationbench'
+                workflow=PROTOCOL.get('benchmark') in ('automationbench','bfcl')
                 academic=PROTOCOL.get('benchmark')=='hle'
                 design=(workflow or academic or bool(text_instruction())) and any(stage in prompt for stage in ['You are a manager and expert prompt engineer.','You are an executive observer'])
                 messages=[{'role':'system','content':s} for s in (system_msgs or ['You are a helpful assistant.']) if s]
-                if workflow:messages.insert(0,{'role':'system','content':automation_capabilities})
+                if workflow:messages.insert(0,{'role':'system','content':(text_instruction()+' Native CustomAction actors use these three Ditto function tools. SearchAndSummarize retrieves only current public state and schemas. Keep AutoAgents Action catalogue names and native manager/observer formats unchanged.' if PROTOCOL.get('benchmark')=='bfcl' else automation_capabilities)})
                 if academic:messages.insert(0,{'role':'system','content':'Academic execution capability: native CustomAction actors can inspect the original question images and call arithmetic, isolated Python and web_search via Ditto function tools. Design subject-specific specialists and complementary methods. Role/observer steps plan and assess; tools fields remain in the original AutoAgents Action catalogue. SearchAndSummarize supplies external evidence. The final response must preserve Explanation, Answer and Confidence (0-100%) sections.'})
-                if text_instruction():messages.insert(0,{'role':'system','content':text_instruction()+' Native CustomAction actors can use arithmetic and isolated Python through Ditto. SearchAndSummarize retrieves only the original task evidence; no internet or hidden tests. Design complementary task-specific roles. Keep native Action catalogue names and observer/manager schemas unchanged.'})
+                if text_instruction() and not workflow:messages.insert(0,{'role':'system','content':text_instruction()+' Native CustomAction actors can use arithmetic and isolated Python through Ditto. SearchAndSummarize retrieves only the original task evidence; no internet or hidden tests. Design complementary task-specific roles. Keep native Action catalogue names and observer/manager schemas unchanged.'})
                 content=call(messages+[{'role':'user','content':prompt}],tools=not design)
                 owner.remember_roles(content)
                 return content

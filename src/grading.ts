@@ -1,3 +1,4 @@
+import { checkBFCL, gradeBFCL, bfclPython } from './bfcl-environment.js';
 import { execFile } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -149,6 +150,7 @@ export async function checkScoring(tasks: Task[]): Promise<void> {
       throw new Error(`Python scoring needs a running Docker daemon and local ${image} image`);
   }
   if (metrics.has('evalplus')) await evalplusRuntime();
+  if (metrics.has('bfcl')) await checkBFCL();
   if (metrics.has('automationbench')) await checkAutomation();
   if (metrics.has('hle')) {
     if (!process.env.MFLOW_HLE_JUDGE_MODEL) throw new Error('HLE scoring requires explicit MFLOW_HLE_JUDGE_MODEL (same configured provider endpoint)');
@@ -174,6 +176,7 @@ function evalplusRuntime() {
 
 /** Additional identity only for the new protocol; historical MATH manifests stay compatible. */
 export async function gradingIdentity(tasks: Task[]) {
+  if (tasks[0].metric === 'bfcl') return { extendedBenchmark: await extraBenchmarkIdentity('bfcl'), bfclBridge: createHash('sha256').update(await readFile('benchmark-hub/bfcl_environment.py')).update(await readFile('benchmark-hub/bfcl_bridge.py')).digest('hex'), bfclPython: (await exec(bfclPython(), ['-c', "import sys,json,importlib.metadata as m; print(json.dumps([sys.version,sorted((p.metadata['Name'],p.version) for p in m.distributions())]))"])).stdout.trim() };
   if (tasks.some(t => t.metric === 'automationbench' || t.metric === 'hle')) {
     const name = tasks[0].metric as 'hle' | 'automationbench';
     return { extendedBenchmark: await extraBenchmarkIdentity(name,tasks[0].dataset?.protocol),
@@ -261,8 +264,8 @@ async function gradeEvalplus(task: Task, answer: string): Promise<0 | 1> {
 export async function grade(task: Task, answer: string, execution?: Execution, agents?: DittoAgents, feedback?: 'search'): Promise<{ score: 0 | 1; f1?: number; partialCredit?: number; confidence?: number; judge?: unknown; gradingFeedback?: string }> {
   // Grader assertions may inform mutation only on the search split, never an episode.
   if (feedback === 'search') assertDatasetRole([task], 'search');
-  if (task.metric === 'automationbench' || task.metric === 'hle') {
-    try { return task.metric === 'automationbench' ? await gradeAutomation(task, execution) : await gradeHLE(task, answer, agents); }
+  if (task.metric === 'automationbench' || task.metric === 'hle' || task.metric === 'bfcl') {
+    try { return task.metric === 'bfcl' ? await gradeBFCL(task, execution) : task.metric === 'automationbench' ? await gradeAutomation(task, execution) : await gradeHLE(task, answer, agents); }
     catch (error) { throw new GradingFailure({ code: 'EXTENDED_GRADER', stderr: String(error).slice(-1000) }); }
   }
   if (task.aflowSplit && task.metric === "drop") return aflowDropScore(task.answer, answer);

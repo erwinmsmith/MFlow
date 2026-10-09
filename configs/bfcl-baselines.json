@@ -1,0 +1,28 @@
+{
+  "benchmark": "bfcl",
+  "runDirectory": "runs/bfcl-deepseek-flash",
+  "model": "deepseek-flash",
+  "temperature": 0,
+  "maxOutputTokens": 393216,
+  "providerTimeoutMs": 2147483647,
+  "providerOptions": {
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "episodeTokenLimit": null,
+  "overallTokenCeiling": null,
+  "concurrency": 8,
+  "aflow": {
+    "maxRounds": null,
+    "validationRounds": 5,
+    "checkConvergence": true,
+    "operators": [
+      "Custom",
+      "ScEnsemble"
+    ]
+  },
+  "seed": 42,
+  "datasetProtocol": "bfcl-multiturn-family-v1",
+  "toolProtocol": "shared-conversation-v1"
+}

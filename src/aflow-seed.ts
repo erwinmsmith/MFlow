@@ -1,3 +1,4 @@
+import { bfclInstruction, bfclTools } from './bfcl-environment.js';
 import { organizationSchema, rootProfile, compositionNodes, type Task } from './types.js';
 import { FACTORY_PROMPT } from './prompts.js';
 import { dynamicPolicyComposition, dynamicPolicyPrompt } from './dynamic-policy.js';
@@ -118,18 +119,19 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   if (benchmarks.size !== 1) throw new Error('A search run must use one benchmark and scoring protocol');
   const benchmark = [...benchmarks][0];
   const dataset = ({ math: 'MATH', gsm8k: 'GSM8K', drop: 'DROP', humaneval: 'HumanEval',
-    humaneval_plus: 'HumanEvalPlus', mbpp: 'MBPP', hle: 'HLE', automationbench: 'AutomationBench' } as Record<string, string>)[benchmark] ?? 'Custom';
+    humaneval_plus: 'HumanEvalPlus', mbpp: 'MBPP', hle: 'HLE', automationbench: 'AutomationBench', bfcl: 'BFCL' } as Record<string, string>)[benchmark] ?? 'Custom';
   if (benchmark === 'math' || benchmark === 'gsm8k' || benchmark === 'numeric') return {
     dataset, kind: 'mathematical reasoning', composition: aflowInspiredComposition,
     organization: textOrganization, prompts: textPrompts,
     provenance: 'AFlow MATH round-12 solve/revise prompts, with adaptive independent reasoning; validation-informed transfer, no test data',
   };
   const code = tasks[0].metric === 'python' || tasks[0].metric === 'evalplus';
-  const workflow = benchmark === 'automationbench';
+  const bfcl = benchmark === 'bfcl';
+  const workflow = benchmark === 'automationbench' || bfcl;
   const academic = benchmark === 'hle';
   const contract = code
     ? 'Return the complete executable Python solution with the requested function signature and any needed imports. No Markdown fences, explanations or boxed answers. Only public examples from the problem may be used as checks; hidden evaluation tests are not available.'
-    : workflow ? automationInstruction
+    : bfcl ? bfclInstruction : workflow ? automationInstruction
     : academic ? hleInstruction
     : 'Answer the question using only the supplied passage and question. Return only the concise final answer; multiple answer spans may be separated with |. Do not include a derivation, Markdown or a boxed answer.';
   const prompts = {
@@ -147,7 +149,8 @@ export function benchmarkSeed(tasks: Pick<Task, 'benchmark' | 'metric'>[]) {
   for (const profile of [...organization.initialAgents, ...organization.agentTemplates!.map(t => t.profile)]) {
     profile.objective = code ? 'Implement the requested Python function correctly.' : workflow ? 'Execute and verify the requested business workflow.' : academic ? 'Solve the academic question accurately.' : 'Answer the supplied reading-comprehension question accurately.';
     profile.capability = code ? 'Python programming and specification checking' : workflow ? 'Cross-application API orchestration' : academic ? 'Academic knowledge and reasoning' : 'Evidence-grounded reading comprehension';
-    if (workflow) { profile.tools = ['api_search', 'api_fetch', 'base64_encode']; profile.nodes = [...compositionNodes]; }
+    if (workflow) { profile.tools = bfcl ? [...bfclTools] : ['api_search', 'api_fetch', 'base64_encode']; profile.nodes = [...compositionNodes]; }
+    if (bfcl) { profile.objective = 'Complete every revealed user turn with exact documented function calls and responses.'; profile.capability = 'Multi-turn tool use, parameter validation and shared-state coordination'; profile.reasoning = 'react'; }
     if (academic) { profile.tools=['arithmetic','python','web_search']; profile.nodes=[...compositionNodes]; }
     profile.expected_output = contract;
     profile.stop_condition = 'A complete answer or a concrete unresolved obstacle is stated.';
@@ -190,7 +193,7 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
   const final=yield* ctx.runAgent('root',complete.map((x,i)=>'Candidate '+(i+1)+':\\n'+solution(x)).join('\\n\\n'),'integrate');
   return final.candidate_answer || review.candidate_answer || independent.candidate_answer || first.candidate_answer;
 }});`;
-  return { dataset, kind: code ? 'code generation' : workflow ? 'workflow automation' : academic ? 'academic reasoning' : 'reading comprehension', composition, organization, prompts,
+  return { dataset, kind: code ? 'code generation' : bfcl ? 'multi-turn function calling' : workflow ? 'workflow automation' : academic ? 'academic reasoning' : 'reading comprehension', composition, organization, prompts,
     provenance: 'Dataset-specific editable MFlow seed; official AFlow optimization controller; no MATH round-12 initialization or test data' };
 }
 
@@ -198,18 +201,19 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], names?: string[]) {
   const seed = structuredClone(benchmarkSeed(tasks));
   seed.organization.toolCreation = true;
+  const bfcl = tasks[0].metric === 'bfcl';
   const textBenchmark=['drop','mbpp'].includes(tasks[0].benchmark ?? '');
   const exploration = textBenchmark ? (tasks[0].benchmark === 'drop'
     ? 'Explore passage evidence extraction, entity/coreference resolution, temporal comparison, counting and arithmetic as complementary responsibilities. Consider a direct solver, parallel independent evidence branches, a decomposition tree, or cross-checking only where the observed gap calls for it. External knowledge cannot replace the supplied passage.'
-    : 'Explore specification analysis, algorithm design, implementation, edge-case generation and independent executable checking as complementary responsibilities. Consider direct solving, parallel alternative algorithms, a decomposition tree, or cross-review where useful. Use only public examples and self-created checks, never hidden grading tests.') : '';
+    : 'Explore specification analysis, algorithm design, implementation, edge-case generation and independent executable checking as complementary responsibilities. Consider direct solving, parallel alternative algorithms, a decomposition tree, or cross-review where useful. Use only public examples and self-created checks, never hidden grading tests.') : bfcl ? 'Explore schema and parameter validation, missing-information clarification, dependency planning, parallel read-only inspection and turn-aware execution as complementary roles. Start from one root; evolve heterogeneous agent graphs, evidence routing and conditional spawn rules together. Read Ditto node documentation before choosing node configurations. Created reusable tools must call only granted bfcl interfaces, carry the current turn, and preserve the official batch step accounting. Keep per-turn reasoning agents from prematurely advancing the conversation.' : '';
   // Grant execution capabilities to the dynamic root; this does not instantiate extra agents.
   const dynamicOrganization=structuredClone(seed.organization);
   if(textBenchmark)for(const p of [...dynamicOrganization.initialAgents,...dynamicOrganization.agentTemplates!.map(t=>t.profile)]){
     p.tools=['arithmetic','python'];p.nodes=[...compositionNodes];
   }
-  const policyPrompt=dynamicPolicyPrompt+(textBenchmark?'\nTASK CONTRACT: '+seed.organization.initialAgents[0].expected_output+'\nEXPLORATION: '+exploration+'\nAll agents may create parameterized tools while executing, using their granted capabilities. Read the supplied Ditto node guide and choose node configuration, evidence routing and dependencies for each distinct role. Preserve the final answer contract when stopping; summarize observations only for workflow tasks.':'');
-  const extended=['automationbench','hle'].includes(tasks[0].metric);
-  const academic=tasks[0].metric!=='automationbench';
+  const policyPrompt=dynamicPolicyPrompt+((textBenchmark||bfcl)?'\nTASK CONTRACT: '+seed.organization.initialAgents[0].expected_output+'\nEXPLORATION: '+exploration+'\nAll agents may create parameterized tools while executing, using their granted capabilities. Read the supplied Ditto node guide and choose node configuration, evidence routing and dependencies for each distinct role. Preserve the final answer contract when stopping; summarize observations only for workflow tasks.':'');
+  const extended=['automationbench','hle','bfcl'].includes(tasks[0].metric);
+  const academic=!['automationbench','bfcl'].includes(tasks[0].metric);
   const availableTools=[...new Set(seed.organization.agentTemplates!.flatMap(t=>t.profile.tools))];
   const planAssignment=academic?`Plan this ${seed.kind} task: identify exact assumptions, specification constraints, viable approaches and decisive checks. Do not invent external evidence or hidden tests.`:'Produce a dependency plan and verification checklist.';
   const executeAssignment=academic?'Solve the original question using the plan as a proposal; verify its decisive steps and preserve the original task output contract.':'Execute the plan against the actual APIs and verify requested effects.';
@@ -218,7 +222,7 @@ export function benchmarkSeeds(tasks: Pick<Task, 'benchmark' | 'metric'>[], name
   const single = `return loop({id:'single',plan:function*(ctx){return (yield* ctx.runAgent('root')).candidate_answer;}});`;
   const planned = structuredClone(seed.organization);
   const planner = { ...planned.agentTemplates![0], id: 'planner', description: academic?'Design a subject-specific method and decisive checks.':'Plan exact dependencies and postconditions without making writes.',
-    profile: { ...planned.agentTemplates![0].profile, tools: availableTools.filter(t=>t!=='api_fetch'), nodes: ['CONTEXT.LOAD','INFER.REASONING.SAMPLE'] as ['CONTEXT.LOAD','INFER.REASONING.SAMPLE'],
+    profile: { ...planned.agentTemplates![0].profile, tools: availableTools.filter(t=>!['api_fetch','bfcl_call','bfcl_respond'].includes(t)), nodes: ['CONTEXT.LOAD','INFER.REASONING.SAMPLE'] as ['CONTEXT.LOAD','INFER.REASONING.SAMPLE'],
       objective: planAssignment, capability: academic?'Subject-specific method selection':'Workflow decomposition and API dependency planning', expected_output: academic?'A concrete solution plan and decisive verification checks.':'Dependency plan and exact verification checklist, without claims of execution.', stop_condition: 'The plan and unresolved lookup requirements are clearly stated.' },
     composition: textReviewer.replace('ctx.publishText(id,yield* finishText(ctx,id,messages,ctx.unwrap(out[node])))', "ctx.publishText(id,yield* finishText(ctx,id,messages,ctx.unwrap(out[node])),'raw')") };
   planned.agentTemplates!.push(planner);

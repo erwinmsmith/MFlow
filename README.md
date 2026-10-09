@@ -77,7 +77,7 @@ npm run mflow -- benchmarks --verify
 npm run mflow -- benchmarks path --name HumanEval+ --split test
 ```
 
-当前通用搜索/评测支持八个 benchmark：DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE 和 AutomationBench。另有 BFCL 四类多轮的 SingleLLM 独立评测入口：`node scripts/bfcl_single.mjs --run runs/bfcl-single`，共 800 题，通过 Ditto 使用官方工具环境与评分；尚未接入 MFlow 搜索。HLE 支持全量多模态及自定义隔离搜索/测试；GAIA、τ³
+当前通用搜索/评测支持九个 benchmark：DROP、HumanEval、MBPP、GSM8K、MATH、HumanEval+、HLE、AutomationBench 和 BFCL。BFCL 的 [六方法对比协议](docs/bfcl-comparison.md) 使用隔离题族的 200 search / 600 test，统一多轮工具接口；原生 FC SingleLLM 的 800 题入口仍独立保留。HLE 支持全量多模态及自定义隔离搜索/测试；GAIA、τ³
 先管理本地数据及官方工具/评分代码，交互执行 adapter 尚未接通。HumanEval+ 使用官方
 EvalPlus v0.1.10 的 base+plus 检查，按 AFlow HumanEval ID 归属保持 33 search / 131 test。
 默认搜索按任务选择数学、阅读理解、Python 代码、学术问答或 API 工作流提示词和输出契约；

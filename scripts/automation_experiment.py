@@ -169,7 +169,7 @@ def status(out):
 
 def main():
     global ROOT
-    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle','drop','mbpp'],default='automationbench');p.add_argument('--run')
+    p=argparse.ArgumentParser();p.add_argument('--status',action='store_true');p.add_argument('--resume',action='store_true');p.add_argument('--sequential',action='store_true');p.add_argument('--benchmark',choices=['automationbench','math','hle','drop','mbpp','bfcl'],default='automationbench');p.add_argument('--run')
     p.add_argument('--execution-root',type=Path,help='Use an existing immutable actor snapshot with this separately recorded scheduler')
     p.add_argument('--concurrency',type=int,help='Concurrent MFlow/AFlow search and test episodes')
     p.add_argument('--methods',nargs='+',choices=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents','SingleLLM'],default=['MFlow','AFlow','DyLAN','EvoAgent','AutoAgents'],help='Resume or run only selected methods; final test follows completed search')
@@ -190,7 +190,7 @@ def main():
     search_config=read(ROOT/search_file,{})
     if a.concurrency is not None:config['concurrency']=search_config['concurrency']=a.concurrency
     config['runDirectory']=a.run
-    port=str(a.port or (8200 if a.benchmark=='drop' else 8201 if a.benchmark=='mbpp' else 8199 if hle else 8198 if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 8197))
+    port=str(a.port or (8202 if a.benchmark=='bfcl' else 8200 if a.benchmark=='drop' else 8201 if a.benchmark=='mbpp' else 8199 if hle else 8198 if os.environ['MFLOW_MODEL']=='qwen3.5-9b' else 8197))
     env={**os.environ,'MFLOW_BASELINE_PROTOCOL':str(out/'baseline-config.json'),'MFLOW_BASELINE_PORT':port,'MFLOW_BASELINE_ENDPOINT':'http://127.0.0.1:'+port}
     env['BENCHMARK_HOME']=str(Path(os.environ['BENCHMARK_HOME']).resolve())
     out.mkdir(parents=True,exist_ok=True)
@@ -200,6 +200,10 @@ def main():
     if hle:
         lock=next(v for v in read(ROOT/'data/extended-benchmarks.lock.json').values() if v['protocol']==config['datasetProtocol'])
         manifest.update(datasetProtocol=lock['protocol'],searchCount=lock['splits']['search']['count'],testCount=lock['splits']['test']['count'],judgeModel=config['judgeModel'],toolProtocol=config['toolProtocol'])
+    if a.benchmark=='bfcl':
+        lock=read(ROOT/'data/extended-benchmarks.lock.json')['bfcl']
+        manifest.update(datasetProtocol=lock['protocol'],searchCount=200,testCount=600,scoreMetric='official conversation pass rate',toolProtocol=lock['toolset'])
+        manifest['transport']['searchProvider']='current public schemas and history only'
     if a.benchmark in ('drop','mbpp'):
         lock=read(ROOT/'data/aflow.lock.json')
         manifest.update(datasetProtocol=lock['protocol'],

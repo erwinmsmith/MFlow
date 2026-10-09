@@ -49,3 +49,59 @@ assert.equal(JSON.parse(readFileSync(resolve(run,'responses/multi_turn_base_1.js
 }finally{rmSync(run,{recursive:true,force:true});}
 `],{timeout:60000,maxBuffer:2*1024*1024});
 });
+
+test('BFCL shared MAS world guards turns, withholds future docs and replays official grading', async t => {
+  const python = resolve('../Benchmarks/environments/bfcl/bin/python');
+  try {await access(python);} catch {t.skip('Official BFCL environment required');return;}
+  const { readTasks, actorInput, assertDisjoint } = await import('../src/data.js');
+  const { benchmarkPath } = await import('../src/benchmark-hub.js');
+  const { openBFCL } = await import('../src/bfcl-environment.js');
+  const { benchmarkSeeds } = await import('../src/aflow-seed.js');
+  const search = await readTasks(await benchmarkPath('bfcl','search'));
+  const heldout = await readTasks(await benchmarkPath('bfcl','test'));
+  assert.equal(search.length,200);assert.equal(heldout.length,600);assertDisjoint(search,heldout);
+  const seed = benchmarkSeeds(search,['dynamic-policy'])[0];
+  assert.equal(seed.organization.initialAgents.length,1);
+  assert(seed.prompts.factory.includes('schema and parameter'));
+  assert.deepEqual(seed.organization.initialAgents[0].tools,['bfcl_state','bfcl_call','bfcl_respond']);
+  const task = [...search,...heldout].find(t=>t.reference?.bfclTaskId==='multi_turn_miss_func_0')!;
+  assert(!('reference' in await actorInput(task)));
+  const env = await openBFCL(task);
+  try {
+    const before = await env.request<any>({op:'state'});
+    assert(!('initial_config' in before));assert(!('ground_truth' in before));
+    const stale = await env.request<any>({op:'call',name:'bfcl_respond',arguments:{turn:1,message:'Invalid stale response'}});
+    assert.match(stale.error,/Stale/);
+    assert.equal((await env.request<any>({op:'state'})).turn,0);
+    let state = before;
+    while (!state.complete) {state=await env.request<any>({op:'call',name:'bfcl_respond',arguments:{turn:state.turn,message:'Need clarification'}});}
+    assert(state.functions.length>before.functions.length);
+    const snapshot = await env.request<any>({op:'snapshot'});
+    const grade = await env.request<any>({op:'grade',...snapshot});
+    assert.equal(grade.score,0);
+  } finally {env.close();}
+  // References are used only by this offline scorer fixture, never a model prompt.
+  await promisify(execFile)(python,['-c',`
+import sys,json,ast,contextlib,os
+from pathlib import Path
+sys.path.insert(0,'benchmark-hub')
+official=Path('../Benchmarks/collections/official-20260930/BFCL/official/berkeley-function-call-leaderboard').resolve()
+sys.path.insert(0,str(official));os.environ['BFCL_PROJECT_ROOT']=str(official)
+from bfcl_environment import Conversation
+from bfcl_bridge import literal_call
+with open(os.devnull,'w') as quiet,contextlib.redirect_stdout(quiet):
+ env=Conversation(official,'multi_turn_base_0')
+ gold=env.load(env.entry['id'],gold=True)['ground_truth']
+ for turn,calls in enumerate(gold):
+  for source in calls:
+   node=ast.parse(source,mode='eval').body
+   schema=next(f for f in env.functions if f['name']==node.func.id)
+   params={k:ast.literal_eval(v) for k,v in zip(schema['parameters']['properties'],node.args)}
+   params.update({k.arg:ast.literal_eval(k.value) for k in node.keywords})
+   call={'name':node.func.id,'arguments':params}
+   result=env.call('bfcl_call',{'turn':turn,'calls':[{'name':call['name'],'arguments':call['arguments']}]})
+   assert not result.get('error'),result
+  env.call('bfcl_respond',{'turn':turn,'message':'Done'})
+ assert env.grade(env.snapshot())['score']==1
+`],{timeout:60000,maxBuffer:2*1024*1024});
+});

@@ -14,6 +14,8 @@ class TransportFailure(BaseException):pass
 class ModelOutputFailure(RuntimeError):pass
 
 def text_instruction():
+    if PROTOCOL.get('benchmark')=='bfcl':
+        return 'Complete the whole BFCL multi-turn conversation using bfcl_state, bfcl_call and bfcl_respond. Inspect current public history and exact function schemas; use current turn numbers, verify arguments, preserve successful writes and ask for missing information. bfcl_respond reveals the next user turn; continue until complete:true. Do not invent unavailable functions or future messages. Control and ranking stages must follow their requested schema without executing actions. End with a concise factual final summary.'
     if PROTOCOL.get('benchmark')=='drop':
         return 'Answer using only the supplied passage and question. Resolve entities and time references, distinguish counts from totals and compare the requested quantities. Return only the concise final answer, with multiple spans separated by |; no derivation, Markdown or boxed answer. Control and ranking stages must follow their requested schema.'
     if PROTOCOL.get('benchmark')=='mbpp':
@@ -63,7 +65,7 @@ def search_web(query):
     return json.dumps(bridge_request('search',dict(method=method,phase=phase,taskId=task_id,query=query))['results'])
 
 def tasks(split):
-    if PROTOCOL.get('benchmark') in ('automationbench','hle'):
+    if PROTOCOL.get('benchmark') in ('automationbench','hle','bfcl'):
         home=Path(os.environ.get('BENCHMARK_HOME',ROOT.parent/'Benchmarks'))
         protocol=PROTOCOL.get('datasetProtocol','automationbench-public-simple-v1')
         path=home/f'views/{protocol}/{split}.jsonl'
@@ -88,7 +90,7 @@ def tasks(split):
     return rows
 
 def grade(task,answer):
-    if task.get('metric')=='automationbench':return benchmark_rpc('finish',task)['score']
+    if task.get('metric') in ('automationbench','bfcl'):return benchmark_rpc('finish',task)['score']
     p=subprocess.run([str(ROOT/'.benchmark-venv/bin/python'),str(ROOT/'scripts/grade_math.py'),json.dumps({'gold':task['answer'],'answer':answer})],capture_output=True,text=True,timeout=10,check=True)
     return int(p.stdout.strip()=='1')
 
@@ -112,7 +114,8 @@ def freeze_run(out,method,phase):
     """Refuse to mix a resumed evaluation with different code, dependencies or data."""
     files=list((ROOT/'baselines').glob('*.py'))+[ROOT/'baselines/bridge.mjs',PROTOCOL_PATH,ROOT/'baselines/sources.lock.json',ROOT/'scripts/grade_math.py',ROOT/'data/aflow.lock.json',ROOT/'package-lock.json']
     if PROTOCOL.get('benchmark')!='automationbench':files += [ROOT/'dist/src/python-tool.js',ROOT/'scripts/resume_aflow_test.py']
-    if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp'):files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
+    if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp','bfcl'):files += [ROOT/'data/extended-benchmarks.lock.json',ROOT/'scripts/aflow_strategy.py',ROOT/'benchmark-hub/automation_bridge.py',*sorted((ROOT/'dist/src').glob('*.js'))]
+    if PROTOCOL.get('benchmark')=='bfcl':files += [ROOT/'benchmark-hub/bfcl_environment.py',ROOT/'benchmark-hub/bfcl_bridge.py']
     manifest={'method':method,'phase':phase,'protocol':PROTOCOL,'testCount':len(tasks('test')),'validationCount':len(tasks('search')),'files':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}}
     manifest['transport']={'endpoint':endpoint(),'executionNamespace':os.environ.get('MFLOW_BASELINE_EXECUTION_NAMESPACE',''),'usagePath':str(Path(os.environ.get('MFLOW_BASELINE_USAGE_PATH',RUNS/'usage.jsonl')).resolve())}
     if os.environ.get('MFLOW_BASELINE_TRANSPORT_ROOT'):

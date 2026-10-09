@@ -1,3 +1,4 @@
+import { bfclTools, bfclInstruction } from './bfcl-environment.js';
 import { dittoGuide } from './ditto-guide.js';
 import { createServer } from "node:http";
 import { spawn, execFile } from "node:child_process";
@@ -119,17 +120,17 @@ export async function runAFlowSearch(options: {
   assertDatasetRole(tasks, 'search');
   const seeds = benchmarkSeeds(tasks, config.initializations), seed = seeds[0];
   assertSingleRoot(seed.organization);
-  const workflow = tasks[0].metric === 'automationbench';
+  const workflow = tasks[0].metric === 'automationbench', bfcl = tasks[0].metric === 'bfcl';
   const webSearch=tasks[0].metric==='hle';
-  const allowedTools = workflow ? [...automationTools, 'python'] : ['arithmetic', 'python', ...(webSearch?['web_search']:[])];
-  const taskInterface = policyInterface + '\nDeployment availableTools: ' + allowedTools.join(', ') + '. create_tool is provided to every agent.';
+  const allowedTools = bfcl ? bfclTools : workflow ? [...automationTools, 'python'] : ['arithmetic', 'python', ...(webSearch?['web_search']:[])];
+  const taskInterface = policyInterface + (bfcl ? '\n'+bfclInstruction : '') + '\nDeployment availableTools: ' + allowedTools.join(', ') + '. create_tool is provided to every agent.';
   await checkScoring(tasks);
   const runtimeConfig = unrestrictedConfig(config.maxOutputTokens);
-  const image = await pythonImage();
+  const image = bfcl ? undefined : await pythonImage();
   const makeAgents = (observe?: (records: MeteredProvider['records']) => Promise<void>, context: Record<string, unknown> = {}) =>
     new DittoAgents(new MeteredProvider(httpProvider(options.model, process.env.MFLOW_API_KEY ?? '', {
       onProgress: progress => save(join(out, 'requests', `${progress.id}.json`), { ...context, ...progress }),
-    }), undefined, observe), options.model, [...(workflow ? [] : [arithmeticTool]), createPythonTool(image), ...(webSearch?[createBenchmarkWebTool()]:[])]);
+    }), undefined, observe), options.model, bfcl ? [] : [...(workflow ? [] : [arithmeticTool]), createPythonTool(image!), ...(webSearch?[createBenchmarkWebTool()]:[])]);
   // Check configuration before starting the Python optimizer or creating paid requests.
   makeAgents();
   const source = resolve(options.source);

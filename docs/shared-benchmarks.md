@@ -94,7 +94,7 @@ DROP/MBPP 的 single 使用任务专用输出契约，只执行一个 root，不
 
 显式 `--search` / `--test` 路径仍支持；与 `--benchmark` 同时提供时，显式路径优先。
 加载器接受 `benchmark:math/search`、`benchmark:humaneval+/test`，并发脚本也可使用。
-GAIA/BFCL/τ³ 请求通用 search/test 视图会明确报错；BFCL 使用下面的独立评测入口。
+GAIA/τ³ 请求通用 search/test 视图会明确报错。BFCL 已支持 [MFlow 与全部 baseline 的共享多轮接口](bfcl-comparison.md)，使用独立的题族隔离 200/600 协议；下面的原生 FC SingleLLM 仍作为独立参考。
 
 ### BFCL 多轮 SingleLLM（2026-10-09）
 
@@ -114,7 +114,7 @@ max_tokens 393216；官方 DeepSeek 请求不传 seed。并发默认 8。
 评分使用固定官方 `eval_runner.py` 中 `_evaluate_single_multi_turn_entry` 原函数：
 从官方 AST 加载该函数，避免导入所有无关供应商 SDK；状态、响应检查直接引用官方模块。
 生成结果落盘后才打开 reference，答案不会传给模型。错误回答保留为 0 分。
-本次没有 search split；将来搜索须先单独制定隔离协议，不能用此 test 的反馈优化后仍声称独立测试。
+这个原生 FC 运行没有 search split。后续 `bfcl-multiturn-family-v1` 单独固定 200/600 划分，搜索仅使用其 search 集，不使用原生全量结果选择或修改策略。
 
 ```sh
 uv venv --python 3.11 ../Benchmarks/environments/bfcl

@@ -1,3 +1,4 @@
+import { openBFCL, checkBFCL } from '../dist/src/bfcl-environment.js';
 // Official controllers keep their control flow; all model calls use published Ditto.
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -23,13 +24,14 @@ const readRows=file=>existsSync(file)?readFileSync(file,'utf8').split('\n').filt
 let spent=readRows(resolve(out,'usage.jsonl')).reduce((n,r)=>n+r.charged,0),active=0;
 const optimizerFailures=new Map();
 const upstream=observableProvider(createHttpProvider({kind:'openai-compatible',baseUrl:process.env.MFLOW_BASE_URL,apiKey:process.env.MFLOW_API_KEY,timeoutMs:config.providerTimeoutMs,idleTimeoutMs:process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS?Number(process.env.MFLOW_PROVIDER_IDLE_TIMEOUT_MS):undefined,fetch:modelFetch,maxTokensField:'max_tokens',providerOptions:config.providerOptions??{thinking:{type:'disabled'}},sandbox:new Sandbox(root,{network:[new URL(process.env.MFLOW_BASE_URL).origin]})}),{stream:true,onProgress:p=>{const path=resolve(out,'requests',p.id+'.json');if(p.state==='completed'){rmSync(path,{force:true});return;}mkdirSync(resolve(out,'requests'),{recursive:true});writeFileSync(path,JSON.stringify(p));}});
-const automation=config.benchmark==='automationbench',hle=config.benchmark==='hle',textBenchmark=['drop','mbpp'].includes(config.benchmark);
-const seed=textBenchmark?benchmarkSeed([{benchmark:config.benchmark,metric:config.benchmark==='drop'?'drop':'python'}]):undefined;
+const bfcl=config.benchmark==='bfcl',automation=config.benchmark==='automationbench',hle=config.benchmark==='hle',textBenchmark=['drop','mbpp'].includes(config.benchmark);
+const seed=(textBenchmark||bfcl)?benchmarkSeed([{benchmark:config.benchmark,metric:bfcl?'bfcl':config.benchmark==='drop'?'drop':'python'}]):undefined;
 const dataset=seed?.dataset??(hle?'HLE':'AutomationBench'),instruction=seed?.organization.initialAgents[0].expected_output??(hle?hleInstruction:automationInstruction),sessions=new Map(),lookup=new Map();
-const image=automation?undefined:await pythonImage(config.aflowPythonImage);
+const image=(automation||bfcl)?undefined:await pythonImage(config.aflowPythonImage);
 if(hle)process.env.MFLOW_HLE_PROTOCOL=config.datasetProtocol;
 if(automation)await checkAutomation();
-if(automation||hle||textBenchmark)for(const split of ['search','test']){
+if(bfcl)await checkBFCL();
+if(automation||hle||textBenchmark||bfcl)for(const split of ['search','test']){
   const tasks=await readTasks(await benchmarkPath(config.benchmark,split));assertDatasetRole(tasks,split);
   if(textBenchmark)await checkScoring(tasks);
   for(const t of tasks)lookup.set(t.id,t);
@@ -53,7 +55,7 @@ const staticSeeds=[
   {name:'review',composition:staticClass+`        answer=await self.custom(input=problem,instruction=prompt_custom.EXECUTE)
         review=await self.custom(input=problem+'\\nPrevious execution:\\n'+answer['response'],instruction=prompt_custom.REVIEW)
         return review['response'],0\n`},
-].map(s=>({...s,organization:{},prompts:'EXECUTE = '+JSON.stringify(instruction)+'\nPLAN = '+JSON.stringify(textBenchmark?'[PLAN ONLY] Identify the exact passage evidence or Python specification, complementary methods and public checks. No final answer or hidden tests.':hle?'[PLAN ONLY] Select subject-specific methods, exact assumptions and decisive checks for the academic question. Do not guess its answer.':'[PLAN ONLY] Plan entity lookups, API dependencies and exact postconditions. Inspect if useful; do not make writes. Return a concise actionable plan.')+'\nREVIEW = '+JSON.stringify(textBenchmark?seed.prompts.review:hle?'Check the candidate against the original question and image. Diagnose the decisive error or uncertainty; use a complementary method or external evidence if useful. Return Explanation, Answer and calibrated Confidence.':'Inspect actual current state against the original task. Repair missing or incorrect effects. Preserve successful writes and never duplicate records or sends.')+'\n'}));
+].map(s=>({...s,organization:{},prompts:'EXECUTE = '+JSON.stringify(instruction)+'\nPLAN = '+JSON.stringify(bfcl?'[PLAN ONLY] Analyze the current multi-turn request, exact function schemas, missing parameters and call dependencies. Do not execute functions or advance the conversation.':textBenchmark?'[PLAN ONLY] Identify the exact passage evidence or Python specification, complementary methods and public checks. No final answer or hidden tests.':hle?'[PLAN ONLY] Select subject-specific methods, exact assumptions and decisive checks for the academic question. Do not guess its answer.':'[PLAN ONLY] Plan entity lookups, API dependencies and exact postconditions. Inspect if useful; do not make writes. Return a concise actionable plan.')+'\nREVIEW = '+JSON.stringify(bfcl?instruction+' Review the current public state first; if already complete, only summarize observed results.':textBenchmark?seed.prompts.review:hle?'Check the candidate against the original question and image. Diagnose the decisive error or uncertainty; use a complementary method or external evidence if useful. Return Explanation, Answer and calibrated Confidence.':'Inspect actual current state against the original task. Repair missing or incorrect effects. Preserve successful writes and never duplicate records or sends.')+'\n'}));
 const ledgerProvider={async invoke(input,options){
   const {method,phase,taskId,kind}=input.metadata,id=randomUUID();
   const estimate=Buffer.byteLength(JSON.stringify(input),'utf8')+input.generation.maxTokens+1024;
@@ -75,7 +77,7 @@ const provider={async invoke(input,options){
   if(input.metadata.optimizerCallId)optimizerFailures.delete(input.metadata.optimizerCallId);
   return result;
 }};
-const tools=[...(textBenchmark?[]:[createBenchmarkWebTool()]),...(image?[arithmeticTool,createPythonTool(image)]:[])];
+const tools=[...((textBenchmark||bfcl)?[]:[createBenchmarkWebTool()]),...(image?[arithmeticTool,createPythonTool(image)]:[])];
 const runtime=createDitto({...(image?{sandboxExecutor:pythonExecutor()}:{}),sandbox:{execute:!!image,tools:tools.map(t=>t.name),network:['https://www.bing.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools})]});
 const plan=graph('baseline-original-prompt').node('sample','INFER.REASONING.SAMPLE',[],x=>x);
 const server=createServer(async(req,res)=>{
@@ -96,7 +98,7 @@ const server=createServer(async(req,res)=>{
       res.end(JSON.stringify({released}));return;
     }
     if(['/bootstrap','/propose','/freeze','/checkpoint-round'].includes(req.url)){
-      if(!automation&&!hle&&!textBenchmark)throw new Error('Static benchmark controller unavailable');
+      if(!automation&&!hle&&!textBenchmark&&!bfcl)throw new Error('Static benchmark controller unavailable');
       if(req.url==='/bootstrap'){
         res.end(JSON.stringify({mode:'aflow-static',dataset,questionType:seed?.kind??(hle?'expert academic reasoning with question images':'API workflow automation'),config:{seed:config.seed,maxRounds:null,validationRounds:config.aflow.validationRounds,concurrency:config.concurrency},...staticSeeds[0],seeds:staticSeeds,
           interface:instruction+(textBenchmark?'\nClosed-book task: arithmetic and isolated Python only. External search and hidden evaluation tests are unavailable. Only Custom and ScEnsemble operators are available.':'')+'\nOptimize a static Python AFlow Workflow using original operator.Custom(self.llm) and operator.ScEnsemble(self.llm). Custom calls have the same native Ditto tools as every compared actor. Programmer may be used only for HLE; its code runs through public Ditto isolated Python. No imports, filesystem, eval, subprocess, SDK or network calls in generated Workflow code. ScEnsemble ranks without tools. Prefix Custom planning-only instructions with [PLAN ONLY] to disable tools in that call; solution/review stages may use tools. Question images are supplied automatically to actor calls. Return the Python Workflow class and prompt constants without Markdown. Preserve native single-modification, parent-feedback and experience optimization. No test data is available. Operator interfaces: await Custom(input, instruction) returns {response:string}; await ScEnsemble(solutions:list[str]'+(config.benchmark==='drop'?'':', problem:str')+') returns {response:string}; HLE-only await Programmer(problem, analysis) returns {code:string,output:string}. Workflow __call__ returns (answer_string,0); actual cost is measured by Ditto.'}));return;
@@ -127,21 +129,21 @@ const server=createServer(async(req,res)=>{
       res.end(JSON.stringify(result));return;
     }
     if(req.url==='/start'){
-      if(!automation&&!hle&&!textBenchmark)throw new Error('Benchmark task sessions unavailable');
+      if(!automation&&!hle&&!textBenchmark&&!bfcl)throw new Error('Benchmark task sessions unavailable');
       const task=lookup.get(body.benchmarkTaskId),split=body.phase==='test'?'test':'search';
       if(!task)throw new Error('Unknown task');assertDatasetRole([task],split);
       const key=scopeKey(body);
       if(existsSync(statePath(body))){const checkpoint=JSON.parse(readFileSync(statePath(body),'utf8'));if(checkpoint.taskId!==task.id)throw new Error('Checkpoint task mismatch');res.end(JSON.stringify({checkpoint:true,answer:checkpoint.answer??''}));return;}
       if(sessions.has(key))throw new Error('Task already running');
       if(hle||textBenchmark){const input=await actorInput(task),scopedTools=tools.map(t=>t.name==='web_search'?createBenchmarkWebTool(input):t),local=createDitto({sandboxExecutor:pythonExecutor(),sandbox:{execute:true,tools:scopedTools.map(t=>t.name),network:['https://www.bing.com']},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:scopedTools})]});sessions.set(key,{task,input,runtime:local,tools:scopedTools,observations:[]});res.end(JSON.stringify({checkpoint:false}));return;}
-      const env=await openAutomation(task),local=createDitto({sandbox:{tools:env.tools.map(t=>t.name)},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:env.tools})]});
+      const env=await (bfcl?openBFCL(task):openAutomation(task)),local=createDitto({sandbox:{tools:env.tools.map(t=>t.name)},workers:[createInferWorker({providers:{baseline:provider},timeoutMs:config.providerTimeoutMs}),createInteractionWorker({tools:env.tools})]});
       sessions.set(key,{env,runtime:local,tools:env.tools,observations:[]});res.end(JSON.stringify({checkpoint:false}));return;
     }
     if(req.url==='/finish'){
       const path=statePath(body),session=sessions.get(scopeKey(body));
       let checkpoint;
       if(existsSync(path))checkpoint=JSON.parse(readFileSync(path,'utf8'));
-      else{if(!session)throw new Error('Missing task session');if(!automation&&typeof body.answer!=='string')throw new Error('Benchmark needs the completed actor answer');checkpoint={taskId:body.benchmarkTaskId,...(!automation?{answer:body.answer}:await session.env.request({op:'snapshot'}))};mkdirSync(resolve(path,'..'),{recursive:true});writeFileSync(path+'.tmp',JSON.stringify(checkpoint));const {renameSync}=await import('node:fs');renameSync(path+'.tmp',path);}
+      else{if(!session)throw new Error('Missing task session');if(!automation&&!bfcl&&typeof body.answer!=='string')throw new Error('Benchmark needs the completed actor answer');checkpoint={taskId:body.benchmarkTaskId,...(!automation&&!bfcl?{answer:body.answer}:await session.env.request({op:'snapshot'}))};mkdirSync(resolve(path,'..'),{recursive:true});writeFileSync(path+'.tmp',JSON.stringify(checkpoint));const {renameSync}=await import('node:fs');renameSync(path+'.tmp',path);}
       const task=lookup.get(body.benchmarkTaskId);if(!task||checkpoint.taskId!==task.id)throw new Error('Checkpoint task mismatch');
       if(textBenchmark){
         if(!checkpoint.grade){
@@ -159,12 +161,13 @@ const server=createServer(async(req,res)=>{
         }
         await session?.runtime.close();sessions.delete(scopeKey(body));res.end(JSON.stringify(checkpoint.grade));return;
       }
-      const env=session?.env??await openAutomation(task);
+      const env=session?.env??await (bfcl?openBFCL(task):openAutomation(task));
       try{res.end(JSON.stringify(await env.request({op:'grade',...checkpoint})));}finally{env.close();await session?.runtime.close();sessions.delete(scopeKey(body));}
       return;
     }
     if(req.url==='/search'){
       const session=sessions.get(scopeKey(body));
+      if(bfcl){if(!session)throw new Error('Start the task before search');const state=await session.env.request({op:'state'});res.end(JSON.stringify({results:[{title:'Current public BFCL conversation and available function schemas',content:JSON.stringify(state)}]}));return;}
       if(textBenchmark){
         if(!session)throw new Error('Start the task before search');
         // The closed-book task is the only retrieval corpus; never query benchmark solutions.
@@ -179,7 +182,7 @@ const server=createServer(async(req,res)=>{
     const session=sessions.get(scopeKey(body));
     if(hle)input.messages=withTaskImages(input.messages,session?.input);
     if(session&&body.tools===false)input.messages=[{role:'system',content:'Task family: '+dataset+'. This is a control/design/serialization stage. Follow the requested ranking, role or repair schema exactly; the task final-answer format does not apply to this stage. Do not solve the benchmark task, execute actions or claim new effects. Available execution tools for role design: '+session.tools.map(t=>t.name).join(', ')+'.'},...input.messages];
-    if((automation||hle||textBenchmark)&&body.tools!==false&&!session)throw new Error('Start the task before execution');
+    if((automation||hle||textBenchmark||bfcl)&&body.tools!==false&&!session)throw new Error('Start the task before execution');
     if(session&&body.tools!==false){
       input.messages=[{role:'system',content:instruction+'\nRespect the current framework stage: planning, ranking, role design and retention checks should produce their required format without writes. Execution/refinement stages may execute and repair. Shared preceding tool observations:\n'+JSON.stringify(session.observations)},...input.messages];
       input.actions=session.tools.map(t=>({name:t.name,description:t.description,inputSchema:t.inputSchema,target:{kind:'tool',toolName:t.name}}));

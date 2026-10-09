@@ -32,7 +32,7 @@ export async function benchmarkPath(name: string, split: 'search' | 'test') {
   return path;
 }
 
-export async function extraBenchmarkIdentity(name: 'hle' | 'automationbench', protocol?: string) {
+export async function extraBenchmarkIdentity(name: 'hle' | 'automationbench' | 'bfcl', protocol?: string) {
   const locks = JSON.parse(await readFile(new URL('../data/extended-benchmarks.lock.json', import.meta.url), 'utf8'));
   const lock = protocol?Object.values(locks).find((l:any)=>l.protocol===protocol) as any:locks[name];
   if(!lock)throw new Error('Unknown benchmark protocol');

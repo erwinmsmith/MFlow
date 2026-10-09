@@ -9,7 +9,7 @@ class DyLAN:
         import util
         self.util=util;self.answers=[]
     def final(self):
-        if PROTOCOL.get('benchmark')=='automationbench':
+        if PROTOCOL.get('benchmark') in ('automationbench','bfcl'):
             return self.answers[-1] if self.answers else ''
         if PROTOCOL.get('benchmark') in ('drop','mbpp'):
             if not self.answers:return ''
@@ -27,7 +27,7 @@ class DyLAN:
         self.answers=[]
         def generate(**kwargs):
             messages=kwargs['messages'];ranking='Please choose the best 2 solutions' in messages[-1]['content']
-            content=call(messages,tools=False) if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp') and ranking else call(messages)
+            content=call(messages,tools=False) if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp','bfcl') and ranking else call(messages)
             if 'Please choose the best 2 solutions' not in messages[-1]['content']:self.answers.append(content)
             return {'choices':[{'message':{'content':content}}]}
         previous=openai.ChatCompletion.create;openai.ChatCompletion.create=generate
@@ -39,7 +39,7 @@ class DyLAN:
                 # The upstream script stores this unused reference in its output; real gold stays in the evaluator.
                 (data/'0.json').write_text(json.dumps({'problem':prompt,'level':'Level 5','type':'MATH','solution':r'\boxed{0}'}))
                 os.chdir(scratch);sys.argv=[str(self.path),str(data),'0','0',PROTOCOL['model'],PROTOCOL['model']]
-                if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp'):
+                if PROTOCOL.get('benchmark') in ('automationbench','hle','drop','mbpp','bfcl'):
                     academic=PROTOCOL.get('benchmark')=='hle'
                     # Adapt prompt/answer IO only; official debate, pruning and consensus remain intact.
                     tree=ast.parse(self.path.read_text())

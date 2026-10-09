@@ -119,7 +119,7 @@ async function run() {
   if (command === 'seed') {
     const name = benchmarkName(required('benchmark'));
     const metrics = { drop: 'drop', humaneval: 'python', mbpp: 'python', gsm8k: 'numeric',
-      math: 'math', humaneval_plus: 'evalplus', hle: 'hle', automationbench: 'automationbench' } as const;
+      math: 'math', humaneval_plus: 'evalplus', hle: 'hle', automationbench: 'automationbench', bfcl: 'bfcl' } as const;
     if (!(name in metrics)) throw new Error('seed requires a supported executable benchmark');
     const { benchmarkSeed, benchmarkSeeds } = await import('./aflow-seed.js');
     const { unrestrictedConfig, aflowConfigSchema } = await import('./aflow-search.js');
@@ -314,7 +314,7 @@ async function run() {
       return;
     }
     const tasks = await readTasks(await datasetPath('test'));
-    if (protocol === 'continual' && tasks.some(t => t.metric === 'automationbench'))
+    if (protocol === 'continual' && tasks.some(t => ['automationbench','bfcl'].includes(t.metric)))
       throw new Error('AutomationBench uses fresh standard task worlds; continual evaluation is not supported');
     const knownSourceOverlaps = assertTestDisjoint(tasks, bundle);
     if (knownSourceOverlaps.length)

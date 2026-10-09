@@ -1,3 +1,4 @@
+import { openBFCL } from './bfcl-environment.js';
 import { createBenchmarkWebTool } from './python-tool.js';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -97,13 +98,13 @@ export async function openAutomation(task: Task) {
 /** Every attempt has a fresh official world, shared by all agents within that MAS. */
 export async function executeBenchmark(task: Task, agents: DittoAgents, strategy: Strategy, limits: Limits, pool?: ConstructorParameters<typeof OrganizationRuntime>[2]): Promise<Execution> {
   const input = await actorInput(task);
-  if (task.metric !== 'automationbench') {
+  if (task.metric !== 'automationbench' && task.metric !== 'bfcl') {
     const scoped=task.metric==='hle'?new DittoAgents(agents.provider,agents.model,agents.tools.map(t=>t.name==='web_search'?createBenchmarkWebTool(input):t)):agents;
     return new OrganizationRuntime(scoped, limits, pool).run(strategy, input);
   }
-  const env = await openAutomation(task);
+  const env = await (task.metric === 'bfcl' ? openBFCL(task) : openAutomation(task));
   try {
-    const scoped = new DittoAgents(agents.provider, agents.model, [...agents.tools, ...env.tools]);
+    const scoped = new DittoAgents(agents.provider, agents.model, [...(task.metric === 'bfcl' ? [] : agents.tools), ...env.tools]);
     const result = await new OrganizationRuntime(scoped, limits, pool).run(strategy, input);
     result.environment = await env.request({ op: 'snapshot' });
     return result;
@@ -112,7 +113,7 @@ export async function executeBenchmark(task: Task, agents: DittoAgents, strategy
 
 export async function gradeAutomation(task: Task, execution?: Execution) {
   if (!execution?.environment) throw new Error('AutomationBench requires the saved world checkpoint, not a textual answer');
-  const env = await openAutomation(task);
+  const env = await (task.metric === 'bfcl' ? openBFCL(task) : openAutomation(task));
   try {
     return await env.request<{score: 0|1; partialCredit: number; assertions: unknown}>({ op: 'grade', ...execution.environment });
   } finally { env.close(); }

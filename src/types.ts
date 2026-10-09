@@ -255,10 +255,10 @@ export const taskSchema = z
     id: z.string().min(1),
     prompt: z.string().min(1),
     answer: z.string(),
-    metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus", "hle", "automationbench"]).default("exact"),
-    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "hle", "automationbench"]).optional(),
+    metric: z.enum(["exact", "numeric", "drop", "math", "python", "evalplus", "hle", "automationbench", "bfcl"]).default("exact"),
+    benchmark: z.enum(["drop", "humaneval", "mbpp", "gsm8k", "math", "humaneval_plus", "hle", "automationbench", "bfcl"]).optional(),
     aflowSplit: z.enum(["validate", "test"]).optional(),
-    dataset: z.object({ protocol: z.enum(['humaneval-plus-aflow-v1', 'hle-text-test-v1', 'hle-full-test-v1', 'hle-full-holdout-v1', 'automationbench-public-simple-v1']), split: z.enum(['search', 'test']) }).strict().optional(),
+    dataset: z.object({ protocol: z.enum(['humaneval-plus-aflow-v1', 'hle-text-test-v1', 'hle-full-test-v1', 'hle-full-holdout-v1', 'automationbench-public-simple-v1', 'bfcl-multiturn-family-v1']), split: z.enum(['search', 'test']) }).strict().optional(),
     images: z.array(z.object({path:z.string().min(1),sha256:z.string().regex(/^[a-f0-9]{64}$/),mimeType:z.enum(['image/png','image/jpeg','image/gif','image/webp'])}).strict()).min(1).optional(),
     category: z.string().optional(),
     answerType: z.string().optional(),
@@ -270,6 +270,7 @@ export const taskSchema = z
       entryPoint: z.string().optional(),
       evalplusTaskId: z.string().optional(),
       automationTaskId: z.string().optional(),
+      bfclTaskId: z.string().optional(),
     }).strict().optional(),
     group: z.string().optional(),
   })
@@ -282,13 +283,15 @@ export const taskSchema = z
     if (task.metric === 'evalplus' && (task.benchmark !== 'humaneval_plus' || !task.dataset ||
         !task.reference?.evalplusTaskId || !task.reference.entryPoint || !task.reference.prefix))
       ctx.addIssue({ code: 'custom', message: 'HumanEval+ requires a locked dataset and EvalPlus task reference' });
-    const protocol = ({ evalplus: 'humaneval-plus-aflow-v1', hle: 'hle-text-test-v1', automationbench: 'automationbench-public-simple-v1' } as Record<string, string>)[task.metric];
+    const protocol = ({ evalplus: 'humaneval-plus-aflow-v1', hle: 'hle-text-test-v1', automationbench: 'automationbench-public-simple-v1', bfcl: 'bfcl-multiturn-family-v1' } as Record<string, string>)[task.metric];
     const matchingProtocol=task.metric==='hle' ? ['hle-text-test-v1','hle-full-test-v1','hle-full-holdout-v1'].includes(task.dataset?.protocol??'') : task.dataset?.protocol===protocol;
     if ((protocol && (!task.dataset || !matchingProtocol || task.benchmark !== (task.metric === 'evalplus' ? 'humaneval_plus' : task.metric))) ||
         (task.dataset && (!protocol || task.aflowSplit)))
       ctx.addIssue({ code: 'custom', message: 'Benchmark metric needs matching locked protocol and benchmark metadata' });
     if (task.metric === 'hle' && task.dataset?.protocol!=='hle-full-holdout-v1' && task.dataset?.split !== 'test')
       ctx.addIssue({ code: 'custom', message: 'HLE official test cannot be used for search' });
+    if (task.metric === 'bfcl' && !task.reference?.bfclTaskId)
+      ctx.addIssue({ code: 'custom', message: 'BFCL requires an official task reference' });
     if (task.metric === 'automationbench' && !task.reference?.automationTaskId)
       ctx.addIssue({ code: 'custom', message: 'AutomationBench requires an official task reference' });
   });
