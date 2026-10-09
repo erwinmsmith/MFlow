@@ -20,6 +20,43 @@ const run = (candidate: Strategy, provider: ModelProvider) => new OrganizationRu
   limitsSchema.parse({ maxSteps: 40, maxTokens: 100000 })).run(candidate,
   { id: 'synthetic', prompt: 'Compute 2 + 3.', answer: 'HIDDEN-REFERENCE' } as any);
 
+for (const variant of ['fixed-mbpp-heterogeneous','fixed-mbpp-homogeneous'] as const) {
+  test(`${variant} routes the full library, isolates independent candidates and inherits role contracts`,async()=>{
+    const original=source(),templates=original.organization!.agentTemplates!;
+    original.organization!.agentTemplates=templates.filter(t=>t.id!=='checker');
+    const probe=structuredClone(templates.find(t=>t.id==='reviewer')!);
+    probe.id='oracle_probe';probe.profile.tools=[];
+    probe.profile.objective='Extract the public callable contract.';
+    probe.profile.expected_output='Contract JSON';
+    original.organization!.agentTemplates.push(probe);
+    const before=JSON.stringify(original),candidate=ablationStrategy(original,variant),calls:SampleInput[]=[];
+    const result=await run(candidate,{async invoke(input){
+      calls.push(input);
+      const id=String(input.metadata?.agentId),messages=JSON.stringify(input.messages);
+      if(id==='independent') {
+        assert.ok(messages.includes('EVIDENCE-oracle_probe'));
+        assert.ok(!messages.includes('EVIDENCE-root'));
+      }
+      if(id==='reviewer'||calls.length===5)for(const role of ['root','independent','oracle_probe'])assert.ok(messages.includes('EVIDENCE-'+role));
+      if(calls.length===5)assert.ok(messages.includes('EVIDENCE-reviewer'));
+      return {message:{role:'assistant',content:`EVIDENCE-${id}: \\boxed{5}`},finishReason:'stop',usage:{totalTokens:20}};
+    }});
+    assert.deepEqual(calls.map(c=>c.metadata?.agentId),['oracle_probe','root','independent','reviewer','root']);
+    assert.equal(result.agents.length,4);assert.equal(result.actualTokens,100);
+    assert.ok(!JSON.stringify(calls).includes('HIDDEN-REFERENCE'));
+    assert.equal(JSON.stringify(original),before);assert.deepEqual(candidate.prompts,original.prompts);
+    if(variant==='fixed-mbpp-heterogeneous')assert.deepEqual(candidate.organization,original.organization);
+    else for(const template of candidate.organization!.agentTemplates!) {
+      const solver=templates.find(t=>t.id==='solver')!;
+      const role: typeof solver=original.organization!.agentTemplates!.find(t=>t.id===template.id)!;
+      assert.equal(template.composition,solver.composition);
+      for(const field of ['tools','nodes','reasoning'] as const)assert.deepEqual(template.profile[field],solver.profile[field]);
+      for(const field of ['objective','private_context','expected_output'] as const)assert.equal(template.profile[field],role.profile[field]);
+    }
+    assert.throws(()=>ablationStrategy(source(),variant),/requested templates/);
+  });
+}
+
 for (const variant of ['fixed-drop-heterogeneous','fixed-drop-homogeneous'] as const) {
   test(`${variant} preserves the complete frozen library and routes all roles before normalization`,async()=>{
     const original=source(),solver=original.organization!.agentTemplates!.find(t=>t.id==='solver')!;
