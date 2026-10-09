@@ -1,3 +1,4 @@
+import { withOptimizerOutputBudget } from './optimizer-context.js';
 import { bfclTools, bfclInstruction } from './bfcl-environment.js';
 import { dittoGuide } from './ditto-guide.js';
 import { createServer } from "node:http";
@@ -265,7 +266,7 @@ export async function runAFlowSearch(options: {
         const usagePath = join(out, 'optimizer-calls', `${randomUUID()}.json`);
         const agents = makeAgents(async (records) => save(usagePath, { round: input.round, records }), { round: input.round, phase: 'optimizer' });
         try {
-          let proposal = (await agents.structured('aflow-optimizer', input.prompt + '\nContract reminder: the outer MAS receives the global ctx, not an agent-local ctx; ctx.self/evidence/prompt exist only inside a bound agent program. Outer code starts with root and returns an answer string; runAgent returns AgentOutput directly (candidate_answer, artifacts, open_deficits), not {output:...}. Preserve and evolve the parent dynamic derivation policy together with MAS routing, agent profiles and internal graphs. Do not accidentally replace the outer MAS with a solver template.', {}, proposalSchema, runtimeConfig.episode)).value;
+          let proposal = (await withOptimizerOutputBudget(runtimeConfig.episode.maxOutputTokens, maxOutputTokens => agents.structured('aflow-optimizer', input.prompt + '\nContract reminder: the outer MAS receives the global ctx, not an agent-local ctx; ctx.self/evidence/prompt exist only inside a bound agent program. Outer code starts with root and returns an answer string; runAgent returns AgentOutput directly (candidate_answer, artifacts, open_deficits), not {output:...}. Preserve and evolve the parent dynamic derivation policy together with MAS routing, agent profiles and internal graphs. Do not accidentally replace the outer MAS with a solver template.', {}, proposalSchema, { ...runtimeConfig.episode, maxOutputTokens }), adjustment => append(join(out, 'optimizer-context-adjustments.jsonl'), { round: input.round, ...adjustment }))).value;
           for (let attempt = 0; ; attempt++) {
             try { const { modification: _, ...artifact } = proposal; candidate({ id: `s${input.round}`, ...artifact }); break; }
             catch (error) {

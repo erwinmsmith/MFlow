@@ -77,3 +77,15 @@ Add `--resume` using the same snapshot/config to retain completed tasks, rounds,
 usage and final conversation checkpoints. An interrupted in-flight conversation
 without a completed checkpoint restarts; completed tasks are not charged again.
 External tool execution uses the registry-published Ditto package only.
+
+### Optimizer context recovery
+
+If a provider rejects a search proposal because input plus the reserved output
+exceeds its reported context window, retain the entire prompt and retry once with
+`max_output = reported_context - reported_input`. Record the adjustment separately.
+This changes only the reservation for that proposal, not task context, parent
+selection, evidence, validation repetitions or the normal generation settings.
+Unparseable errors, input that already fills the window, billing failures and a
+failed correction propagate without this retry. Existing snapshots can receive
+a checksummed application-module override with an explicit repair receipt; keep
+completed evaluations and their original manifests.

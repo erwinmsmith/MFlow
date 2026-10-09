@@ -1,3 +1,4 @@
+import { withOptimizerOutputBudget } from '../dist/src/optimizer-context.js';
 import { openBFCL, checkBFCL } from '../dist/src/bfcl-environment.js';
 // Official controllers keep their control flow; all model calls use published Ditto.
 import { createServer } from 'node:http';
@@ -115,7 +116,7 @@ const server=createServer(async(req,res)=>{
       const optimizerCallId=randomUUID();
       const input={model:{provider:'baseline',model:config.model,providerOptions:{response_format:{type:'json_object'}}},messages:[{role:'system',content:'Return JSON with exactly three nonempty string fields: modification, graph, prompt. graph is the complete Python Workflow class; prompt defines Python constants. No Markdown fences.'},{role:'user',content:body.prompt}],generation:{temperature:config.temperature,maxTokens:config.maxOutputTokens},metadata:{method:'AFlow',phase:'search',taskId:'optimizer-round-'+body.round,optimizerCallId}};
       try{
-        const result=await runtime.run(plan,input);if(result.sample.status!=='success')throw new Error(result.sample.error?.message??'Optimizer failed');
+        const result=await withOptimizerOutputBudget(input.generation.maxTokens, async maxTokens=>{const response=await runtime.run(plan,{...input,generation:{...input.generation,maxTokens}});if(response.sample.status!=='success')throw new Error(response.sample.error?.message??'Optimizer failed');return response;},adjustment=>append('optimizer-context-adjustments.jsonl',{round:body.round,...adjustment}));
         const proposal=JSON.parse(result.sample.output.message.content);for(const key of ['modification','graph','prompt'])if(typeof proposal[key]!=='string'||!proposal[key])throw new Error('Invalid static proposal');
         res.end(JSON.stringify(proposal));return;
       }catch(error){const unavailable=optimizerFailures.has(optimizerCallId);res.statusCode=502;res.end(JSON.stringify({error:String(error),fatal:unavailable,unavailable}));return;}
