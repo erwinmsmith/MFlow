@@ -1,7 +1,7 @@
 # 本地统一 benchmark 管理
 
 更新日期：2026-09-30。管理十一个 benchmark 的本地资产，接入六个文本评测、HLE 多模态评测与 AutomationBench 官方交互环境。
-GAIA/BFCL/τ³ 当前仅管理资产，交互 adapter 尚未接通。执行配置与支持范围见 [README](../README.md#llm-配置)。
+GAIA/τ³ 当前仅管理资产；BFCL 已接入独立 SingleLLM 多轮评测，尚未接入 MFlow 搜索。执行配置与支持范围见 [README](../README.md#llm-配置)。
 
 ## 共享目录
 
@@ -49,7 +49,7 @@ python3 ../Benchmarks/bench.py path bfcl --protocol raw
 | MATH | AFlow `3f457218` | 119 / 486 | 可搜索、math-verify 评分；完整官方 test 另存 |
 | HumanEval+ | EvalPlus v0.1.10；继承 AFlow HumanEval ID | 33 / 131 | 可搜索、官方 base+plus 评分；需镜像 |
 | GAIA | HF `682dd723`；2023 validation 与附件 | 尚未制定 MFlow 划分 | 仅管理资产，官方 test 未下载 |
-| BFCL | V4 checkout `6ea57973` | 原类别与会话保留 | 仅管理资产与官方工具/评分代码 |
+| BFCL | V4 checkout `6ea57973` | 四类多轮各 200，共 800；test-only | 独立 SingleLLM + 官方控制器/评分；MFlow 搜索尚未接入 |
 | τ³ | v1.0.1 / `fc0055dc` | 保留原 split 结构 | 仅管理资产与官方环境/评分代码 |
 | HLE | `cais/hle@5a81a4c7`；官方 evaluator `22ed3074` | 官方 2500 test；另有自定义 200 search / 2300 test | 全部图片、五框架 actor 和官方 prompt/schema 的 Ditto judge 已接入 |
 | AutomationBench | Zapier 1.0.6 / `4a8e1061`，API toolset | 200 simple / 600 public domain | 官方环境、工具与断言评分已接入 |
@@ -94,7 +94,44 @@ DROP/MBPP 的 single 使用任务专用输出契约，只执行一个 root，不
 
 显式 `--search` / `--test` 路径仍支持；与 `--benchmark` 同时提供时，显式路径优先。
 加载器接受 `benchmark:math/search`、`benchmark:humaneval+/test`，并发脚本也可使用。
-GAIA/BFCL/τ³ 请求 search/test 视图会明确报错，避免把“有数据”误认成“执行已接通”。
+GAIA/BFCL/τ³ 请求通用 search/test 视图会明确报错；BFCL 使用下面的独立评测入口。
+
+### BFCL 多轮 SingleLLM（2026-10-09）
+
+`scripts/bfcl_single.mjs` 跑固定 BFCL V4 的 base、miss_param、miss_func、long_context，
+各 200 道完整会话，共 800 道。这是四类多轮的完整评测，不是 BFCL 全类别总榜。
+一个 agent 可连续调用工具，不搜索、不派生；没有额外任务提示词，复用官方 FC handler
+的工具文档转换、历史消息、缺失函数逐轮开放和每轮 20-step 保护（固定版本实际在
+计数超过 20 后终止）。模型保持 DeepSeek Flash、temperature 0、thinking disabled、
+max_tokens 393216；官方 DeepSeek 请求不传 seed。并发默认 8。
+
+官方 `BaseHandler.inference_multi_turn_FC` 不改写，模型回调通过 Ditto
+`INFER.REASONING.SAMPLE`，已开放的每个函数注册为 `RegisteredTool`，由
+`INTERACTION.ACT.TOOL` 调用官方模拟环境。一个任务一个 Python 进程，隔离官方
+全局状态和随机数。不会实例化官方 OpenAI 客户端，也不会绕过 Ditto 请求模型。
+仅接受函数名及字面量参数；未注册工具计为失败，不执行任意 Python 表达式。
+
+评分使用固定官方 `eval_runner.py` 中 `_evaluate_single_multi_turn_entry` 原函数：
+从官方 AST 加载该函数，避免导入所有无关供应商 SDK；状态、响应检查直接引用官方模块。
+生成结果落盘后才打开 reference，答案不会传给模型。错误回答保留为 0 分。
+本次没有 search split；将来搜索须先单独制定隔离协议，不能用此 test 的反馈优化后仍声称独立测试。
+
+```sh
+uv venv --python 3.11 ../Benchmarks/environments/bfcl
+uv pip install --python ../Benchmarks/environments/bfcl/bin/python -r benchmark-hub/bfcl-requirements.lock.txt
+npm run build
+# 已获实验授权且私有 .env 配置完成后运行：
+node scripts/bfcl_single.mjs --run runs/bfcl-single --concurrency 8
+# 查询不会调用模型：
+node scripts/bfcl_single.mjs --run runs/bfcl-single --status
+```
+
+可通过 `MFLOW_BFCL_PYTHON` 指定环境、`BENCHMARK_HOME` 指定共享数据。
+重复运行相同命令可接续；已完成题目跳过，进行中的模型响应按请求哈希重放，模拟工具
+重新执行以恢复该题状态。固定 manifest 不一致则拒绝接续。HTTP/网络/评分故障暂停领取
+新任务，允许其余请求结束，保留用量及检查点，不自动无限重试。
+只保存精简预测、结果、用量与进行中检查点，不保存重复输入历史或完整环境 dump。
+用量中的 unknownCalls 必须另报，不能把未知调用当作 0 token。
 
 ### 修正现有使用方式
 

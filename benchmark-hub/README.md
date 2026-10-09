@@ -32,7 +32,7 @@ HLE 同样仅保留本地，访问同意与文件下载权限由 Hugging Face �
 - GAIA：当前只有 2023 validation 和对应附件；没有下载隐藏答案的官方 test。
 - BFCL：保存官方 V4 checkout。指定 commit，不能默认宣称与在线 leaderboard 的 pin 一致。
 - τ³：保存官方 v1.0.1 checkout，原始领域政策、工具、任务与 split 保留。
-- GAIA/BFCL/τ³ 本轮只管理资产和官方评估代码，尚未提供 MFlow 交互执行 adapter。
+- GAIA/τ³ 只管理资产和官方评估代码。BFCL 已提供 SingleLLM 四类多轮的独立执行入口 `scripts/bfcl_single.mjs`（800 题），尚未接入 MFlow 搜索；详见 `docs/shared-benchmarks.md`。
 - HLE：完整 2500 题（342 图片题）；保留原 2158 无图题 test-only view，新增全量 test-only 和单独命名的分层 200 search / 2300 test 自定义协议。图片经已发布 Ditto 公共接口传递。
 - AutomationBench：固定 Zapier 1.0.6，200 simple 开发搜索 / 600 public domain 评测。
   该命名开发协议不等于官方 train/test 或私有 leaderboard；保留官方 API 环境和 strict/partial 评分。
