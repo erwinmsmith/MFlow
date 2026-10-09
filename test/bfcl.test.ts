@@ -42,6 +42,10 @@ assert.equal(rows.result[0][0][0].cd,'{"folder":"document"}');
 const available=[];
 await runTask({...common,taskId:'multi_turn_miss_func_0',provider:{async invoke(input){available.push(input.actions.map(t=>t.name));return {message:{role:'assistant',content:'Cannot proceed'},finishReason:'stop',usage:{inputTokens:1,outputTokens:1,totalTokens:2}};}}});
 assert(available.some(names=>names.length>available[0].length),'Official holdout functions must be added only in later turns');
+let rejectedCalls=0;
+const rejected=await runTask({...common,taskId:'multi_turn_base_1',provider:{async invoke(){rejectedCalls++;return {message:{role:'assistant',content:''},actionRequests:[{id:'invalid',name:'not_an_exposed_tool',arguments:{}}],finishReason:'action_request',usage:{inputTokens:1,outputTokens:1,totalTokens:2}};}}});
+assert.equal(rejected.score,0);assert.equal(rejected.errorType,'unavailable_tool');assert.equal(rejectedCalls,1);
+assert.equal(JSON.parse(readFileSync(resolve(run,'responses/multi_turn_base_1.json'))).rejectedResponse.actionRequests[0].name,'not_an_exposed_tool');
 }finally{rmSync(run,{recursive:true,force:true});}
 `],{timeout:60000,maxBuffer:2*1024*1024});
 });

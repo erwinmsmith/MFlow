@@ -54,12 +54,12 @@ export async function runTask({official, python, run, taskId, provider, config})
   const send = value => child.stdin.write(JSON.stringify(value) + '\n');
   const cachePath = resolve(run, 'checkpoints', taskId + '.jsonl');
   const saved = readRows(cachePath);
-  let sampleIndex = 0, runtime, activeCalls = [];
+  let sampleIndex = 0, runtime, activeCalls = [], lastSample;
   const pending = new Map();
   const usageProvider = {async invoke(input, options) {
     let output;
     const startedAt = new Date().toISOString();
-    try { output = await provider.invoke(input, options); return output; }
+    try { output = await provider.invoke(input, options); lastSample = output; return output; }
     catch (error) { transportError = error; throw error; }
     finally { const usage = output?.usage;
       append(resolve(run, 'usage.jsonl'), {taskId, startedAt, at: new Date().toISOString(), usage,
@@ -98,6 +98,17 @@ export async function runTask({official, python, run, taskId, provider, config})
             generation: {temperature: config.temperature, maxTokens: config.maxOutputTokens},
             metadata: {method:'SingleLLM',phase:'test',taskId,nodeId:'single/sample'}};
           const result = await runtime.invoke('INFER.REASONING.SAMPLE', input);
+          // Ditto correctly rejects a hallucinated/held-out tool. This is a
+          // completed incorrect prediction, not an outage of the whole benchmark.
+          if (result.status === 'failed' && result.error?.code === 'UNDECLARED_ACTION') {
+            const row = {id:taskId,category:taskId.replace(/_\d+$/,''),score:0,errorType:'unavailable_tool',
+              errorMessage:result.error.message,completedAt:new Date().toISOString()};
+            atomic(resolve(run,'responses',taskId+'.json'),{id:taskId,error:result.error,
+              partialResponses:readRows(cachePath).map(x=>x.response),rejectedResponse:lastSample});
+            atomic(resolve(run,'results',taskId+'.json'),row);
+            rmSync(cachePath,{force:true});
+            return row;
+          }
           if (result.status !== 'success') throw transportError ?? new Error(result.error?.message ?? 'Ditto inference failed');
           // A cut-off response is not a completed model turn and is resumable as an infrastructure failure.
           if (result.output.finishReason === 'length') throw new Error('Incomplete model output: length');
