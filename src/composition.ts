@@ -11,6 +11,7 @@ import { agentOutputSchema, profileSchema, compositionNodes, type AgentProfile, 
 import { PolicyContractError } from './strategy-program.js';
 import { withTaskImages, imageLog } from './data.js';
 import { dittoGuide } from './ditto-guide.js';
+import { assertCompleteToolHistory } from './tool-history.js';
 class GeneratedProgramError extends PolicyContractError {}
 
 /** The seed is itself a searched artifact, not a hidden fixed agent executor. */
@@ -407,6 +408,10 @@ export async function runComposition(agents: DittoAgents, limits: Limits, strate
       agent.status = 'ACTIVE'; event('ACTIVATE', id);
     }
     if (nodeTask.node.startsWith('INFER.')) {
+      if (Array.isArray(value.messages)) {
+        try { assertCompleteToolHistory(value.messages); }
+        catch (error) { throw new GeneratedProgramError(`Invalid tool-message history: ${String(error)}. Validate planned calls BEFORE appending their assistant message; rejected calls were not executed and must not be added to history. Preserve every executed call and its actual observation. Do not invent tool results or repeat successful writes.`); }
+      }
       for (const action of value.actions ?? []) {
         if (!agent.profile.tools.includes(action.name) || action.target?.kind !== 'tool' || action.target.toolName !== action.name)
           throw new PolicyContractError(`Agent ${id} requested an unavailable action`);

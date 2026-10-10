@@ -23,6 +23,21 @@ const run = (provider: ModelProvider, candidate = strategy(), prompt = 'Syntheti
   new OrganizationRuntime(new DittoAgents(new MeteredProvider(provider), model), limitsSchema.parse({maxSteps: 20, maxTokens: 100000}))
     .run(candidate, { id: 'fixture', prompt });
 
+test('generated orphan tool requests are rejected locally before inference admission',async()=>{
+  let paidCalls=0;
+  const candidate=strategy(`return loop({id:'bad-history',plan:function*(ctx){
+    try {
+      yield* graphStep(graph('bad').node('root/sample','INFER.REASONING.SAMPLE',[],()=>ctx.request('root',[
+        {role:'assistant',content:'',metadata:{actionRequests:[{id:'unexecuted',name:'arithmetic',arguments:{}}]}},
+        {role:'user',content:'Clarify instead'}
+      ])),null);
+    }catch(e){return String(e);}
+    return 'unexpected';
+  }});`);
+  const result=await run({async invoke(){paidCalls++;throw new Error('must not reach provider');}},candidate);
+  assert.equal(paidCalls,0);assert.match(result.answer,/missing observations/);
+});
+
 test('native seed executes declared context, inference and interaction nodes through Ditto', async () => {
   let calls = 0;
   const provider: ModelProvider = { async invoke(input) {

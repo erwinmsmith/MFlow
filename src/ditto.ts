@@ -159,6 +159,12 @@ export class MeteredProvider implements ModelProvider {
         typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'PROVIDER_FAILURE',
         error instanceof Error ? error.message : String(error), error);
       this.nodeFailures.set(nodeId, failure);
+      if (failure.code === 'INVALID_MODEL_OUTPUT' && input.metadata?.kind === 'agent' && input.actions?.length && attempt < 2 && !options.signal.aborted) {
+        // Parsing failed before this sample returned actions to the graph. Retry
+        // only inference; never replay a graph or any completed tool effects.
+        return this.invoke({ ...input, messages: [...input.messages, { role: 'user', content:
+          'The previous model response could not be parsed as valid JSON. No actions from that response were executed. Produce a fresh response using the same task and existing observations. Tool arguments must be a complete JSON object with double-quoted keys and strings, correctly escaped values, and no trailing commas or prose. Use a small batch of independent calls; wait for observations before dependent calls. Preserve already completed effects.' }] }, options, attempt + 1);
+      }
       const cause = failure.cause as { code?: string; cause?: { code?: string } } | undefined;
       const transient = ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT'].includes(
         String(cause?.code ?? cause?.cause?.code ?? failure.code)) ||
