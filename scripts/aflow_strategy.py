@@ -7,41 +7,26 @@ import json
 import os
 import random
 import sys
-import urllib.request
-import urllib.error
 from pathlib import Path
 from search_evidence import compact_evidence, paired_outcomes
+from search_transport import request, ProviderUnavailable, ControllerFailure
+from evidence_storage import write_evidence
 
 
 def main():
     endpoint, source, out = sys.argv[1:]
     out = Path(out).resolve()
     # Local scripts/benchmarks.py must not shadow the official benchmarks package.
-    sys.path = [str(Path(source).resolve())] + [p for p in sys.path if Path(p).resolve() != Path(__file__).resolve().parent]
+    local_scripts = {Path(__file__).resolve().parent, Path.cwd() / 'scripts'}
+    sys.path = [str(Path(source).resolve())] + [p for p in sys.path if Path(p).resolve() not in local_scripts]
     from scripts.async_llm import AsyncLLM, LLMConfig
     from scripts.optimizer import Optimizer
     from scripts.evaluator import Evaluator
     from scripts.prompts.optimize_prompt import WORKFLOW_INPUT, WORKFLOW_OPTIMIZE_PROMPT
     import numpy as np
 
-    class ProviderUnavailable(BaseException):
-        """Abort the search without scoring an unavailable provider as policy failure."""
-
-    class ControllerFailure(BaseException):
-        """Do not advance search rounds after optimizer infrastructure failures."""
-
     def rpc(route, data=None):
-        req = urllib.request.Request(endpoint + '/' + route, data=json.dumps(data or {}).encode(), headers={'Content-Type': 'application/json'})
-        try:
-            with urllib.request.urlopen(req, timeout=None) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as error:
-            body = error.read().decode()
-            if json.loads(body).get('unavailable'):
-                raise ProviderUnavailable(body) from None
-            if json.loads(body).get('fatal'):
-                raise ControllerFailure(body) from None
-            raise RuntimeError(body) from None
+        return request(endpoint, route, data)
 
     init = rpc('bootstrap')
     static = init.get('mode') == 'aflow-static'
@@ -216,12 +201,12 @@ REGRESSIONS: inspect pairedSearchOutcomes for both repaired and newly harmed sea
                 try:result = await evaluate_static(number,repeat,strategy,config['concurrency'])
                 except Exception as error:raise ControllerFailure(str(error)) from error
             else:result = await asyncio.to_thread(rpc, 'evaluate', {'round': number, 'repeat': repeat, 'strategy': strategy})
-            (Path(directory) / f'organization_{repeat}.json').write_text(json.dumps(result['organizationSummary'], indent=2) + '\n')
-            (Path(directory) / f'failures_{repeat}.json').write_text(json.dumps(result['failures']) + '\n')
+            write_evidence(Path(directory) / f'organization_{repeat}.json', result['organizationSummary'])
+            write_evidence(Path(directory) / f'failures_{repeat}.json', result['failures'])
             failures = []
             for prior in range(repeat + 1):
                 failures.extend(json.loads((Path(directory) / f'failures_{prior}.json').read_text()))
-            (Path(directory) / 'log.json').write_text(json.dumps(failures, indent=2) + '\n')
+            write_evidence(Path(directory) / 'log.json', failures)
             return result['score'], result['meanTokens'], result['tokens']
         Evaluator.graph_evaluate = graph_evaluate
         try:

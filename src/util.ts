@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, rename, appendFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rename, appendFile, rm } from "node:fs/promises";
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { basename, dirname, resolve } from "node:path";
 import type { Execution } from './types.js';
 
@@ -77,8 +79,19 @@ export async function save(path: string, value: unknown) {
   const pending = (saves.get(path) ?? Promise.resolve()).catch(() => {}).then(async () => {
     if (completedRequest) { await rm(path, { force: true }); return; }
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path + ".tmp", text);
-    await rename(path + ".tmp", path);
+    try {
+      await writeFile(path + ".tmp", text);
+      if (process.platform === 'darwin' && process.env.MFLOW_COMPRESS_EVIDENCE === '1' && Buffer.byteLength(text) >= 65536) {
+        await promisify(execFile)('/usr/bin/ditto', ['--hfsCompression', path + '.tmp', path + '.compressed-tmp']);
+        const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+        if (hash(await readFile(path + '.compressed-tmp')) !== hash(text)) throw new Error('Evidence compression checksum mismatch');
+        await rename(path + '.compressed-tmp', path + '.tmp');
+      }
+      await rename(path + ".tmp", path);
+    } finally {
+      await rm(path + '.tmp', { force: true });
+      await rm(path + '.compressed-tmp', { force: true });
+    }
   });
   saves.set(path, pending);
   try { await pending; }

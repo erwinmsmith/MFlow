@@ -4,12 +4,23 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 from pathlib import Path
 import subprocess
 import time
 import urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
+
+def stop_process(child):
+    # Each actor owns a process group, including its controller and tool subprocesses.
+    try:os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:pass
+    try:child.wait(timeout=15)
+    except subprocess.TimeoutExpired:pass
+    try:os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:pass
+    child.wait(timeout=15)
 
 def require_disk_space(path):
     minimum=int(os.environ.get('MFLOW_MIN_FREE_GIB','10'))*1024**3
@@ -257,13 +268,13 @@ def main():
         command=commands[name][index]
         if name=='MFlow' and ((search if index==0 else test)/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
         if name=='SingleLLM' and 'evaluate' in command and (single_test/'manifest.json').exists() and '--resume' not in command:command=command+['--resume']
-        child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
+        child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
         stream.close();active[name]=(child,index);jobs['jobs'][name]={'pid':child.pid,'stage':index,'status':'running','startedAt':time.time()};persist()
     bridge=None
     def start_bridge():
         nonlocal bridge
         if bridge is not None:return
-        bridge_log=(out/'bridge.log').open('a');bridge=subprocess.Popen(['node','baselines/bridge.mjs'],cwd=ROOT,env=env,stdout=bridge_log,stderr=subprocess.STDOUT);bridge_log.close()
+        bridge_log=(out/'bridge.log').open('a');bridge=subprocess.Popen(['node','baselines/bridge.mjs'],cwd=ROOT,env=env,stdout=bridge_log,stderr=subprocess.STDOUT,start_new_session=True);bridge_log.close()
         for attempt in range(60):
             if bridge.poll() is not None:raise RuntimeError('Bridge failed; inspect bridge.log')
             try:
@@ -273,6 +284,8 @@ def main():
                     break
             except OSError:time.sleep(1)
         else:raise RuntimeError('Bridge did not become ready')
+    def interrupted(signum, frame):raise SystemExit(f'Interrupted by signal {signum}')
+    previous_signal=signal.signal(signal.SIGTERM,interrupted)
     try:
         require_disk_space(out)
         prune_progress(out)
@@ -305,6 +318,7 @@ def main():
             for name,(child,index) in list(active.items()):
                 code=child.poll()
                 if code is None:continue
+                stop_process(child)
                 del active[name]
                 if code==0 and index+1<len(commands[name]):launch(name,index+1)
                 else:
@@ -316,8 +330,14 @@ def main():
                     if a.sequential and pending:launch(pending.pop(0),0)
             time.sleep(2)
         if any(jobs['jobs'].get(name,{}).get('status')=='failed' for name in commands):raise RuntimeError('Some methods need repair; inspect jobs.json and logs, then --resume')
+    except BaseException as error:
+        for name in active:
+            jobs['jobs'][name].update(status='interrupted',error=str(error),finishedAt=time.time())
+        persist()
+        raise
     finally:
-        for child,_ in active.values():child.terminate()
-        if bridge is not None:bridge.terminate();bridge.wait(timeout=15)
+        for child,_ in active.values():stop_process(child)
+        if bridge is not None:stop_process(bridge)
+        signal.signal(signal.SIGTERM,previous_signal)
 
 if __name__=='__main__':main()
