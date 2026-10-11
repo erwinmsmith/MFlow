@@ -172,3 +172,39 @@ for (const variant of ['fixed-heterogeneous', 'fixed-homogeneous'] as const) {
     assert.equal(original.organization!.agentTemplates[1].profile.tools.length, 0);
   });
 }
+
+for (const variant of ['fixed-bfcl-heterogeneous','fixed-bfcl-homogeneous'] as const) {
+  test(`${variant} reuses one executor across turns and preserves recovery and role contracts`,async()=>{
+    const original=source(),solver=original.organization!.agentTemplates!.find(t=>t.id==='solver')!;
+    const runner={...structuredClone(solver),id:'turn_runner',composition:textReviewer,
+      profile:{...structuredClone(solver.profile),objective:'Execute only the assigned public turn.',private_context:'Per-turn role'}};
+    original.organization!.agentTemplates=[solver,runner];
+    original.composition=`return loop({id:'mas',plan:function*(ctx){
+  const rootId='root';
+  for(let stage=0;stage<3;stage++){
+    const turn=stage;
+    const childId='turn_'+turn+'_'+stage;
+    if(!ctx.agents.some(a=>a.profile.id===childId)){
+      ctx.spawnTemplate('turn_runner',childId,rootId);
+    }
+    yield* ctx.runAgent(childId,{turn},'agent');
+  }
+  return (yield* ctx.runAgent(rootId,{instruction:'Recover unfinished work only'},'agent')).candidate_answer;
+}});`;
+    const before=JSON.stringify(original),candidate=ablationStrategy(original,variant),calls:SampleInput[]=[];
+    const result=await run(candidate,{async invoke(input){calls.push(input);
+      return {message:{role:'assistant',content:'Done'},finishReason:'stop',usage:{totalTokens:20}};
+    }});
+    assert.deepEqual(calls.map(c=>c.metadata?.agentId),['fixed_turn_runner','fixed_turn_runner','fixed_turn_runner','root']);
+    assert.equal(result.agents.length,2);assert.equal(result.actualTokens,80);
+    assert.ok(!JSON.stringify(calls).includes('HIDDEN-REFERENCE'));
+    assert.equal(JSON.stringify(original),before);assert.deepEqual(candidate.prompts,original.prompts);
+    if(variant==='fixed-bfcl-heterogeneous')assert.deepEqual(candidate.organization,original.organization);
+    else for(const template of candidate.organization!.agentTemplates!){
+      assert.equal(template.composition,solver.composition);
+      for(const key of ['tools','nodes','reasoning'] as const)assert.deepEqual(template.profile[key],solver.profile[key]);
+      assert.equal(template.profile.objective,original.organization!.agentTemplates!.find(t=>t.id===template.id)!.profile.objective);
+    }
+    assert.throws(()=>ablationStrategy({...original,composition:original.composition!.replace("const childId='turn_'+turn+'_'+stage;", "const childId='unexpected';")},variant),/frozen per-turn/);
+  });
+}

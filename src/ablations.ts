@@ -1,12 +1,13 @@
 import { strategySchema, type Strategy } from './types.js';
 
 /** Frozen routing ablations; profiles, agent programs and prompts stay inherited. */
-export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform' | 'fixed-heterogeneous' | 'fixed-homogeneous' | 'fixed-drop-heterogeneous' | 'fixed-drop-homogeneous' | 'fixed-mbpp-heterogeneous' | 'fixed-mbpp-homogeneous'): Strategy {
+export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-full' | 'fixed-uniform' | 'fixed-heterogeneous' | 'fixed-homogeneous' | 'fixed-drop-heterogeneous' | 'fixed-drop-homogeneous' | 'fixed-mbpp-heterogeneous' | 'fixed-mbpp-homogeneous' | 'fixed-bfcl-heterogeneous' | 'fixed-bfcl-homogeneous'): Strategy {
   const templates = source.organization?.agentTemplates ?? [];
+  const bfcl = variant === 'fixed-bfcl-heterogeneous' || variant === 'fixed-bfcl-homogeneous';
   const drop = variant === 'fixed-drop-heterogeneous' || variant === 'fixed-drop-homogeneous';
   const mbpp = variant === 'fixed-mbpp-heterogeneous' || variant === 'fixed-mbpp-homogeneous';
   const paired = variant === 'fixed-heterogeneous' || variant === 'fixed-homogeneous';
-  const required = variant === 'single' ? ['solver'] : mbpp ? ['solver', 'reviewer', 'independent', 'oracle_probe'] : drop ? ['solver', 'independent', 'calculator', 'span_extractor', 'normalizer'] : paired ? ['solver', 'verifier'] : ['solver', 'reviewer', 'independent', 'checker'];
+  const required = variant === 'single' ? ['solver'] : bfcl ? ['solver', 'turn_runner'] : mbpp ? ['solver', 'reviewer', 'independent', 'oracle_probe'] : drop ? ['solver', 'independent', 'calculator', 'span_extractor', 'normalizer'] : paired ? ['solver', 'verifier'] : ['solver', 'reviewer', 'independent', 'checker'];
   if (source.organization?.initialBindings?.root !== 'solver' ||
       source.organization.initialAgents.length !== 1 || !source.prompts ||
       required.some(id => !templates.some(template => template.id === id)))
@@ -17,8 +18,8 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
     if (['independent','span_extractor'].includes(template.id))
       template.composition = template.composition.replaceAll('String(r.result).trim()', 'String(r.result.content).trim()');
   }
-  if (variant === 'fixed-uniform' || variant === 'fixed-homogeneous' || variant === 'fixed-drop-homogeneous' || variant === 'fixed-mbpp-homogeneous') {
-    const shared = templates.find(template => template.id === (paired || drop || mbpp ? 'solver' : 'independent'))!;
+  if (variant === 'fixed-uniform' || variant === 'fixed-homogeneous' || variant === 'fixed-drop-homogeneous' || variant === 'fixed-mbpp-homogeneous' || variant === 'fixed-bfcl-homogeneous') {
+    const shared = templates.find(template => template.id === (paired || drop || mbpp || bfcl ? 'solver' : 'independent'))!;
     for (const template of candidate.organization!.agentTemplates!) {
       template.composition = shared.composition;
       Object.assign(template.profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
@@ -26,7 +27,7 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
     for (const profile of candidate.organization!.initialAgents)
       Object.assign(profile, { tools: [...shared.profile.tools], nodes: [...shared.profile.nodes!], reasoning: shared.profile.reasoning });
   }
-  const composition = variant === 'single' ? String.raw`return loop({id:'single',plan:function*(ctx){
+  const composition = bfcl ? fixedBfclRoute(source.composition ?? '') : variant === 'single' ? String.raw`return loop({id:'single',plan:function*(ctx){
     const result=yield* ctx.runAgent('root','','agent');
     return result.candidate_answer;
   }});` : mbpp ? String.raw`return loop({id:'fixed-mbpp-library',plan:function*(ctx){
@@ -86,4 +87,17 @@ export function ablationStrategy(source: Strategy, variant: 'single' | 'fixed-fu
   }});`;
   return strategySchema.parse({ ...candidate, id: `${source.id}-${variant}`,
     composition: variant === 'fixed-uniform' ? composition.replace("id:'fixed-full'", "id:'fixed-uniform'") : composition });
+}
+
+/** Keep the searched BFCL controller, but reuse one executor for every public turn. */
+function fixedBfclRoute(composition: string): string {
+  const allocation = "const childId='turn_'+turn+'_'+stage;";
+  const spawn = "if(!ctx.agents.some(a=>a.profile.id===childId)){\n      ctx.spawnTemplate('turn_runner',childId,rootId);\n    }";
+  const root = "const rootId='root';";
+  for (const anchor of [allocation, spawn, root])
+    if (composition.split(anchor).length !== 2)
+      throw new Error('BFCL ablation requires the frozen per-turn turn_runner controller');
+  return composition.replace(root, root + "\n  ctx.spawnTemplate('turn_runner','fixed_turn_runner',rootId);")
+    .replace(allocation, "const childId='fixed_turn_runner';").replace(spawn, '')
+    .replace('via a fresh turn_runner instance', 'via the fixed turn_runner instance');
 }
