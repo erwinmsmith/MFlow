@@ -24,3 +24,9 @@ BFCL 是有状态多轮任务，固定的是成员及交互关系，仍按公开
 运行 `npm run build` 后，通过 `scripts/prepare_ablations.mjs --source <R29 bundle> --out <new directory> --variant fixed-bfcl-heterogeneous`（或 `fixed-bfcl-homogeneous`）生成冻结 bundle。构建器严格匹配 R29 的按轮次分配结构，不支持时拒绝修改。
 
 使用同一冻结 actor 的 `dist/src/cli.js evaluate --benchmark bfcl --protocol standard --bundle <bundle> --out <new output> --concurrency 8`，存在 manifest 时加 `--resume`。数据、环境及启动/运行收据位于实验目录，不提交凭据或结果到源码仓库。当前入口为 `runs/current-experiments.json` 的 `localDeepSeek.bfclMFlowR29Ablations`。
+
+## 冻结修复加载与启动核验
+
+旧 `tool-history-20261010/install.mjs` 仅在命令参数含 `/runs/bfcl/MFlow/` 时加载。此次最终输出采用 `<variant>/runs/bfcl/MFlow/test`，日志必须同时确认 tool-history 和 storage 两个修复。另用同一冻结执行器、两个实际 bundle 和无付费的三轮 fixture 验证：只创建一个固定子 agent、连续复用三轮、异构输入包含 turn_runner 专属 Assigned turn 指令，同构输入使用 solver 程序。两者图名相同，不能仅靠图名判定程序相同。
+
+首次启动未匹配该修复路径，已停止并单列为无效试跑，保留全部账本，不混入最终 test。已返回用量为异构 14.502283M、同构 15.438960M，另有异构 3 次未返回准确用量；这属于额外启动开销。详见实验目录 `invalid-startup-pilot.json`。
