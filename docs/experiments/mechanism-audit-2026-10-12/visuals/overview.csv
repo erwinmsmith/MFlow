@@ -1,0 +1,6 @@
+benchmark,lineage,testVariant,testRound,searchR1,searchBest,searchBestRound,metric,testTasks,singleTasks,spawnedTasks,singlePercent,spawnedPercent,spawnEvents,meanSpawnEvents
+MATH,deepseek_math_v8,selected_R2,R2,97.98319327731092,98.31932773109243,2,Accuracy,486,0,486,0.0,100.0,525,1.0802469135802468
+DROP,deepseek_drop,selected,R26,82.01722757634522,88.26977244977245,26,F1,800,450,350,56.25,43.75,725,0.90625
+MBPP,deepseek_mbpp,selected,R7,83.25581395348837,83.95348837209302,7,Accuracy,341,13,328,3.812316715542522,96.18768328445748,1042,3.0557184750733137
+BFCL,deepseek_bfcl,supplementary_R29,R29,71.0,77.60000000000001,31,Accuracy,600,0,600,0.0,100.0,1356,2.26
+AutomationBench,deepseek_automation_v11,frozen_R3_supplementary,v11 R3,98.8,98.9,3,Accuracy,600,494,106,82.33333333333333,17.666666666666668,128,0.21333333333333335
