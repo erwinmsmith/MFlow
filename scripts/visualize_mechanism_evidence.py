@@ -198,6 +198,8 @@ def member_plot(rows, overview, out):
         value = 100*count/r['testTasks']
         if count:
             ax.scatter(0,y-.17,s=value/100*550,c=[cmap(norm(value))],edgecolors='#777',lw=.7,zorder=3)
+        else:
+            ax.scatter(0,y-.17,s=180,facecolors='white',edgecolors='#888',lw=1,linestyles=(0,(2,2)),zorder=3)
         ax.text(0,y+.33,str(count),ha='center',va='center',fontsize=11)
     for r in rows:
         x,y=roles.index(r['member']),labels.index(r['benchmark'])

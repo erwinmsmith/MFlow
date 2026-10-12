@@ -23,6 +23,8 @@ The compact figures omit figure-wide titles and place panel titles close to thei
 
 The leading **Single only** column counts test tasks with no SPAWN events: MATH 0/486, DROP 450/800, MBPP 13/341, BFCL 0/600, and AutomationBench 494/600. Its bubble area and color represent the fraction of all test tasks; the number is the task count. These counts include both correct and incorrect answers. The values come from [overview.csv](overview.csv).
 
+Dashed hollow circles in the Single only column mark zero tasks; their fixed size is a visibility marker, not a quantitative area.
+
 The remaining member columns overlay three measures without adding panels or increasing the canvas:
 
 - **Area:** the member category's fraction of all spawn events within that benchmark.
