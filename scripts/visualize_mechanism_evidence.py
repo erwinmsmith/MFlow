@@ -6,6 +6,7 @@ horizontal bars) and figure07/plot.py + vizlib/common.py:grouped_bars.
 Unmeasured sample/error layers and biological annotations are removed.
 """
 import argparse
+from collections import Counter
 import csv
 import json
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
@@ -102,6 +104,36 @@ def prepare(source, out):
     return overview, members, tools
 
 
+def extract_member_coverage(spec_path, out):
+    """Count each template at most once per task; raw task content stays private."""
+    specs = {r['id']: r for r in json.loads(spec_path.read_text())}
+    result = []
+    for name, lineage, variant, _ in CASES:
+        root = Path(specs[lineage]['tests'][variant])
+        source = root/'test.jsonl'
+        present, events, seen = Counter(), Counter(), set()
+        with source.open() as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                task = r['taskId']
+                if task in seen:
+                    raise ValueError(f'Duplicate task ID in {name}')
+                seen.add(task)
+                org = r.get('organization') or (r.get('execution') or {}).get('orchestration')
+                if org is None or org.get('lifecycle') is None:
+                    raise ValueError(f'Missing lifecycle evidence in {name}')
+                spawned = [e.get('templateId') or '<generated-profile>' for e in org['lifecycle'] if e.get('action') == 'SPAWN']
+                events.update(spawned)
+                present.update(set(spawned))
+        for member in sorted(events):
+            result.append(dict(benchmark=name, member=member, testTasks=len(seen),
+                               tasksWithMember=present[member], taskCoveragePercent=100*present[member]/len(seen),
+                               spawnEvents=events[member]))
+    export(out/'member-task-coverage.csv', result)
+
+
 def overview_plot(rows, out):
     # Figure 19 panel order, x positions, palette, and layering are retained.
     # Height is reduced for five benchmark rows instead of 36 cell types.
@@ -149,16 +181,32 @@ def member_plot(rows, overview, out):
     # Reuse Figure 19's categorical bubble matrix and area encoding.
     # Auxiliary panels are removed; the matrix reclaims their horizontal space.
     c = Canvas(1026,466); ax = c.ax([190,16,807,320]); clean(ax,True)
+    coverage = {(r['benchmark'],r['member']):r for r in read(out/'member-task-coverage.csv')}
+    assert set(coverage) == {(r['benchmark'],r['member']) for r in rows}
+    totals = {r['benchmark']:r['testTasks'] for r in overview}
+    cmap = LinearSegmentedColormap.from_list('coverage', ['#edf3f2','#99c5bc','#286e67'])
+    norm = Normalize(0,100)
     roles=['reviewer','independent','checker','solver','calculator','normalizer','span_extractor','oracle_probe','turn_runner','verifier','<generated-profile>']
     labels=[r['benchmark'] for r in overview]; ys=np.arange(len(labels))
-    ax.set_ylim(len(labels)-.5,-.7); ax.set_yticks(ys,labels,fontsize=11)
+    ax.set_ylim(len(labels)-.5,-1.1); ax.set_yticks(ys,labels,fontsize=11)
     ax.set_xlim(-.7,len(roles)-.3)
     ax.set_xticks(range(len(roles)),[x.replace('_',' ') if x!='<generated-profile>' else 'Custom profile*' for x in roles],rotation=55,ha='right',fontsize=11)
     ax.grid(color='#e9e9e9',ls=(0,(2,7)),lw=.7,zorder=0)
     for r in rows:
         x,y=roles.index(r['member']),labels.index(r['benchmark'])
-        ax.scatter(x,y-.17,s=r['shareOfSpawnEvents']/100*650,c='#8cbbb0',edgecolors='#777',lw=.7,zorder=3)
+        evidence = coverage[(r['benchmark'],r['member'])]
+        assert int(evidence['testTasks']) == totals[r['benchmark']]
+        assert int(evidence['spawnEvents']) == r['spawnEvents']
+        assert 0 < int(evidence['tasksWithMember']) <= min(r['spawnEvents'],int(evidence['testTasks']))
+        value = float(evidence['taskCoveragePercent'])
+        assert abs(value-100*int(evidence['tasksWithMember'])/int(evidence['testTasks'])) < 1e-8
+        ax.scatter(x,y-.17,s=r['shareOfSpawnEvents']/100*550,c=[cmap(norm(value))],edgecolors='#777',lw=.7,zorder=3)
         ax.text(x,y+.33,str(r['spawnEvents']),ha='center',va='center',fontsize=11)
+    # Keep the quantitative color key inside the existing panel; no extra panel.
+    key = ax.inset_axes([.58,.88,.37,.028])
+    c.fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),cax=key,orientation='horizontal',ticks=[0,50,100])
+    key.set_xticklabels(['0%','50%','100%']); key.tick_params(labelsize=8,length=2,pad=1)
+    ax.text(.58,.925,'Test tasks with member',transform=ax.transAxes,fontsize=9,va='bottom')
     c.save(out,'02-spawned-members')
 
 
@@ -189,11 +237,17 @@ def tool_plot(rows,out):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source',type=Path,default=Path('docs/experiments/mechanism-audit-2026-10-12'))
+    p.add_argument('--members-only',action='store_true',help='Render only the member figure')
+    p.add_argument('--run-spec',type=Path,help='Optional private run spec to refresh per-task member coverage')
     a=p.parse_args(); out=a.source/'visuals'; out.mkdir(exist_ok=True)
     plt.rcParams.update({'font.family':'DejaVu Sans','font.size':12,'axes.linewidth':1.3,'svg.fonttype':'none','pdf.fonttype':42})
     overview,members,tools=prepare(a.source,out)
-    overview_plot(overview,out); member_plot(members,overview,out); tool_plot(tools,out)
-    print(f'Rendered 3 figures (PNG/SVG/PDF) and 3 source tables in {out}')
+    if a.run_spec:
+        extract_member_coverage(a.run_spec,out)
+    member_plot(members,overview,out)
+    if not a.members_only:
+        overview_plot(overview,out); tool_plot(tools,out)
+    print(f'Rendered {1 if a.members_only else 3} figures (PNG/SVG/PDF) in {out}')
 
 
 if __name__=='__main__':main()

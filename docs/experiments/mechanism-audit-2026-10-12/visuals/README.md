@@ -19,9 +19,17 @@ The compact figures omit figure-wide titles and place panel titles close to thei
 
 ![Spawned members](02-spawned-members.png)
 
-[SVG](02-spawned-members.svg) · [PDF](02-spawned-members.pdf) · [Data](members.csv)
+[SVG](02-spawned-members.svg) · [PDF](02-spawned-members.pdf) · [Spawn counts](members.csv) · [Task coverage](member-task-coverage.csv)
 
-Numbers count SPAWN events, not unique task IDs or successful agent completions. Bubble area is each role's fraction of the row's total spawn events, making member choices comparable across test sets of different sizes. Blank cells mean no observed events for that role.
+The single matrix overlays three measures without adding panels or increasing the canvas:
+
+- **Area:** the member category's fraction of all spawn events within that benchmark.
+- **Color:** the percentage of all test tasks in which that member category is spawned at least once. Repeated spawns within a task count once for this measure. Darker colors indicate broader task coverage.
+- **Number:** total SPAWN events, including repeated spawns within the same task.
+
+Blank cells mean no observed events for that role. These measures describe member selection, not successful completion of each spawned agent.
+
+The coverage layer comes from a fresh offline pass over the same frozen test lifecycle traces. It is matched to the original event totals and task counts before rendering. For example, BFCL's `turn_runner` occurs in all 600 tasks but is spawned 1,356 times. AutomationBench's `verifier` accounts for 94/128 (73.44%) spawn events while appearing in only 94/600 (15.67%) test tasks. MBPP's `oracle_probe` appears in 303/341 (88.86%) tasks, with 309 spawn events. The added color layer distinguishes broad use across tasks from concentration within the subset of tasks that spawn agents.
 
 `Custom profile` means an event without a template ID. DROP, MBPP, and AutomationBench respectively have 20, 87, and 21 such events. This is evidence of spawning outside a named template; it does not alone identify a new internal graph. Template IDs describe member identities, not a guarantee of identical reasoning on every execution.
 
@@ -62,8 +70,11 @@ uv run --no-project --with matplotlib python scripts/visualize_mechanism_evidenc
 
 The script reads only the public aggregate `rounds.csv`, `search-mechanisms.csv`, and `test-mechanisms.csv` in the parent directory. `--source <audit-directory>` supports another audit with the same lineage/variant keys. No private experiment paths are required.
 
+The member figure additionally reads the included `member-task-coverage.csv`. Add `--members-only` to update just that figure. To refresh coverage from original private traces, use `--members-only --run-spec <private-run-paths.json>`; the spec has the same format as the audit script. This optional operation exports aggregate counts only, without task IDs, questions, answers, or trace text.
+
 - `overview.csv`: selected test variant, search scores in percent, task counts, routing percentages, spawn-event count, and mean spawn events per task.
 - `members.csv`: benchmark, frozen test round, member/template label, spawn-event count, and within-benchmark share in percent.
+- `member-task-coverage.csv`: benchmark, member/template label, full test-task count, number and percentage of tasks with that member, and the matching spawn-event count.
 - `tools.csv`: benchmark/stage, all observed episodes, registry and usage coverage, and the three generated-tool counts. Empty counts mean unknown.
 
 All figures are exported as PNG, SVG, and PDF. No simulated observations, significance tests, or fabricated error bars are added.
@@ -72,4 +83,4 @@ All figures are exported as PNG, SVG, and PDF. No simulated observations, signif
 
 Adapted from the data-viz skill's **Figure 19** (`plot.py`: paired endpoints, aligned bubble matrix and horizontal bars) and **Figure 07** (`plot.py` and `vizlib/common.py:grouped_bars`). The original code was copied into a private preparation workspace before adaptation. The script retains the horizontal panel order, muted blue/green palette, area encoding, and grouped-bar palette. Legends are moved inside the panels at the user's request.
 
-Figure 19's height is reduced for five benchmarks instead of 36 rows. The member matrix reclaims unused auxiliary-panel space. Figure 07 reclaims the external legend space and removes unmeasured replicate dots, error bars, P-values, and biological labels. Explanatory notes live in this document; shorter canvases reduce whitespace. Axis values, legends, and labels describe actual MFlow measures. The installed templates are unchanged.
+Figure 19's height is reduced for five benchmarks instead of 36 rows. The member matrix reclaims unused auxiliary-panel space and uses the template's color-plus-area encoding for task coverage and event share, with an in-panel color key. Its canvas remains 1026 × 466 layout pixels. Figure 07 reclaims the external legend space and removes unmeasured replicate dots, error bars, P-values, and biological labels. Explanatory notes live in this document; shorter canvases reduce whitespace. Axis values, legends, and labels describe actual MFlow measures. The installed templates are unchanged.
