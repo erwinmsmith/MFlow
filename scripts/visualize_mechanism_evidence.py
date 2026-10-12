@@ -105,10 +105,10 @@ def prepare(source, out):
 def overview_plot(rows, out):
     # Figure 19 panel order, x positions, palette, and layering are retained.
     # Height is reduced for five benchmark rows instead of 36 cell types.
-    c = Canvas(1026, 510)
-    ax = c.ax([190, 98, 482, 332])
-    expr = c.ax([686, 98, 184, 332])
-    bar = c.ax([881, 98, 116, 332])
+    c = Canvas(1026, 442)
+    ax = c.ax([190, 30, 482, 332])
+    expr = c.ax([686, 30, 184, 332])
+    bar = c.ax([881, 30, 116, 332])
     ys = np.arange(len(rows))
     for aa in [ax, expr, bar]:
         clean(aa, True); aa.set_ylim(len(rows)-.45, -1.15); aa.set_yticks(ys)
@@ -122,9 +122,9 @@ def overview_plot(rows, out):
     ax.scatter(best, ys, c='#8cbbb0', edgecolors='#46665e', s=40, zorder=4)
     for y, r in enumerate(rows):
         ax.text(66, y-.24, f"{r['searchR1']:.2f} → {r['searchBest']:.2f}%  (+{r['searchBest']-r['searchR1']:.2f} pp)", fontsize=10)
-    ax.set_title('A  Search outcomes', loc='left', fontsize=15, pad=17)
+    ax.set_title('A  Search outcomes', loc='left', fontsize=15, pad=5)
     ax.set_xlabel('Search accuracy / DROP F1 (%)', fontsize=12, labelpad=10)
-    expr.set_title('B  Test routing', fontsize=15, pad=17)
+    expr.set_title('B  Test routing', fontsize=15, pad=5)
     expr.set_xlim(-.5,1.5); expr.set_yticklabels([])
     expr.set_xticks([0,1],['Single','Spawned'], fontsize=11)
     for y, r in enumerate(rows):
@@ -132,14 +132,13 @@ def overview_plot(rows, out):
             value=r[field]
             expr.scatter(x,y-.18,s=value/100*500,c=color,edgecolors='#777',lw=.7,zorder=3)
             expr.text(x,y+.30,f'{value:.1f}%',ha='center',va='center',fontsize=10)
-    bar.set_title('C  Spawning', fontsize=15,pad=17)
+    bar.set_title('C  Spawning', fontsize=15,pad=5)
     bar.set_yticklabels([]); bar.set_xlim(0,4.6); bar.set_xticks([0,2,4])
     bar.grid(axis='x',color='#eee',ls=(0,(2,5)),lw=.7)
     for i,r in enumerate(rows):
         bar.barh(i,r['meanSpawnEvents'],.32,color='#9dc9d8',edgecolor='none',zorder=3)
         bar.text(r['meanSpawnEvents']+.1,i,f"{r['meanSpawnEvents']:.2f}",va='center',fontsize=10)
     bar.set_xlabel('Children\nper test task',fontsize=11,labelpad=10)
-    c.text(30,22,'MFlow: search outcomes and adaptive execution',fontsize=21,weight='bold',va='top')
     ax.legend([Line2D([],[],marker='o',ls='',color='black'),Line2D([],[],marker='o',ls='',color='#8cbbb0')],
               ['R1 search mean','Best completed search mean'],loc='upper left',frameon=False,ncol=2,fontsize=10,
               handletextpad=.4,columnspacing=1.2)
@@ -149,7 +148,7 @@ def overview_plot(rows, out):
 def member_plot(rows, overview, out):
     # Reuse Figure 19's categorical bubble matrix and area encoding.
     # Auxiliary panels are removed; the matrix reclaims their horizontal space.
-    c = Canvas(1026,530); ax = c.ax([190,80,807,320]); clean(ax,True)
+    c = Canvas(1026,466); ax = c.ax([190,16,807,320]); clean(ax,True)
     roles=['reviewer','independent','checker','solver','calculator','normalizer','span_extractor','oracle_probe','turn_runner','verifier','<generated-profile>']
     labels=[r['benchmark'] for r in overview]; ys=np.arange(len(labels))
     ax.set_ylim(len(labels)-.5,-.7); ax.set_yticks(ys,labels,fontsize=11)
@@ -160,14 +159,13 @@ def member_plot(rows, overview, out):
         x,y=roles.index(r['member']),labels.index(r['benchmark'])
         ax.scatter(x,y-.17,s=r['shareOfSpawnEvents']/100*650,c='#8cbbb0',edgecolors='#777',lw=.7,zorder=3)
         ax.text(x,y+.33,str(r['spawnEvents']),ha='center',va='center',fontsize=11)
-    c.text(30,22,'Which members did MFlow spawn?',fontsize=22,weight='bold',va='top')
     c.save(out,'02-spawned-members')
 
 
 def tool_plot(rows,out):
     # Figure 07 grouped bars; the legend moves inside to reclaim unused space.
     # Provided counts replace means; unmeasured samples/error bars are omitted.
-    c=Canvas(1026,520); ax=c.ax([84,85,918,345]); clean(ax)
+    c=Canvas(1026,451); ax=c.ax([84,16,918,345]); clean(ax)
     observed=[r for r in rows if r['registeredGeneratedTools'] is not None]
     groups=['Registered','Successful calls','Cross-agent calls']
     fields=['registeredGeneratedTools','successfulGeneratedToolCalls','crossAgentGeneratedToolCalls']
@@ -185,7 +183,6 @@ def tool_plot(rows,out):
     ax.legend([Patch(fc=cc,ec='#555',lw=.9) for cc in COLORS],groups,title='Generated tools',
                  loc='upper right',frameon=False,fontsize=11,title_fontsize=12,
                  handlelength=1.2,labelspacing=.7,handletextpad=.5)
-    c.text(30,22,'Autonomous tool creation, execution and reuse',fontsize=22,weight='bold',va='top')
     c.save(out,'03-generated-tools')
 
 

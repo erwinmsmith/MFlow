@@ -2,7 +2,7 @@
 
 These figures summarize the existing 2026-10-12 audit. No model requests or new evaluations were made. They show observed search outcomes, adaptive spawning, member choices, and working tool creation/reuse. The [full audit](../README.md) retains all indexed lineages and fixed-MAS variants.
 
-The compact figures use benchmark-only row labels, separated and centered bubble/count labels, and in-panel legends. Explanatory captions are provided below rather than embedded in the images. The underlying CSV values are unchanged.
+The compact figures omit figure-wide titles and place panel titles close to their borders. They use benchmark-only row labels, separated and centered bubble/count labels, and in-panel legends. Explanatory captions are provided below rather than embedded in the images. The underlying CSV values are unchanged.
 
 ## 1. Search outcomes and adaptive execution
 
