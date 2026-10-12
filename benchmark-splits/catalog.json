@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "release": "mflow-splits-v1",
+  "entries": [
+    {
+      "benchmark": "drop",
+      "protocol": "aflow-fixed-v1",
+      "manifest": "drop/aflow-fixed-v1/manifest.json",
+      "manifestSha256": "8a28af89122d8f89721c20d084513aa70f13ae1f2b1ac6df40acac1d6fec9a0d"
+    },
+    {
+      "benchmark": "humaneval",
+      "protocol": "aflow-fixed-v1",
+      "manifest": "humaneval/aflow-fixed-v1/manifest.json",
+      "manifestSha256": "9daedfe86618925949b904803b85bb246a46d028fe53a21682950fab5d85bc52"
+    },
+    {
+      "benchmark": "mbpp",
+      "protocol": "aflow-fixed-v1",
+      "manifest": "mbpp/aflow-fixed-v1/manifest.json",
+      "manifestSha256": "56619827b873c5cc4091de94cc3c6bd3220b370c2563308de8e503888ea91a54"
+    },
+    {
+      "benchmark": "gsm8k",
+      "protocol": "aflow-fixed-v1",
+      "manifest": "gsm8k/aflow-fixed-v1/manifest.json",
+      "manifestSha256": "cee1ff039facaeaaf18dd7db3131dfe9242063477746fb6faa6c89cf4b8eb9b6"
+    },
+    {
+      "benchmark": "math",
+      "protocol": "aflow-fixed-v1",
+      "manifest": "math/aflow-fixed-v1/manifest.json",
+      "manifestSha256": "7a4835925bcb98f11b08cadfaa28ec0da00a0a42a964646f3ce1c9ce120bcc36"
+    },
+    {
+      "benchmark": "humaneval_plus",
+      "protocol": "humaneval-plus-aflow-v1",
+      "manifest": "humaneval_plus/humaneval-plus-aflow-v1/manifest.json",
+      "manifestSha256": "4bfb3c63212e319306bca1754b5b7155874c5ebae574ddbf3a77c4713fe75937"
+    },
+    {
+      "benchmark": "bfcl",
+      "protocol": "bfcl-multiturn-family-v1",
+      "manifest": "bfcl/bfcl-multiturn-family-v1/manifest.json",
+      "manifestSha256": "c5c025d0d8bd93157717f7cb6972dade875ecc782b6da2608029768bfc32fb8e"
+    },
+    {
+      "benchmark": "automationbench",
+      "protocol": "automationbench-public-simple-v1",
+      "manifest": "automationbench/automationbench-public-simple-v1/manifest.json",
+      "manifestSha256": "5e0e8cc179aa79178c2f9f23f98e2d56a48f1015b753ba1bb4a3eff79b1796e7"
+    },
+    {
+      "benchmark": "hle",
+      "protocol": "hle-text-test-v1",
+      "manifest": "hle/hle-text-test-v1/manifest.json",
+      "manifestSha256": "2a5484e0396ec25f1832cf37e1417195aec7c94cc2f46f6ec27962b71ed7bc56"
+    },
+    {
+      "benchmark": "hle",
+      "protocol": "hle-full-test-v1",
+      "manifest": "hle/hle-full-test-v1/manifest.json",
+      "manifestSha256": "43e9d7a4f3123249099f6d0ddab4fe4164ee5dd19bcd85ebc509d1ac41d72bae"
+    },
+    {
+      "benchmark": "hle",
+      "protocol": "hle-full-holdout-v1",
+      "manifest": "hle/hle-full-holdout-v1/manifest.json",
+      "manifestSha256": "f0f371e40a5f670399bd6cab369722cae95e53ca21ed1aab5a877400e8e66510"
+    }
+  ],
+  "assetsOnly": [
+    "gaia",
+    "tau3"
+  ],
+  "notice": "Metadata only. Obtain datasets from their upstream publishers under their access terms. No model calls are needed."
+}

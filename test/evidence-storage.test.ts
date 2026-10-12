@@ -17,7 +17,7 @@ test('transparent evidence compression preserves concurrent checkpoint order and
   process.env.MFLOW_COMPRESS_EVIDENCE = '1';
   try {
     const path = join(directory, 'result.json');
-    const first = { score: 0, toolEvidence: ['中文 schemas '.repeat(10000)] };
+    const first = { score: 0, toolEvidence: ['\u4e2d\u6587 schemas '.repeat(10000)] };
     const last = { ...first, score: 1, arguments: { active: false, count: 0 } };
     await Promise.all([save(path, first), save(path, last)]);
     assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), last);

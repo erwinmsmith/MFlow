@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "hle",
+  "protocol": "hle-full-holdout-v1",
+  "upstreamLock": "data/extended-benchmarks.lock.json",
+  "upstreamLockSha256": "87f6d90769b925eeebd0e2402a47ead1a6f3b263f5b770eefc08a1510f9829a5",
+  "source": {
+    "url": "https://github.com/centerforaisafety/hle.git",
+    "revision": "22ed3074b1e7b134bcbc09028d0ba320839b0655",
+    "dataset": "cais/hle",
+    "datasetRevision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
+    "parquetSha256": "6d0ee0602e8aea6b159509577e884f48ecac7b8e3f6822a35f51335a446c726a"
+  },
+  "splitMethod": {
+    "seed": 42,
+    "searchCount": 200,
+    "stratification": [
+      "category",
+      "answerType",
+      "hasImage"
+    ],
+    "allocation": "largest remainder; SHA256(42:taskId) order"
+  },
+  "scope": "Custom stratified 200/2300 holdout; not official full-test accuracy",
+  "splits": {
+    "search": {
+      "count": 200,
+      "sha256": "0cb20b223459da16b02b41dfa312d10d5965c35c9bff427aa951cdbc955da4a8",
+      "imageCount": 28,
+      "idsFile": "search.ids.json",
+      "idsSha256": "30bbc79c6649bb7ca98d945fbefaa1e0f1b22cc3bb5962c339f2c6e98a1b6388",
+      "recordsSha256": "52abc2e022a4466614e6bb8eeb39f101693b8bfbd0320a6dea5cb502b90ccbca"
+    },
+    "test": {
+      "count": 2300,
+      "sha256": "30b966761e208558f23210536c9511f8dfac91b23e3e858a78df19a2fbf9939e",
+      "imageCount": 314,
+      "idsFile": "test.ids.json",
+      "idsSha256": "fd70aef5b278f507f4aeb1d6e8936648678fe3048163e172b2cd42aded29462a",
+      "recordsSha256": "669bed4b4e37259007034ab066b4777c33a1f222a69e13746923c7971ea502d2"
+    }
+  },
+  "knownPromptOverlaps": [],
+  "tasksSha256": "cd678e94e4edc59eb4edeb164165160506dd5aa70f27d7f3e89a970d9b1acd27"
+}

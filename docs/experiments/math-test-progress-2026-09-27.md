@@ -1,32 +1,15 @@
-# MFlow MATH test 进度与诊断
+# MATH partial test snapshot, 2026-09-27
 
-此页保留早期快照；本轮现已完成，见[完整 test 结果](math-test-complete-2026-09-27.md)。
+Snapshot at `2026-09-27T11:53:40Z`: **396/486** test tasks completed. These rates apply only to the completed subset. See [the completed report](math-test-complete-2026-09-27.md) for the eventual result.
 
-快照：2026-09-27T11:53:40.349002+00:00。本轮仍在运行，以下只覆盖前 396/486 题，不是最终准确率。
+| Within-trace stage | Correct / completed | Rate |
+| --- | ---: | ---: |
+| Root | 324 / 396 | 81.82% |
+| Before first child | 336 / 396 | 84.85% |
+| Final | 355 / 396 | 89.65% |
 
-| 同一条执行轨迹的阶段 | 正确题数 | 准确率 |
-| --- | --- | --- |
-| 主 agent 首答 | 324/396 | 81.82% |
-| 首个子 agent 执行前 | 336/396 | 84.85% |
-| 最终答案 | 355/396 | 89.65% |
+Post-derivation changes included 21 corrections and two harms. End-to-end changes included 36 corrections and five harms. These stage comparisons are not independent ablation experiments.
 
-- 派生之后的阶段：纠正 21 题，改错 2 题，净增 19 题。
-- 整条流程相对首答：纠正 36 题，改错 5 题。
-- 这是同轨迹阶段比较，包含额外推理与答案整合的效果；不等价于独立 no-spawn 消融，也不能证明优于 AFlow/DyLAN 等基线。
+394 tasks spawned 409 children. Known usage was 3,436,978 tokens, approximately 8,679 per completed task. There were 64 historical token-stop markers and 32 cases without post-spawn integration.
 
-## 当前问题
-
-1. 几乎总是派生：394/396 题，累计 409 个子 agent。当前学到的策略主要是审查、独立求解、回传整合，还没有体现出强的选择性派生能力。
-2. 成本较高：test 已用 3,436,978 tokens，均值 8,679/题。比较时必须同时报告正确率和 token。
-3. token 相关停止 64/396 题。日志把输出截断、预算预留不足等原因合并为 tokens，无法从现有记录精确区分。
-4. 32 题已派生，但没有完成后续主 agent 回合，说明子结果可能没有被最终答案利用。
-5. 主流程优势尚未建立：相同验证集上，AFlow 初始流程为 114/119（95.80%），MFlow 搜出的策略为 106/119（89.08%）。需区分内部阶段收益与跨方法竞争力，待完整 test 后比较。
-
-## 处理与后续
-
-- 当前 MFlow bundle、提示词、评分器均保持冻结；本次分析为离线重评分，没有额外模型调用。
-- 已恢复 AFlow 的成本序列化和优化器预算适配；原始 119 道验证结果复用，提前进入 test 的诊断结果隔离并计费。
-- AutoAgents 原生角色 JSON 解析失败按失败题计入并继续，不重试挑选输出。原生算法代码和提示词不改写。
-- 后续优先在验证集做基础提示词/结构化输出协议消融，检查与 AFlow 初始流程的差距；再验证选择性派生、上下文压缩、为整合预留预算等方向。当前 test 结果不用于修改本轮策略。
-
-依据：`runs/math-search-v2-20260927-02/test/test.jsonl`、离线 `test-stage-progress.json`、冻结清单及共享基线账本。公开汇总见同目录 `math-search-v2-2026-09-27.json`。
+At this snapshot, validation was AFlow 114/119 (95.80%) versus MFlow 106/119 (89.08%); this did not establish a MFlow quality improvement. Offline analysis did not change prompts or launch paid calls, and the test artifact remained frozen. An AFlow serialization repair reused all 119 initial validation results. Ordinary AutoAgents parse failures were retained rather than selectively removed from its score.

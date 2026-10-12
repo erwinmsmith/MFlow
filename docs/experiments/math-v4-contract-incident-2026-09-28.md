@@ -1,17 +1,15 @@
-# MATH v4 第一个候选的接口错误
+# MATH v4 candidate-contract incident
 
-检查时间：2026-09-28 16:31（上海）。
+Historical snapshot: 2026-09-28, 16:31 Asia/Shanghai.
 
-- 初始 round_1 的五次完整验证：98、99、97、104、99 /119，均值 **497/595 = 83.5294%**。
-- round_2 是首个优化候选；已提交 594/595 个逐题结果，其中 575 条记录 `undefined is not valid JSON`，其余 19 条也为零分。
-- 已提交记录的账本费用合计 **11,245,304 tokens**，含重试；另有被中断尝试的最终消费未知。这些数字不能解释成有效策略的推理成本。
+Round 1's five complete passes scored 98, 99, 97, 104, and 99 out of 119: **497/595 = 83.5294%**. Its valid STOP-returning artifact was retained.
 
-## 原因
+The first Round 2 candidate generated 594/595 attempted rows. Of these, 575 failed with undefined/invalid JSON output, and the other 19 also scored zero. Known charged usage was **11,245,304 tokens**, including retries, with additional interrupted usage unknown. This was an invalid execution experiment, not a meaningful zero-quality candidate score.
 
-优化模型返回 `(state) => {...}` 完整函数。旧检查器把它放进另一层函数体，仅检查 JS 语法，未检查是否返回 Decision；实际执行因此返回 undefined。候选还对 CONTINUE 使用了 DERIVE 专属的 request，并使用了接口未定义的 lowercase deficit 状态。旧适配器将接口错误当一般执行失败逐题重试，浪费了模型调用。
+## Cause and repair
 
-## 处理
+The generated full arrow function was wrapped as a function body and therefore returned undefined. Further contract mismatches included CONTINUE carrying a DERIVE request and invalid lowercase deficit fields.
 
-停止失效执行；保留原始候选、所有结果、请求/用量和错误日志，将 round_2 标记为无效技术候选并移出选择及收敛评分表。初始 round_1 的程序是合法 `return STOP`，本次规范化对其决定没有影响，因此保留五次已完成的验证，不重购模型调用。
+The invalid run was stopped. Raw logs and costs were preserved, and invalid Round 2 score-table entries were removed. Round 1 was not discarded. Recovery normalized equivalent function/body representations and checked return types, legal actions, IDs, and derivation requests on label-free fixtures before bulk evaluation. Invalid proposals received contract-only feedback.
 
-补充无 benchmark 数据的接口检查、完整函数等价规范化、模型契约修复，以及确定性策略错误的停止调度。恢复时从官方控制器下一候选继续；不手工修改失败策略来追求分数，不读取 test 标签。此前尚无有效优化候选，不能宣称搜索提升。
+The checks do not expose search/test answers or score solution quality. Subsequent continuation follows the upstream candidate loop with the original valid evaluations and incident accounting intact.

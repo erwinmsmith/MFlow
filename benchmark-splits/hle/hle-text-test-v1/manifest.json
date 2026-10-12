@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "hle",
+  "protocol": "hle-text-test-v1",
+  "upstreamLock": "data/extended-benchmarks.lock.json",
+  "upstreamLockSha256": "87f6d90769b925eeebd0e2402a47ead1a6f3b263f5b770eefc08a1510f9829a5",
+  "source": {
+    "url": "https://github.com/centerforaisafety/hle.git",
+    "revision": "22ed3074b1e7b134bcbc09028d0ba320839b0655",
+    "dataset": "cais/hle",
+    "datasetRevision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
+    "parquetSha256": "6d0ee0602e8aea6b159509577e884f48ecac7b8e3f6822a35f51335a446c726a"
+  },
+  "splitMethod": {
+    "method": "Preserve the published upstream membership and order."
+  },
+  "scope": "Pinned official full/test-only views and a separately named custom stratified search/test holdout; question images only",
+  "splits": {
+    "test": {
+      "count": 2158,
+      "sha256": "0e726b38d322d7cf08d57418c0cd6f6ea4c62c52e043b4eb7f61c339b1079b69",
+      "idsFile": "test.ids.json",
+      "idsSha256": "1509bbc1b0ec0565402f776f29e6037b6f40bed9307ee543fa42dfa870005f4a",
+      "recordsSha256": "118661efaaf266d7f513ab37d4e30ed698fd649bf99c0ef33e3c1d96b93e81e8"
+    }
+  },
+  "knownPromptOverlaps": [],
+  "tasksSha256": "dbafeb4338b855a2a3e5f407e1f2ec05331ea5da4a7ccf5337d0bf80a50f7be2"
+}

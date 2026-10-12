@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 const tasks = ['slow', 'wrong', 'failed', 'later'].map(id => taskSchema.parse({ id, prompt: id, answer: '1' }));
 
 test('history copies preserve values and isolation without quadratic string storage; streaming hashes remain identical', () => {
-  const shared={content:'工具 😀 \ud800',metadata:{ids:['one']}};
+  const shared={content:'\u5de5\u5177 😀 \ud800',metadata:{ids:['one']}};
   const value={z:[undefined,NaN,-0,shared],a:shared,omitted:undefined};
   const copy=snapshotGraphData(value);
   assert.deepEqual(copy,structuredClone(value));assert.equal(copy.a,copy.z[3]);

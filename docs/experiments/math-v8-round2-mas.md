@@ -1,84 +1,80 @@
-# MFlow v8 Round 2：提示词来源、subagent 与动态 MAS
+# MFlow v8 Round 2: prompt provenance, subagents, and dynamic MAS
 
-日期：2026-09-30（Asia/Shanghai）。这是冻结搜索产物及已完成运行的说明，不向搜索提供 test 数据，也不修改任何候选。
+Historical report dated 2026-09-30 (Asia/Shanghai), based on the frozen search artifact and completed executions. This report does not feed test data into search or modify a candidate.
 
-## 产物与选定依据
+## Artifact and selection
 
-- 当前推荐为搜索选中的 Round 2 / s2，119 道验证题完整重复 5 次，每次 117/119。
-- 后续真实 test 为 469/486（96.50%），使用工程修复后的 v3.3.1；验证来自 v3.2，未重测原验证分数。
-- 策略哈希：`3d6ba55130cb5c33b80f2f88dc0d33265509067b4e2caf92fb0f381dc45c1e69`。
-- [完整选定策略 JSON](math-v8-round2-strategy.json)：与冻结 best.json 的 strategy 字段完全一致，包含提示词、初始成员、模板、各自内部 graph/loop 和 MAS 控制代码。
-- [全部 Round 1–9 候选 JSON](math-v8-search-candidates.json)：保留每个候选的完整结构，供查看；Round 9 未完成，Round 6 有原生 REFLECT 输出契约失败，不应把这两个当成有效推荐。
-- 原始冻结 bundle：`runs/math-v8-round2-test-repaired-20260930-02/best.json`。
-- 选定策略中的 `rules:[unused/STOP]` 是兼容结构；本候选实际由 `composition` 返回的 Ditto loop 控制。不能只读 rules 就判断没有派生。
+- Search selected Round 2 / s2. All five complete validation passes scored 117/119 (98.32%).
+- Final test scored 469/486 (96.50%) using repaired runtime v3.3.1. Validation used v3.2 and was not rerun.
+- Strategy SHA-256: `3d6ba55130cb5c33b80f2f88dc0d33265509067b4e2caf92fb0f381dc45c1e69`.
+- [Selected strategy JSON](math-v8-round2-strategy.json) exactly preserves the frozen bundle's strategy: prompts, initial member, templates, internal programs, and MAS composition.
+- [Rounds 1–9](math-v8-search-candidates.json) retain complete candidate structures. Round 9 was incomplete and Round 6 encountered a native REFLECT contract failure; neither is a validated recommendation.
+- Original bundle: `runs/math-v8-round2-test-repaired-20260930-02/best.json`.
+- The compatibility `rules:[unused/STOP]` does not control this candidate. Its `composition` returns the actual Ditto loop.
 
-## 复用了 AFlow 的什么
+## AFlow prompt reuse
 
-来源为本地 AFlow 的 `workspace/MATH/workflows/round_12/prompt.py`，工作流为同轮 `graph.py`。
+The source was AFlow's `workspace/MATH/workflows/round_12/prompt.py`, with its same-round `graph.py` workflow.
 
-1. `SOLVE_PROMPT` → MFlow `prompts.agent`：逐步求解、完整推导、以 boxed 答案结束、按题目要求输出数字/分数/字母列表。
-2. `VERIFY_PROMPT` → MFlow `prompts.review`：接收原题和完整初始推导，检查推理、计算、解释错误；纠错或确认，最后给 boxed 答案。
-3. MFlow 在 review 中额外加入一次检查后结束、受阻时说明障碍、不反复重算的指令。
-4. `integrate`、`factory`、`retrieve` 以及各 agent 的 profile 和动态派生控制是 MFlow 的初始设计或后续搜索产物，不是 AFlow Round 12 的这两段提示词。
+1. `SOLVE_PROMPT` became `prompts.agent`: stepwise derivation and a concise final boxed answer in the required format.
+2. `VERIFY_PROMPT` became `prompts.review`: inspect the original problem and complete initial derivation, correct or confirm it, and return a boxed answer.
+3. MFlow added a stopping instruction: check consequential steps once, explain concrete obstacles, and avoid repeated recalculation.
+4. `integrate`, `factory`, `retrieve`, member profiles, and dynamic spawning were MFlow seed/search artifacts, not those two AFlow prompts.
 
-这是按源码提示词文本迁移的初始化，实际请求还拼接原题、显式路由的证据、目标、能力、推理方式、输出要求、停止条件和 private_context；并非复制 AFlow 的完整请求。AFlow 原工作流固定执行 solve → revise → 返回第二次结果。MFlow 继承这条初始路径，并按中间答案决定是否增派成员。
+Requests additionally contain the problem, explicitly routed evidence, objectives, capabilities, reasoning/output contracts, stopping instructions, and private context. This is prompt-text transfer, not a copy of the entire AFlow request. AFlow's selected workflow always solves then revises; MFlow retains that initial path and conditionally adds members.
 
-Round 2 与 Round 1 的五段全局提示词完全一致；solver、reviewer、independent 模板也完全一致。Round 2 的新增内容是 checker 模板及其路由。不能将整个库都称为 Round 2 新搜索生成。
+Round 2 inherited all five global prompts and the solver/reviewer/independent templates unchanged from Round 1. Its addition was the checker template and routing. Do not attribute the entire library to Round 2 optimization.
 
-## 推荐 MAS 与派生条件
+## Recommended structure and conditions
 
 ```mermaid
 flowchart TD
-  A[原题] --> B[root / solver：完整求解]
-  B --> C[spawn reviewer：原题与 root 完整推导]
-  C --> D{两者非空且答案字符串一致?}
-  D -->|是| R[返回 reviewer 答案]
-  D -->|否| E[spawn independent：原题与独立求解指令]
-  E --> F{与 root 或 reviewer 一致?}
-  F -->|是| S[返回 independent 答案]
-  F -->|否| G[spawn checker：原题与已有完整推导]
-  G --> H{与任一已有答案一致?}
-  H -->|是| T[返回 checker 答案]
-  H -->|否| I[root 再次执行：整合完整推导]
-  I --> U[返回整合答案或候选回退]
+  A[Original problem] --> B[Root solver: complete derivation]
+  B --> C[Spawn reviewer with root derivation]
+  C --> D{Nonempty answers agree?}
+  D -->|Yes| R[Return reviewer answer]
+  D -->|No| E[Spawn independent with original problem]
+  E --> F{Agrees with either earlier answer?}
+  F -->|Yes| S[Return independent answer]
+  F -->|No| G[Spawn checker with available derivations]
+  G --> H{Agrees with any earlier answer?}
+  H -->|Yes| T[Return checker answer]
+  H -->|No| I[Root integrates derivations]
+  I --> U[Return integration or fallback]
 ```
 
-- 每題只初始化 root，并绑定 solver。其余模板随控制条件按需实例化，parent 均为 root。
-- 每个下游成员结束后调用 dormant；这释放活动状态，不改变其已保存的证据。
-- independent 开始时不接收前两者的推导或答案；checker 接收有答案的既有成员完整推导，并专注原题约束。
-- answerKey 提取 boxed 答案并去除空白后作字符串比较，不调用数学 grader，也不读取标准答案。等价表达不同可能增派成员；相同答案也不保证正确。
-- 若最终没有任何非空候选则返回空串；只有一个非空候选则直接返回；有多个且仍未解决才由 root 使用 integrate 提示词再次求解。整合空答案时按 checker → reviewer → independent → 原 root 回退。
-- 这是串行、带条件分支的动态 MAS。当前推荐没有节点级跨 agent 交织、并行辩论、递归生成子问题树或推理期间改变 profile 的代码。固定的是可复用程序和模板，实际成员数量与路径取决于当前题目输出。
-- 分支以答案分歧/缺失为主，不使用置信度、评分器、test 正确答案或自报效用。
+Each task initializes only root, bound to solver. Every later member is spawned with root as parent and becomes dormant after its turn; saved evidence remains available. Independent initially sees neither earlier answer nor derivation. Checker sees available full derivations and focuses on original constraints.
 
-## 实际 test 中是否执行了这些分支
+`answerKey` extracts the boxed answer and removes whitespace for string comparison. It does not use a mathematical grader or reference answer. Equivalent expressions may disagree as strings; shared wrong answers can still stop early.
 
-以下仅作运行报告，不反馈搜索：
+With no nonempty answers, return empty text; with one, return it. Multiple unresolved answers trigger root integration. Empty integration falls back in checker → reviewer → independent → original-root order.
 
-| 执行路径 | 题数 |
-|---|---:|
+This selected program is serial with conditional escalation. It contains no parallel debate, node-level cross-agent interleaving, recursive subproblem generation, or runtime profile revision. The program/templates are frozen; realized membership and route depend on the task outputs.
+
+## Observed test paths
+
+| Path | Tasks |
+| --- | ---: |
 | root → reviewer | 458 |
 | root → reviewer → independent | 17 |
 | root → reviewer → independent → checker | 11 |
 
-root 和 reviewer 各执行 486 题；independent 执行 28 题；checker 执行 11 题。root 最后的整合分支在这次 test 中没有触发。工具执行/观察共 130 次（arithmetic: 9, python: 121，包含失败后可纠正的观察）。这些计数证明分支使用情况，不能单独证明某一 subagent 对准确率的因果贡献。
+Root and reviewer each ran on 486 tasks, independent on 28, and checker on 11. Final root integration never triggered in this test. There were 130 tool execution/observation events: nine arithmetic and 121 Python, including recoverable failures. These counts establish usage, not each member's causal accuracy contribution.
 
-## 各成员的能力与内部图
+## Member capabilities
 
-| 模板 / 实例 | 来源 | 推理与工具 | 实际内部结构 |
-|---|---|---|---|
-| solver / root | Round 1 种子，Round 2 原样继承 | cot；无工具权限 | CONTEXT.LOAD → SAMPLE；通常一次完整推导 |
-| reviewer | Round 1 种子，Round 2 原样继承 | cot；无工具权限 | 单个 SAMPLE，读取原题及初始推导 |
-| independent | Round 1 种子，Round 2 原样继承 | react；arithmetic、python | LOAD → SAMPLE → 若请求工具则 TOOL → OBSERVE → 回到 SAMPLE |
-| checker | Round 2 新增 | react；arithmetic、python | 自己的 check loop；LOAD → SAMPLE → TOOL → OBSERVE → SAMPLE |
+| Template / instance | Origin | Reasoning and tools | Internal program |
+| --- | --- | --- | --- |
+| solver / root | Round 1 seed, inherited | cot; no tools | CONTEXT.LOAD → SAMPLE |
+| reviewer | Round 1 seed, inherited | cot; no tools | SAMPLE on problem and initial derivation |
+| independent | Round 1 seed, inherited | react; arithmetic/Python | LOAD → SAMPLE → optional TOOL → OBSERVE → repeat |
+| checker | Added in Round 2 | react; arithmetic/Python | Separate check loop with the same node categories |
 
-solver 和 independent 的模板代码相同，但 profile、工具权限和输入证据不同。checker 使用同类工具循环结构与不同目标、私有方法指令；当前推荐没有为所有成员搜索出完全不同的复杂拓扑。cot/react 是 profile 描述；真正控制执行的是下方 graph/loop 代码。
+Solver and independent share template code but differ in profile, permissions, and evidence. Checker uses its own objective/private method instructions. cot/react are profile descriptions; the programs below control actual execution. This candidate did not discover a distinct complex topology for every member.
 
-所有模型与工具执行由发布的 `@codesoul-co/ditto@0.1.1` 公共能力完成，部署模型为 deepseek-flash。spawnTemplate 只实例化 profile 并绑定模板，实际模型调用发生在随后 runAgent 的 Ditto 节点。
+Model and tool execution used public `@codesoul-co/ditto@0.1.1` and DeepSeek Flash. `spawnTemplate` creates/binds a profile; the subsequent `runAgent` nodes execute it. This selected policy did not invoke factory/retrieve, generate fresh profiles per task, or register persistent shared tools. Isolated Python execution is not evidence of creating a new reusable tool.
 
-当前选中策略没有调用 factory/retrieve，没有在每题里用模型重新创造一个 profile；也没有创建或注册可跨 agent 持久复用的新工具。Python 是当前工具中的隔离代码执行，不能称为新增持久化工具。
-
-## 完整 MAS 控制代码（冻结原文）
+## Complete MAS composition (frozen text)
 
 ```javascript
 function solution(output){
@@ -111,7 +107,7 @@ return loop({id:'adaptive-mas',plan:function*(ctx){
 }});
 ```
 
-## 全部提示词（冻结原文）
+## All prompts (frozen text)
 
 ### agent
 
@@ -153,7 +149,7 @@ Problem:
 Choose a relevant reusable agent program and assign a concrete mathematical objective and method. Do not choose by a confidence score.
 ```
 
-## 初始 root profile（冻结原文）
+## Initial root profile (frozen text)
 
 ```json
 {
@@ -172,7 +168,7 @@ Choose a relevant reusable agent program and assign a concrete mathematical obje
 }
 ```
 
-## 模板 solver（冻结原文）
+## Template: solver (frozen text)
 
 Full mathematical derivation with context and sampling nodes.
 
@@ -194,7 +190,7 @@ Full mathematical derivation with context and sampling nodes.
 }
 ```
 
-### 内部 graph/loop
+### Internal graph/loop
 
 ```javascript
 return loop({id:'solve',plan:function*(ctx){
@@ -222,7 +218,7 @@ return loop({id:'solve',plan:function*(ctx){
 }});
 ```
 
-## 模板 reviewer（冻结原文）
+## Template: reviewer (frozen text)
 
 Review a complete derivation against the original problem and revise it.
 
@@ -243,7 +239,7 @@ Review a complete derivation against the original problem and revise it.
 }
 ```
 
-### 内部 graph/loop
+### Internal graph/loop
 
 ```javascript
 return loop({id:'revise',plan:function*(ctx){
@@ -256,7 +252,7 @@ return loop({id:'revise',plan:function*(ctx){
 }});
 ```
 
-## 模板 independent（冻结原文）
+## Template: independent (frozen text)
 
 Independent derivation with optional exact computation, enumeration or counterexample tools.
 
@@ -283,7 +279,7 @@ Independent derivation with optional exact computation, enumeration or counterex
 }
 ```
 
-### 内部 graph/loop
+### Internal graph/loop
 
 ```javascript
 return loop({id:'solve',plan:function*(ctx){
@@ -311,7 +307,7 @@ return loop({id:'solve',plan:function*(ctx){
 }});
 ```
 
-## 模板 checker（冻结原文）
+## Template: checker (frozen text)
 
 Re-examine the problem statement and constraints to resolve disagreement between derivations.
 
@@ -338,7 +334,7 @@ Re-examine the problem statement and constraints to resolve disagreement between
 }
 ```
 
-### 内部 graph/loop
+### Internal graph/loop
 
 ```javascript
 return loop({id:'check',plan:function*(ctx){
@@ -366,26 +362,19 @@ return loop({id:'check',plan:function*(ctx){
 }});
 ```
 
-## 其他搜索轮次保留了什么
+## Other retained rounds
 
-| Round | 模板库 | 说明 |
-|---|---|---|
-| 1 | solver, reviewer, independent | 迁移初始化种子 |
-| 2 | solver, reviewer, independent, checker | 当前选定 |
-| 3 | solver, reviewer, independent, checker | 完整候选；未被选定 |
-| 4 | solver, reviewer, independent, checker | 完整候选；未被选定 |
-| 5 | solver, reviewer, decomposer, independent, checker | 含 decomposer |
-| 6 | solver, verifier, reviewer, independent, checker | 含 REFLECT verifier，但原生契约失败 |
-| 7 | solver, reviewer, independent, checker | 完整候选；未被选定 |
-| 8 | solver, reviewer, independent, checker, decomposer | 含 decomposer |
-| 9 | solver, reviewer, independent, checker, verifier | 含独立 verifier；未完成，非推荐 |
+| Round | Templates / status |
+| --- | --- |
+| 1 | solver, reviewer, independent |
+| 2 | Added checker; selected artifact |
+| 3, 4, 7 | Same four template names; not selected |
+| 5, 8 | Also included decomposer |
+| 6 | solver, verifier, reviewer, independent, checker; REFLECT fault |
+| 9 | solver, reviewer, independent, checker, verifier; incomplete |
 
-这些是各自候选的模板库和完整控制代码，不是可以随意拼接到 Round 2 的独立已验证组件。decomposer 模板名称不代表已经实现真实的递归子问题派生树；具体行为应以对应 composition 为准。
+These are retained candidates, not validated mix-and-match libraries. A template named decomposer is not by itself evidence of a recursive task tree.
 
-## 局限与可比性
+## Limitations and comparison
 
-1. root 与 reviewer 若共享同一个错误并得到相同字符串，当前策略会立即结束，不触发 independent/checker。checker 的优化说明不能覆盖其实际门控的这个局限。
-2. 本次 test 实际未触发最终 root 整合。它存在于程序中，但不能说已通过本次真实 test 验证这条分支的收益。
-3. 目前搜索获得的是按分歧升级的有限模板系统，动态性体现为派生与路由；没有实现每题重新合成任意结构的新 agent、持久化新工具或复杂跨成员节点交织。
-4. AFlow Round 12 的验证搜索产物用于初始化，属于迁移实验；其前置搜索成本与这份模板来源必须披露。
-5. 候选只按验证集选取。本文 test 路径统计与准确率只是冻结后的报告，不能用于重新选择此标准实验的候选。
+Early agreement can preserve shared mistakes. The unused integration branch cannot explain observed gains. The selected program implements finite conditional template escalation; it does not demonstrate arbitrary new graphs or tool creation. The AFlow-derived initialization is a transferred search prior and its cost/provenance must be disclosed. This document reports frozen test behavior; it is not search feedback.

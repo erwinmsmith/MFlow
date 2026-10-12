@@ -1,34 +1,31 @@
-# MFlow MATH v2 完整 test 结果
+# MATH completed test, 2026-09-27
 
-完成后核验：486 个唯一任务，成员与顺序均匹配原 AFlow test；冻结策略 s4、执行版本与评分器保持原清单。
+Historical `s4v2` frozen-policy result on the 486-task AFlow test split. Task IDs and order were verified. Two output-format interruptions resumed the same frozen artifact.
 
-- 最终成绩：**431/486（88.68%）**。
-- 全部 test 尝试累计：**4,235,308 tokens**，usage 均为 known；其中已完成题目执行 4,212,610，失败/恢复尝试 22,698。
-- 两次格式异常中断后，使用相同冻结实现恢复未完成题目。失败成本保留，已完成题目不重复选择答案。
+## Final score and cost
 
-| 同一执行轨迹的阶段 | 正确题数 | 准确率 |
-| --- | --- | --- |
-| Root 初答 | 394/486 | 81.07% |
-| 第一个子 agent 执行之前 | 410/486 | 84.36% |
-| 最终答案 | 431/486 | 88.68% |
+| Metric | Result |
+| --- | ---: |
+| Correct / total | 431 / 486 |
+| Accuracy | 88.68% |
+| Known tokens, all attempts | 4,235,308 |
+| Known tokens, completed executions | 4,212,610 |
+| Known failed/recovery tokens | 22,698 |
 
-复核阶段纠正 19、误伤 3；派生之后阶段纠正 24、误伤 3，净增 21；全流程纠正 43、误伤 6，净增 37。
+## Within-trace stages
 
-这包含额外推理和整合的作用，是同轨迹阶段比较；不能替代独立 no-spawn 消融，也不能据此宣布领先其他基线。
+| Stage | Correct | Rate |
+| --- | ---: | ---: |
+| Root answer | 394 | 81.07% |
+| Before first child | 410 | 84.36% |
+| Final answer | 431 | 88.68% |
 
-## 仍存在的执行问题
+Review corrected 19 tasks and harmed three. Later derivation corrected 24 and harmed three, for a net gain of 21 over the pre-child stage. End-to-end, 43 corrections and six harms yielded a net gain of 37 over root.
 
-- 483/486 题发生派生，共 500 个子 agent，策略仍接近普遍独立验证，选择性不足。
-- 41 题派生后没有完成 Root 的后续调用；78 题以 token 相关原因停止。旧版未细分输出截断与预算不足，新版已区分。
-- 本轮实际重试和错误需要在对比时一并报告，不能只计算成功执行成本。
+These are stages of the same recorded executions, not independently run ablation groups. Derivation occurred on 483/486 tasks, producing 500 children. On 41 tasks, no further root completion followed spawning. The old `token_stop` field appeared 78 times and was not sufficiently specific to identify one cause.
 
-## 后续运行快照
+## Contemporaneous search snapshot
 
-快照时间：2026-09-27T13:18:22.809270+00:00。
+At `2026-09-27T13:18:22Z`, v3 search scores were s0=94/119, s1=99/119, s2=107/119. Relative to s1, s2 corrected ten and harmed two; 114 tasks spawned, with two lacking subsequent integration. AFlow R1 and R2 each scored 116/119, and R3 was running. Other baseline scores were incomplete.
 
-- MFlow v3：完整验证节点 s0=94/119，s1=99/119，s2=107/119；第三个候选从 s2 继续评测，尚未 test。
-- s2 相对 s1 纠正 10、误伤 2，净增 8；114/119 题派生，2 题派生后未整合。
-- AFlow：初始 round_1 和 round_2 均为116/119，round_3 正在评测；未冻结 test。
-- DyLAN、EvoAgent 和 AutoAgents 均未完成 test。存在真实供应商输出硬上限与长调用；部分前缀的准确率不作为完整排名。
-
-原始结果位于 `runs/math-search-v2-20260927-02/`，公开结构化汇总见 [JSON](math-search-v2-2026-09-27.json)。v3 与基线采用独立目录，test 标签未用于搜索。
+See [the historical search artifact](math-search-v2-2026-09-27.json). Later results use different frozen versions and must not overwrite this record.

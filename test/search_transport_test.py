@@ -37,7 +37,7 @@ class RecoveryTest(unittest.TestCase):
     def test_compressed_evidence_is_readable_and_atomic(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'MFLOW_COMPRESS_EVIDENCE': '1'}):
             p = Path(directory) / 'log.json'
-            value = [{'schema': '中文 function schema ' * 10000, 'score': 0, 'arguments': {'a': False}}]
+            value = [{'schema': '\u4e2d\u6587 function schema ' * 10000, 'score': 0, 'arguments': {'a': False}}]
             write_evidence(p, value)
             self.assertEqual(json.loads(p.read_text()), value)
             if sys.platform == 'darwin':

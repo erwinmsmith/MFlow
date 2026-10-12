@@ -1,127 +1,65 @@
-# 单根 MAS 结构与动态派生搜索
+# Single-root MAS and dynamic derivation search
 
-本次是新的执行/搜索语义；使用 registry `@codesoul-co/ditto@0.1.2`，不需要修改 Ditto。
-正在运行的冻结快照保持原协议，不能将新根节点插入旧搜索后继续沿用其 manifest。
-HLE 按用户要求暂停并保留断点。用户随后授权启动新版 AutomationBench 搜索：先搜索，冻结最终候选后再 test，取消逐轮 test；历史逐轮结果不用于选取或优化。
+Current protocol uses registry `@codesoul-co/ditto@0.1.2`. Frozen older experiments retain their own execution identities. A new seed, guide, capability set, or runtime cannot silently replace an old manifest. HLE remains stopped unless explicitly resumed; the current experiment policy is search first, freeze, then final test.
 
-## 当前搜索协议（2026-10-05 修正）
+## Search protocol corrected on 2026-10-05
 
-MFlow 只有一棵搜索树，round 1 从一个 `root` agent 的 `dynamic-policy` 候选开始。
-AutomationBench、HLE 配置和其他 benchmark 的默认搜索入口均使用这一单根方案；
-候选验证拒绝多个初始 agent。`agentTemplates` 只是可选程序库，不会预先实例化成员。
-旧的七个初始化方案依次占据七轮的实验已停止；这不是当前协议，也不将旧分数移入新搜索。
+There is one search tree. Round 1 evaluates one `dynamic-policy` candidate with one initial `root`. Templates are available programs, not pre-instantiated members. The earlier experiment that spent seven rounds on seven initializations was stopped; those scores are not migrated into the new tree.
 
-- **round 1**：评估唯一初始候选；每题从 root 出发，按策略决定是否派生。
-- **round 2 起**：使用原 AFlow 的父节点采样、父节点经验、完整变异和重复评估。
-  父节点来自已经完成评估的历史候选，可能回到较早节点形成兄弟分支；不是强制线性链。
-- **搜索对象**：完整 MAS 程序、动态派生/停止/证据交互规则、各 agent 的节点配置与 graph/loop、
-  可复用 subagent 和工具库。新候选继承选中父节点的完整程序及真实执行反馈。
-- **多样性**：优化器收到已探索分支的结构摘要；树状拆解、并行合并、交叉上下文、异构推理和工具循环
-  是候选变异方向，不是七棵独立树。根据任务和测量反馈选择方向，不强制每题创建 agent 或工具。
-- **原生提示词适配**：保留一次一个明确改进点，去掉上游 Python 工作流的五行修改限制和十节点限制，
-  允许完整实现对应的 Ditto graph/loop、成员配置与控制代码。
-- **重复验证**：当前配置为每个候选同一搜索集的五次独立运行，五次不算五个搜索 round。
-- **停止与 test**：沿用 AFlow 原生收敛；全部搜索完成后按完整搜索重复评估的平均成绩冻结最优候选，
-  执行同一批完整 test。test 不参与提案、父节点选择或收敛，不逐轮 test。
+- Round 1 evaluates the single seed. Each task starts from root and follows the policy's derivation decisions.
+- Later rounds use upstream AFlow sampling over evaluated historical parents. A child can extend an earlier node, creating siblings rather than a mandatory chronological chain.
+- A candidate includes complete MAS code, dynamic derivation/stopping/evidence rules, member profiles, internal graph/loops, and reusable agent/tool libraries.
+- Diversity is encouraged through branch summaries and mutation directions: trees, parallel merges, context exchange, heterogeneous reasoning, and tool loops. These are search choices, not mandatory roles, seven independent trees, or required tool creation.
+- Native prompt adaptation keeps one focused improvement while removing Python-specific five-line and ten-node guidance so a complete Ditto change can be expressed.
+- Each candidate receives five independent full-search-set repetitions. Five passes are one round, not five rounds.
+- Upstream convergence selects by complete search means. Final test opens after freezing; no automatic per-round tests or test-driven proposals/selection/stopping.
 
-旧结构生成器保留供历史复现和显式消融；正式 MFlow 搜索只允许一个初始化，且必须仅含 root。
-AFlow 基线的冻结运行和已有结果不因 MFlow 协议修正而变化。
+Historical structure generators remain for explicit ablations/reproduction. Default candidate validation requires exactly one initial root. Existing AFlow baseline runs are not redefined by MFlow changes.
 
-## 工具定义与执行
+## Tool definitions and execution
 
-`tool-factory` 已移除：它把一项能力误当成了 MAS 结构。新版搜索的
-`organization.toolCreation=true` 对所有初始成员、模板实例、树的叶节点和库外派生成员生效。
-每个成员在自身的 SAMPLE → TOOL → OBSERVE 循环中可随时选择 `create_tool({definition})`，
-注册成功后下一次推理即可调用新名称；无需额外的强制设计调用，也不设专职创建者。
-创建者由 Ditto `WorkerContext.execution.nodeId` 识别，不接受模型伪造身份。
-能力只增加注册入口与 TOOL/OBSERVE 节点权限，不统一各成员的推理图或基础工具权限。
-规划成员可用 API 发现/纯计算能力创建组合工具，但不授予 AutomationBench 的写入接口。
-跨 agent 依赖消费的是工具循环完成后的证据；并行规划与树/交叉图依然保留不同结构。
+The old `tool-factory` initialization was removed because tool creation is a member capability, not a MAS topology. `organization.toolCreation=true` exposes `create_tool({definition})` to initial, template, tree-leaf, and generated members. A member can create a tool from its own SAMPLE -> TOOL -> OBSERVE loop and call the new name afterward. No dedicated creator or mandatory design call is required.
 
-SingleLLM 的 `seed` 命令明确关闭创建能力，保持直接模型调用 benchmark 原始工具的对照定义。
+Creator identity comes from Ditto `WorkerContext.execution.nodeId`, not model-supplied identity. Enabling creation adds its registry entry and required interaction nodes without homogenizing reasoning graphs or granting every API capability. Read-only planners do not gain write permissions.
 
+- `organization.toolLibrary`: ordered inherited/frozen definitions; dependencies must be available base tools or earlier definitions.
+- `ctx.registerTool(agentId,definition)`: register for this task and grant the creator access. Authorized sharing can use spawn/reconfigure.
+- `ctx.tools` and `orchestration.tools`: definitions, hashes, origins, and creators.
+- Definitions specify a `generated_` name, description, typed parameters, and implementation. Supported parameter types include string, number, integer, boolean, array, and object.
+- Python definitions expose `def run(args)` returning JSON through the existing isolated Python tool. They do not gain network, host files, or cross-call state.
+- Sequence definitions use `steps:[{tool,arguments}]`, JSON Pointer references `{"$input":"/x"}` and `{"$step":"/0/result"}`, and return the final result. Failure stops without replaying successful writes.
 
-- `organization.toolLibrary`：候选继承和冻结的有序工具定义；依赖只能指向已启用的基础工具或此前的定义。
-- `ctx.registerTool(agentId, definition)`：当前题内注册，并将名称授予创建者。可用 `ctx.reconfigure` 或 `ctx.spawn` 将该工具授予另一成员。
-- `ctx.tools`：本题工具定义、内容哈希、来源与创建者。执行记录在 `orchestration.tools` 中保留同样证据。
-- 定义具有 `name`（`generated_` 前缀）、`description`、`parameters`、`implementation`。参数声明 `name/description/type/required`，支持 string、number、integer、boolean、array、object；后两者内容为 JSON。
-- Python 定义提供 `def run(args)` 并返回 JSON 值，委托已有 `python` 工具在同一受保护容器内执行。不开放网络、宿主文件或跨调用状态。
-- Sequence 定义提供 `steps:[{tool,arguments}]`。参数中的 `{"$input":"/x"}` 读取输入，`{"$step":"/0/result"}` 读取此前步骤结果的 JSON Pointer。返回最后一步结果，失败立即停止，不自动重放写入。
+Registration and nested calls use public ToolRegistry.register/call and native INFER/INTERACTION. MFlow owns the search grammar and composition, not a replacement model/container/tool engine. Duplicate names, forward/cyclic/unknown dependencies, and create_tool dependencies are rejected. The creator must hold every dependency; cancellation and call guards propagate through nested calls.
 
-注册和每层调用均经过公开 `ToolRegistry.register/call`，模型选择与观察经过原生 INFER/INTERACTION；
-MFlow 仅定义搜索语法与依赖组合，不实现新的模型、容器或工具执行器。
-重复名称、前向依赖、循环、未知能力及以 create_tool 为依赖的定义被拒绝；创建者必须拥有依赖能力。
-每层调用纳入调用保护并传递取消信号，基础沙箱权限不因注册新名称而扩大。
+The unsearched SingleLLM seed disables creation and uses only the benchmark's original tools.
 
-## 搜索、冻结与 inference
+## Freezing and task isolation
 
-优化器可根据 **search** 的工具定义与执行反馈修改工具库、内部 agent 图和 MAS 派生程序。
-冻结的 `best.json` 携带完整 organization；`tool-library.json` 提供选中工具库的单独导出，
-与 `agent-library.json`、`organization.json` 一起标注所选轮次/策略哈希。
+Search may modify library definitions, internal programs, and derivation using search-only evidence. `best.json` freezes the complete organization. `agent-library.json`, `tool-library.json`, and `organization.json` share selected-round/strategy identities.
 
-Inference 从冻结定义重新注册工具，运行同一派生程序，仍可生成新的工具或库外成员。
-每题单独创建 registry；题内新建工具不会自动进入模板库，不会传给下一题或搜索。
-持久化的是源定义，不是题目答案、消息、世界状态或可变工具会话。
-任意外部资源的事务/回滚仍属于 `DITTO-002` 未满足部分。
+Inference reloads definitions and executes the same policy; it may generate new task-local members or tools outside the library. Each task has a fresh registry/world. Generated tools do not automatically enter future tasks or feed back into search. Persisted definitions are source artifacts, not answers, messages, or mutable sessions. General external-resource rollback remains the unresolved part of DITTO-002.
 
-验证覆盖公开 Ditto 调用、模型生成→注册→观察、成员间授权调用、定义重载、题间隔离、
-依赖/参数错误、写入前失败、嵌套调用保护、实际 Docker Python，以及树/交织节点并发。
-这些工程测试使用脚本模型，只证明执行契约，不证明准确率提升。
+Contract fixtures cover native registration/calls, model-generated definitions, authorized sharing, reload, isolation, invalid dependencies/parameters, write-before-failure protection, nested calls, Docker Python, and interleaved graphs. They are not accuracy evidence.
 
+## Monitoring and scheduling
 
-## 搜索监控与运行调度
+`scripts/automation_experiment.py` starts only final test after search. `--methods MFlow` can start a new frozen MFlow actor while other methods resume their original snapshots. Scheduler changes are recorded separately in scheduler.json; they do not redefine an actor version. Remote Qwen also uses final-only scheduling.
 
-`scripts/automation_experiment.py` 仅在搜索结束后启动最终 test，不自动提交任何逐轮测试。
-`--methods MFlow` 可以运行独立的新 MFlow 快照；`--methods AFlow DyLAN EvoAgent AutoAgents`
-可在旧快照上恢复其余方法，保持原来的配置、划分和已完成题目。调度策略写入 `scheduler.json`，
-不会把调度变化冒充为同一个 actor 版本。远端 Qwen 原调度已经是 final-only。
+Status exposes task-level derivation coverage, generated programs, tool creations, successful generated-tool calls, cross-agent graph dependencies, depth, and node failures. Composite internal dependency calls are not counted again as top-level generated-tool use. Runtime success is not proof of improved task correctness. Search curves must distinguish complete five-pass rounds from partial means. Summaries use saved search records without reading test to optimize or duplicating giant requests/world snapshots.
 
-`--status` 的 `methods.MFlow.currentValidation.organization` 报告：派生题数、生成的成员程序数、
-创建的工具数、通过原生 TOOL 节点调用生成工具的次数/成功次数、跨 agent 图依赖边、最大派生深度和节点失败。
-这里工具调用成功是运行成功，不代表任务得分提高；复合工具内部的依赖调用不重复计入该指标。
-`methods.MFlow.searchCurve` 报告每轮已完成重复数和平均得分，必须等满配置的重复次数才比较完整轮次。
-统计仅从已落盘的 search 记录汇总；不额外保存大模型请求全文、世界快照或读取 test 来指导优化。
+## Shared Ditto design guide
 
-## 2026-10-04 修正与实验边界
+`src/ditto-guide.ts` is the versioned contract for enabled public 0.1.2 APIs: Worker/node/agent distinctions; node I/O; CoT/ToT/GoT/self-consistency; reflection/integration; tool creation; Context operations; serial, parallel, tree, and interleaved composition. Unconfigured package features are not advertised as available.
 
-后加的 v6 MFlow 已按用户要求停止。它的工具创建只在专门的初始化中暴露给模型，
-不符合各 agent 均可自主创建工具的要求。新版使用新的执行版本与独立搜索目录，
-不续接 v6 的分数或父节点。旧快照与结果仅保留追溯；其他 baseline、SingleLLM 保持原协议。
-新的搜索仍复用官方 AFlow 的父节点选择、反馈与收敛控制；搜索完成后再做最终 test。
-工程测试覆盖七种结构中的实际创建/调用、生成成员和孙节点、错误修复、权限与题间隔离；
-是否主动创建有用工具、是否提高得分，需看真实 search 记录，不能由脚本模型测试推出。
+Search uses this guide. Factory calls through `ctx.textMessages(...,'factory')` or `ctx.messages(...,'factory')` include it, current members/templates, and real tool schemas. Custom design graphs can read `ctx.dittoGuide.text`; ordinary solve calls need not repeat it. Search saves ditto-guide.json; manifests, round candidates, final bundles, and execution identities retain its version/package/hash. Inference rejects missing or changed guidance before paid execution. A guide upgrade requires a separate run.
 
-## 搜索与 test 共用的 Ditto 设计指南
+## Historical deployment and storage repairs
 
-`src/ditto-guide.ts` 是唯一的版本化契约说明，依据已发布的 Ditto 0.1.2 README 与公开类型整理。
-它区分 Worker、node 和 agent，说明本项目实际启用的节点输入/输出、CoT/ToT/GoT/
-self-consistency、反思/融合、工具创建与调用、Context 加载/选择/更新/压缩，以及串行、
-并行、树状和跨 agent 节点交织的编排方式。公开包中未在当前部署配置的节点不会冒充可用能力。
+On 2026-10-04 the later v6 experiment was stopped because only its dedicated initialization exposed tool creation. A new version exposed creation to all members and used a separate search directory. Old scores and parents were not reused; baselines retained their own protocols.
 
-- 搜索优化器读取同一指南；成员派生通过 `ctx.textMessages(id,evidence,'factory')` 或
-  `ctx.messages(...,'factory')` 自动收到完整指南、当前成员、模板和真实工具 schema。
-- 自定义派生图可读取 `ctx.dittoGuide.text` 并用于设计提示词；普通解题轮次不重复注入指南。
-- 搜索启动保存 `search/ditto-guide.json`，manifest 记录哈希；每轮候选和最终 `best.json`
-  保存相同正文、版本、包版本与哈希，执行版本也包含指南哈希。
-- `infer`/`evaluate` 在付费执行前检查冻结指南与当前运行时一致；缺失或修改过的 MFlow
-  指南会拒绝运行。要升级指南，必须创建独立版本重新搜索，不能混用旧分数和新接口。
-- Test 仍可按冻结程序派生库外成员、创建题内工具与动态交互图；题内状态与测试评分
-  不会回流到搜索，也不会自动成为下一题的工具库或模板。
+Repeated structuredClone of cumulative message histories caused near-quadratic evidence storage. The repair copies mutable containers while sharing immutable strings and streams canonical hashing in chunks with unchanged bytes. It does not remove model context. A 96 MiB Node fixture covers 64 cumulative steps, isolation, and digest equivalence. Frozen runs load recorded application I/O patches with original/replacement hashes, preserving actor source, prompts, Ditto, data, and completed rows.
 
-## 2026-10-04 运行恢复：内存与磁盘故障
-
-长工具循环的每一张历史图曾用 structuredClone 复制累计消息；不可变字符串也被重复分配，
-使长上下文的记录占用随步数接近平方增长。现在只复制可变容器、共享不可变字符串，
-保留完整历史内容与隔离性；不删除模型上下文。摘要哈希改为逐块写入 SHA-256，
-与原 canonical 字节完全一致，避免再构造一份巨大的序列化字符串。
-
-单独的 96 MiB Node 进程回归覆盖 64 步累计长消息、隔离拷贝与等价哈希。
-冻结实验通过带原始/替换文件 SHA-256 的应用层 I/O 修复记录加载；原 actor 文件、
-提示词、Ditto 包与数据划分不变，不覆盖已完成题目或修改搜索策略。
-
-原生 baseline 适配器中的 OSError 现在作为基础设施故障退出，不再作为模型失败评分。
-已确认因磁盘写满导致中断、却被错误提交的结果单独留存失效记录，再从干净题目世界重试；
-正常完成但答错、模型格式错误的记录保留，不能按 test 得分选择性重跑。
+Native baseline OSError now remains an infrastructure failure. Rows proven invalid because disk writes failed are archived with provenance before retrying a fresh world. Ordinary wrong answers and model-format failures remain; test scores do not authorize selective retries.
 
 ## AutomationBench tool creation repair (2026-10-04)
 
@@ -190,20 +128,16 @@ need not belong to the frozen template library. Test outcomes never enter the
 optimizer. The separately user-selected old round 9 test runs in the old v8
 snapshot; this changed search starts a fresh independent experiment.
 
-## 2026-10-05 生成程序恢复修复
+## Generated-program recovery on 2026-10-05
 
-v10 的一题创建成员后未绑定内部程序，随后把函数当作源码、把 `ctx.agents` 属性当作函数使用。
-控制循环吞掉异常后反复重生成 556 次，最终触发供应商上下文上限；不能把这种记录当成成功派生。
+One v10 task spawned a member without binding a program, passed a function where source text was required, and called the `ctx.agents` property as a function. The controller swallowed failures and regenerated 556 times until the provider context limit. This was not successful derivation.
 
-- `spawn(profile,parent)` 仍支持为显式跨 agent graph 创建成员；`runAgent` 必须有模板绑定或源码字符串。
-  程序编译拒绝函数、生成器和对象的隐式字符串转换，错误信息说明正确的绑定入口。
-- Ditto 指南和设计提示词明确属性读取、源码字符串、绑定与复用已有成员的区别。
-- 连续三个生成阶段异常后，初始动态策略使用 root 的原始模板恢复，携带已观察到的工具结果和输出，
-  保留同一任务世界并检查剩余工作。控制输出连续三次不合法或发生上下文超限时也走同一恢复入口。
-  这是代码错误恢复保护，不限制成功执行的阶段数、派生数量或搜索轮次。
-- `ctx.structure.programs` 只给设计阶段当前绑定的源码；完整历史仍保存在执行审计与搜索反馈中。
-- 临时 `fetch failed` 与已有 socket/502 恢复一致：最多重试当前模型调用两次，保留任务世界和未知用量记录，
-  不重放已完成的工具调用。鉴权、欠费仍停止而不在调用层重试。
+`spawn(profile,parent)` remains valid for members used by explicit graphs, but runAgent requires a template or bound source string. Compilation rejects implicit conversion of functions/generators/objects. Guidance distinguishes property access, source strings, binding, and member reuse.
 
-该修复改变初始控制程序与冻结指南，使用新的 v11 完整搜索；不将 v10 的重复验证分数混入新运行。
-已有基线从各自冻结快照和任务断点继续，已完成的 test 不重跑。
+After three consecutive generated-stage failures, the seed recovers through root's original template with observed outputs/tool effects in the same world. Three malformed controller outputs or context exhaustion use the same path. This bounds fault recovery, not successful stages, agent counts, or search rounds. `ctx.structure.programs` supplies current bindings to design; the audit retains full history.
+
+Transient fetch/socket/502 failures retry the current model call at most twice without replaying successful tools. Unknown usage remains recorded. Authentication and insufficient balance stop instead of retrying. The changed seed/guide started a fresh v11 search; v10 repetition scores were not mixed. Baselines continued their own frozen checkpoints.
+
+## Capability versus observed behavior
+
+Supported derivation mechanisms do not imply that every selected policy uses them. In the BFCL R29 supplementary test, all 600 tasks spawned `turn_runner` instances from the same template (1,356 creations total); no root-only task or successfully registered generated tool was observed. See [R29 ablations](experiments/bfcl-round29-ablations-2026-10-11.md). Report the measured topology separately from the framework's broader search space.

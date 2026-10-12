@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "math",
+  "protocol": "aflow-fixed-v1",
+  "upstreamLock": "data/aflow.lock.json",
+  "upstreamLockSha256": "02933981a1324199322c2a018d1fbdbd1230c9847ae66d18c22b484a585a9092",
+  "source": {
+    "upstreamCommit": "3f457218fc716093fe53f6df8a5d5e6379d66346",
+    "url": "https://drive.google.com/uc?export=download&id=1DNoegtZiUhWtvkd2xoIuElmIi4ah7k8e",
+    "archiveSha256": "7089a373c27184ae1b67e322f8276642dab246359052989b03a27f48251ae053"
+  },
+  "splitMethod": {
+    "method": "Preserve the published upstream membership and order."
+  },
+  "scope": "Pinned AFlow release subset; not the entire original dataset.",
+  "splits": {
+    "search": {
+      "count": 119,
+      "sha256": "ea5811790a54e4b31ba6fce4660e599c33713207b1598f28aa588d59abaf7e18",
+      "idsFile": "search.ids.json",
+      "idsSha256": "df8c1021b1b09beab3f3a45114e9fe12c1886f89d62c8e24c5ff91aee94291da",
+      "recordsSha256": "d2beeb0fb6779ee09791d6ad52e881ddb177be0b5263d8451faa4cb9515b1914"
+    },
+    "test": {
+      "count": 486,
+      "sha256": "f70ee9bf452002843a7896a8297529a475e1f8f554a6bb7ae9317399ebfbec68",
+      "idsFile": "test.ids.json",
+      "idsSha256": "c7baa487ecacd5555bcfed4a06100556095a5b788848a1e7cc74be6cdc827623",
+      "recordsSha256": "ae66f173a56e977602039c35428114a83d827459dd8c97a3f5f7861574774e0f"
+    }
+  },
+  "knownPromptOverlaps": [],
+  "tasksSha256": "a8e5f010d08eee5c92464019713ba3b7a9078b4cbf39fa5178b63cc92d7227e3"
+}

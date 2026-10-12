@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "drop",
+  "protocol": "aflow-fixed-v1",
+  "upstreamLock": "data/aflow.lock.json",
+  "upstreamLockSha256": "02933981a1324199322c2a018d1fbdbd1230c9847ae66d18c22b484a585a9092",
+  "source": {
+    "upstreamCommit": "3f457218fc716093fe53f6df8a5d5e6379d66346",
+    "url": "https://drive.google.com/uc?export=download&id=1DNoegtZiUhWtvkd2xoIuElmIi4ah7k8e",
+    "archiveSha256": "7089a373c27184ae1b67e322f8276642dab246359052989b03a27f48251ae053"
+  },
+  "splitMethod": {
+    "method": "Preserve the published upstream membership and order."
+  },
+  "scope": "Pinned AFlow release subset; not the entire original dataset.",
+  "splits": {
+    "search": {
+      "count": 200,
+      "sha256": "e6ca23247f1dee75a5a7a4d65a17441e2f1be65b60b7599ddb961181767793fd",
+      "idsFile": "search.ids.json",
+      "idsSha256": "09c838b83ebed51c3c24fba942dddb73d483a0637ab8760f586ae0280db83aef",
+      "recordsSha256": "ab043cb7e5433dc154c7e9ee0fd949cc90b7ae2a288fa1f17421bf6dec6b5103"
+    },
+    "test": {
+      "count": 800,
+      "sha256": "6760b6614d2c2c68899b8492d4994698518a554ca3fc409e8f0daa96a4d5ac74",
+      "idsFile": "test.ids.json",
+      "idsSha256": "8f626a7902693d02507ae2f92e3a46cc3f3cfc656622064a354f112b6ed546f3",
+      "recordsSha256": "fccd4f45bd3558cc03692af2d065267f9aff3541fe03d2700adf061194c4f86b"
+    }
+  },
+  "knownPromptOverlaps": [
+    {
+      "searchId": "drop:563",
+      "testId": "drop:5145",
+      "promptHash": "d142d8eefddf17dc4c6b2786b206499505791a8990d7d221e24106f863978be3"
+    },
+    {
+      "searchId": "drop:5872",
+      "testId": "drop:7202",
+      "promptHash": "dcf738c75bbe59726d15d5631497bc6d39211a30052d3e0332c8f8e4dcd1d061"
+    },
+    {
+      "searchId": "drop:8540",
+      "testId": "drop:4560",
+      "promptHash": "af774a6731624ec05457c468032b13a4e14bb5f9ece4a3c8e80885419825c377"
+    },
+    {
+      "searchId": "drop:3024",
+      "testId": "drop:871",
+      "promptHash": "1ff587a57a1c61f2f1d8f61eef83a1b2bdd65c49999c897d4968e8656b3d8166"
+    },
+    {
+      "searchId": "drop:131",
+      "testId": "drop:3879",
+      "promptHash": "abd3a8aa80e8447f8afd59f5490f31e2a1a89267acb77e85b324461c782fd922"
+    }
+  ],
+  "tasksSha256": "7b18eeeef48cd07f293df5672256e5e45562182dddb5847fdcaa4ad916c99e8d"
+}

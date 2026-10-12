@@ -1,21 +1,13 @@
-# MFlow v5 长请求与响应解析错误恢复
+# MATH v5 provider-stream repair
 
-## 观察
+Historical incident, 2026-09-28. Round 1 had four complete validation passes plus 118 tasks in pass five: **594 valid rows**. No synthetic zero row replaced the unfinished task.
 
-初始节点第五次验证的 index 7 在 20:22 发出请求；21:18 返回 `Ditto agent failed: error value must be an object`，自动重跑整题；22:01 检查时第二次尝试仍未结束。四次完整验证与第五次的 118 条结果有效，未提交该题零分。首次失败及中断尝试的真实计费用量未知。
+A request at 20:22 failed at 21:18 with a non-object field error. A whole-task retry was still running at 22:01. Usage for the first failed request and any interrupted request was unknown. The exact malformed field was not established; non-object tool arguments reproduced a possible failure path in a synthetic fixture, which did not prove the production cause.
 
-错误来自发布包模型响应解析层。旧日志没有原始响应，无法确定实际哪一个字段为非对象。离线 HTTP/SSE fixture 证明非对象工具参数可以触发同样错误，这只是可复现原因之一，不能当作实际请求根因已完全确定。
+## Repair boundary
 
-## 修复
+The adapter used Ditto's public streaming interface and added progress records with task/round/pass, character/non-whitespace counts, timestamps, finish/error status, and known usage. Progress updates were approximately every two seconds and did not include credentials or response content.
 
-- DeepSeek 使用发布包 `ModelProvider.stream()`；不自行实现 SSE、HTTP provider 或工具参数解析。
-- `search/requests/<uuid>.json` 按请求记录 task/round/repeat、开始、文本字符数、非空白字符数、最后文本时间、完成/失败、错误 code 与最终已知 usage。增量落盘最多约每两秒一次，不存密钥或文本内容。
-- MeteredProvider 保留原始供应商异常；Ditto workflow 的错误包装不再吞掉 `INVALID_MODEL_OUTPUT` 等类型。
-- 供应商错误直接中断本轮控制器、保留任务断点，不再把同一道题无条件重跑五次，也不生成零分参与搜索。
-- 已有模型、提示词、策略、工具和 token 额度不变；只改变传输可观测性和异常恢复。流式没有最终 result 时不能生成成功结果。
+The original exception remained visible. Provider faults suspend the controller instead of causing five complete task retries. A new manifest recorded the audited streaming repair while retaining all 594 committed results and continuing the one outstanding task. Prompts, model options, and organization policy were unchanged.
 
-普通文本增量可观测；当前包不暴露工具参数生成等所有进度，不能保证所有长调用都能显示活动，也没有新增任意总时长限制。修复不保证模型永远不返回非法结构。
-
-## 恢复与可比性
-
-停止旧进程，冻结旧代码与原始 manifest。新 manifest 显式记录公共流式传输和代码哈希变化，附恢复审计；复用已提交的 594 条有效结果，继续唯一未完成题，然后按官方 AFlow 进行搜索。中断请求的最终实耗继续标记 unknown。任何后续供应商故障均留下可恢复状态，而不是候选质量分数。
+This is engineering recovery evidence, not a new validation score or a reason to erase earlier request costs.

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "humaneval_plus",
+  "protocol": "humaneval-plus-aflow-v1",
+  "upstreamLock": "data/humaneval-plus.lock.json",
+  "upstreamLockSha256": "4d0cda8d2dc7f5d581bd7c9a6c4c5e5dde0f3435e3b55a840aa8016fff12fca8",
+  "source": {
+    "id": "humaneval_plus",
+    "official_repository": "https://github.com/evalplus/evalplus",
+    "official_dataset_page": "https://huggingface.co/datasets/evalplus/humanevalplus",
+    "evaluator_revision": "26d6d00bb1fd0fa37f39c99d5290da67891d1c5e",
+    "data_version_from_loader": "v0.1.10"
+  },
+  "splitMethod": {
+    "method": "Inherit AFlow HumanEval task membership and order; use EvalPlus questions and grading."
+  },
+  "scope": "AFlow HumanEval membership with EvalPlus v0.1.10 inputs and tests.",
+  "splits": {
+    "search": {
+      "count": 33,
+      "sha256": "70603c8a55169ec28e9be462865583818c001542313609b89741301e7608cf50",
+      "idsFile": "search.ids.json",
+      "idsSha256": "de21ced39c646421550d7d89d20b0f6867606adab9f3bcb0fd2242d84a420960",
+      "recordsSha256": "a94f0bed9c0e85fc97cb2c8d207e6a21923d097d874f30a46de92a145604242b"
+    },
+    "test": {
+      "count": 131,
+      "sha256": "fa476476e7057a90e1ea63622a472e9b1904daf27b3879494aef8122791780d7",
+      "idsFile": "test.ids.json",
+      "idsSha256": "3b27dbc50e7aa8e870af016850324dcc15a3283579758827e6374dd4da592f3e",
+      "recordsSha256": "b60008974058f98e3286dc518eb6943384f57ee815a8722686da73bd2c9e6e7d"
+    }
+  },
+  "knownPromptOverlaps": [],
+  "tasksSha256": "5aff91065df5a1e46106dd9e33ba85bae1edd349a3a54c5d04133b671d72d67b"
+}

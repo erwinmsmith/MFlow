@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "automationbench",
+  "protocol": "automationbench-public-simple-v1",
+  "upstreamLock": "data/extended-benchmarks.lock.json",
+  "upstreamLockSha256": "87f6d90769b925eeebd0e2402a47ead1a6f3b263f5b770eefc08a1510f9829a5",
+  "source": {
+    "url": "https://github.com/zapier/AutomationBench.git",
+    "revision": "4a8e1061254004d9dac807054eed33fad7d1ff14",
+    "uvLockSha256": "c7d275af5ad98caa7058edce5806281a340f63781cdff3062622c9c0d5d7c521"
+  },
+  "splitMethod": {
+    "method": "simple tasks for search; six public domains for test"
+  },
+  "scope": "Public simple tasks for search; six public domains for test; not the private leaderboard",
+  "splits": {
+    "search": {
+      "count": 200,
+      "sha256": "926b0d17a075f71a4851f505bc23c02fb982bb6e01e12506db8a605f40033354",
+      "idsFile": "search.ids.json",
+      "idsSha256": "c4dffc3233bad116ebba7a8c3c95a4054911750f0d00cb835cc0c8fa8198babe",
+      "recordsSha256": "0e13fb7a0c0901a0149ce317b8f5a70253bb7df224d8b1926f1a049042765af2"
+    },
+    "test": {
+      "count": 600,
+      "sha256": "fdc0c83b9c1275d8809d28d5c3300e0f38a8b0a8ae2e23eb7700c7195f323331",
+      "idsFile": "test.ids.json",
+      "idsSha256": "7d3e05d1838481acf81fc6b8549ecaaf6513ef8b4fedcf24bc802e4fdd8ad54e",
+      "recordsSha256": "797f46f5269842eefd1912a67374a5170d151aa619a60029e59854758e516aa3"
+    }
+  },
+  "knownPromptOverlaps": [],
+  "tasksSha256": "39a860d5d0bf39e12f3866a8465e64086a9f0809c818240313bc5834c07c751b"
+}
