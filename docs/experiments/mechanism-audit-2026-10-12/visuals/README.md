@@ -2,6 +2,8 @@
 
 These figures summarize the existing 2026-10-12 audit. No model requests or new evaluations were made. They show observed search outcomes, adaptive spawning, member choices, and working tool creation/reuse. The [full audit](../README.md) retains all indexed lineages and fixed-MAS variants.
 
+The compact figures use benchmark-only row labels, separated and centered bubble/count labels, and in-panel legends. Explanatory captions are provided below rather than embedded in the images. The underlying CSV values are unchanged.
+
 ## 1. Search outcomes and adaptive execution
 
 ![Search outcomes and adaptive execution](01-search-and-adaptation.png)
@@ -68,6 +70,6 @@ All figures are exported as PNG, SVG, and PDF. No simulated observations, signif
 
 ### Template provenance
 
-Adapted from the data-viz skill's **Figure 19** (`plot.py`: paired endpoints, aligned bubble matrix and horizontal bars) and **Figure 07** (`plot.py` and `vizlib/common.py:grouped_bars`). The original code was copied into a private preparation workspace before adaptation. The script retains the horizontal panel order and positions, muted blue/green palette, area encoding, and grouped-bar palette/legend layout.
+Adapted from the data-viz skill's **Figure 19** (`plot.py`: paired endpoints, aligned bubble matrix and horizontal bars) and **Figure 07** (`plot.py` and `vizlib/common.py:grouped_bars`). The original code was copied into a private preparation workspace before adaptation. The script retains the horizontal panel order, muted blue/green palette, area encoding, and grouped-bar palette. Legends are moved inside the panels at the user's request.
 
-Figure 19's height is reduced for five benchmarks instead of 36 rows. The member matrix reclaims unused auxiliary-panel space. Figure 07's unmeasured replicate dots, error bars, P-values, and biological labels are removed. Axis values, legends, labels, and notes are replaced with actual MFlow measures. The installed templates are unchanged.
+Figure 19's height is reduced for five benchmarks instead of 36 rows. The member matrix reclaims unused auxiliary-panel space. Figure 07 reclaims the external legend space and removes unmeasured replicate dots, error bars, P-values, and biological labels. Explanatory notes live in this document; shorter canvases reduce whitespace. Axis values, legends, and labels describe actual MFlow measures. The installed templates are unchanged.

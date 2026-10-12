@@ -105,14 +105,14 @@ def prepare(source, out):
 def overview_plot(rows, out):
     # Figure 19 panel order, x positions, palette, and layering are retained.
     # Height is reduced for five benchmark rows instead of 36 cell types.
-    c = Canvas(1026, 680)
-    ax = c.ax([190, 125, 482, 320])
-    expr = c.ax([686, 125, 184, 320])
-    bar = c.ax([881, 125, 116, 320])
+    c = Canvas(1026, 510)
+    ax = c.ax([190, 98, 482, 332])
+    expr = c.ax([686, 98, 184, 332])
+    bar = c.ax([881, 98, 116, 332])
     ys = np.arange(len(rows))
     for aa in [ax, expr, bar]:
-        clean(aa, True); aa.set_ylim(len(rows)-.5, -.7); aa.set_yticks(ys)
-    labels = [r['benchmark']+f"\nTest {r['testRound']} · n={r['testTasks']}" for r in rows]
+        clean(aa, True); aa.set_ylim(len(rows)-.45, -1.15); aa.set_yticks(ys)
+    labels = [r['benchmark'] for r in rows]
     ax.set_yticklabels(labels, fontsize=11)
     ax.set_xlim(65, 102); ax.set_xticks([70,80,90,100])
     ax.grid(axis='x', color='#e9e9e9', ls=(0,(2,7)), lw=.7)
@@ -125,13 +125,13 @@ def overview_plot(rows, out):
     ax.set_title('A  Search outcomes', loc='left', fontsize=15, pad=17)
     ax.set_xlabel('Search accuracy / DROP F1 (%)', fontsize=12, labelpad=10)
     expr.set_title('B  Test routing', fontsize=15, pad=17)
-    expr.set_xlim(-.6,1.6); expr.set_yticklabels([])
+    expr.set_xlim(-.5,1.5); expr.set_yticklabels([])
     expr.set_xticks([0,1],['Single','Spawned'], fontsize=11)
     for y, r in enumerate(rows):
         for x, field, color in [(0,'singlePercent','#d5d5d2'),(1,'spawnedPercent','#81b2c4')]:
             value=r[field]
-            expr.scatter(x,y,s=value/100*600,c=color,edgecolors='#777',lw=.7,zorder=3)
-            expr.text(x,y+.27,f'{value:.1f}%',ha='center',va='center',fontsize=10)
+            expr.scatter(x,y-.18,s=value/100*500,c=color,edgecolors='#777',lw=.7,zorder=3)
+            expr.text(x,y+.30,f'{value:.1f}%',ha='center',va='center',fontsize=10)
     bar.set_title('C  Spawning', fontsize=15,pad=17)
     bar.set_yticklabels([]); bar.set_xlim(0,4.6); bar.set_xticks([0,2,4])
     bar.grid(axis='x',color='#eee',ls=(0,(2,5)),lw=.7)
@@ -139,21 +139,17 @@ def overview_plot(rows, out):
         bar.barh(i,r['meanSpawnEvents'],.32,color='#9dc9d8',edgecolor='none',zorder=3)
         bar.text(r['meanSpawnEvents']+.1,i,f"{r['meanSpawnEvents']:.2f}",va='center',fontsize=10)
     bar.set_xlabel('Children\nper test task',fontsize=11,labelpad=10)
-    c.text(30,28,'MFlow: search outcomes and adaptive execution',fontsize=21,weight='bold',va='top')
-    c.text(30,66,'Existing observations · DeepSeek · complete test sets',fontsize=12,color='#666',va='top')
-    c.fig.legend([Line2D([],[],marker='o',ls='',color='black'),Line2D([],[],marker='o',ls='',color='#8cbbb0')],
-                 ['R1 search mean','Best completed search mean'],loc='upper left',bbox_to_anchor=(.18,.22),frameon=False,ncol=2,fontsize=11)
-    c.text(30,566,'A: best observed means; repeated candidates can contribute. Five validation passes per completed round.',fontsize=10,va='top')
-    c.text(30,588,'B: bubble area = fraction of test tasks. C: spawn events / all test tasks, including tasks that stay single.',fontsize=10,va='top')
-    c.text(30,610,'BFCL search best is R31; the displayed supplementary test is R29. DROP search uses F1.',fontsize=10,va='top')
-    c.text(30,632,'HLE has no complete search round; Qwen/MATH R2 is incomplete. They are listed in the accompanying data notes.',fontsize=10,va='top')
+    c.text(30,22,'MFlow: search outcomes and adaptive execution',fontsize=21,weight='bold',va='top')
+    ax.legend([Line2D([],[],marker='o',ls='',color='black'),Line2D([],[],marker='o',ls='',color='#8cbbb0')],
+              ['R1 search mean','Best completed search mean'],loc='upper left',frameon=False,ncol=2,fontsize=10,
+              handletextpad=.4,columnspacing=1.2)
     c.save(out,'01-search-and-adaptation')
 
 
 def member_plot(rows, overview, out):
     # Reuse Figure 19's categorical bubble matrix and area encoding.
     # Auxiliary panels are removed; the matrix reclaims their horizontal space.
-    c = Canvas(1026,680); ax = c.ax([190,125,807,320]); clean(ax,True)
+    c = Canvas(1026,530); ax = c.ax([190,80,807,320]); clean(ax,True)
     roles=['reviewer','independent','checker','solver','calculator','normalizer','span_extractor','oracle_probe','turn_runner','verifier','<generated-profile>']
     labels=[r['benchmark'] for r in overview]; ys=np.arange(len(labels))
     ax.set_ylim(len(labels)-.5,-.7); ax.set_yticks(ys,labels,fontsize=11)
@@ -162,22 +158,16 @@ def member_plot(rows, overview, out):
     ax.grid(color='#e9e9e9',ls=(0,(2,7)),lw=.7,zorder=0)
     for r in rows:
         x,y=roles.index(r['member']),labels.index(r['benchmark'])
-        ax.scatter(x,y,s=r['shareOfSpawnEvents']/100*1100,c='#8cbbb0',edgecolors='#777',lw=.7,zorder=3)
-        ax.text(x,y+.30,str(r['spawnEvents']),ha='center',va='center',fontsize=11)
-    for y,r in enumerate(overview):
-        ax.text(-.012,y-.26,f"{r['testRound']} · {r['spawnEvents']:,} spawns",transform=ax.get_yaxis_transform(),ha='right',fontsize=9,color='#666')
-    c.text(30,28,'Which members did MFlow spawn?',fontsize=22,weight='bold',va='top')
-    c.text(30,66,'Full test sets · area = share of spawn events within each benchmark · labels = event counts',fontsize=11,va='top',color='#666')
-    c.text(30,574,'Blank cells = zero observed spawns of that member type. A spawn event does not guarantee successful execution.',fontsize=10,va='top')
-    c.text(30,598,'* Custom profile: the SPAWN event has no template ID; this alone does not establish a new internal graph.',fontsize=10,va='top')
-    c.text(30,622,'These selected test sets include 20 / 87 / 21 non-template spawns in DROP / MBPP / AutomationBench.',fontsize=10,va='top')
+        ax.scatter(x,y-.17,s=r['shareOfSpawnEvents']/100*650,c='#8cbbb0',edgecolors='#777',lw=.7,zorder=3)
+        ax.text(x,y+.33,str(r['spawnEvents']),ha='center',va='center',fontsize=11)
+    c.text(30,22,'Which members did MFlow spawn?',fontsize=22,weight='bold',va='top')
     c.save(out,'02-spawned-members')
 
 
 def tool_plot(rows,out):
-    # Figure 07 grouped-bar geometry, three-category palette and right legend.
+    # Figure 07 grouped bars; the legend moves inside to reclaim unused space.
     # Provided counts replace means; unmeasured samples/error bars are omitted.
-    c=Canvas(1094,752); ax=c.ax([106,127,723,450]); clean(ax)
+    c=Canvas(1026,520); ax=c.ax([84,85,918,345]); clean(ax)
     observed=[r for r in rows if r['registeredGeneratedTools'] is not None]
     groups=['Registered','Successful calls','Cross-agent calls']
     fields=['registeredGeneratedTools','successfulGeneratedToolCalls','crossAgentGeneratedToolCalls']
@@ -189,17 +179,13 @@ def tool_plot(rows,out):
             ax.text(x,value+.8,str(value),ha='center',va='bottom',fontsize=9)
     ax.set_xlim(-1,(len(observed)-1)*spacing+len(groups))
     ax.set_ylim(0,72); ax.set_ylabel('Observed count',fontsize=15)
-    names=[r['benchmark'].replace('AutomationBench','AutoBench')+f"\n{r['stage']}\n{r['episodes']:,}" for r in observed]
+    names=[r['benchmark'].replace('AutomationBench','AutoBench')+f"\n{r['stage']}" for r in observed]
     ax.set_xticks(np.arange(len(observed))*spacing+1,names,fontsize=9)
     ax.tick_params(axis='x',pad=10); ax.grid(axis='y',color='#eee',lw=.7,zorder=0)
-    c.fig.legend([Patch(fc=cc,ec='#555',lw=.9) for cc in COLORS],groups,title='Generated tools',
-                 loc='upper left',bbox_to_anchor=(.77,.83),frameon=False,fontsize=12,title_fontsize=14,
+    ax.legend([Patch(fc=cc,ec='#555',lw=.9) for cc in COLORS],groups,title='Generated tools',
+                 loc='upper right',frameon=False,fontsize=11,title_fontsize=12,
                  handlelength=1.2,labelspacing=.7,handletextpad=.5)
-    c.text(30,28,'Autonomous tool creation, execution and reuse',fontsize=22,weight='bold',va='top')
-    c.text(30,66,'Search and test evidence shown separately · benchmark / built-in tools excluded',fontsize=12,color='#666',va='top')
-    c.text(30,666,'Numbers below stage labels are observed episodes. Search = all retained task × pass observations; test = unique tasks.',fontsize=10,va='top')
-    c.text(30,688,'Exposure differs across stages; raw counts describe observed use, not success rates. Cross-agent calls are a subset of successful calls.',fontsize=10,va='top')
-    c.text(30,710,'Available tool traces only; coverage is in tools.csv. MATH is unknown; HLE has no full test. AutoBench = AutomationBench v11.',fontsize=10,va='top')
+    c.text(30,22,'Autonomous tool creation, execution and reuse',fontsize=22,weight='bold',va='top')
     c.save(out,'03-generated-tools')
 
 
