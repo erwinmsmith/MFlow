@@ -227,7 +227,7 @@ def tool_plot(rows,out):
     ax.set_ylim(0,72); ax.set_ylabel('Observed count',fontsize=15)
     names=[r['benchmark'].replace('AutomationBench','AutoBench')+f"\n{r['stage']}" for r in observed]
     ax.set_xticks(np.arange(len(observed))*spacing+1,names,fontsize=9)
-    ax.tick_params(axis='x',pad=10); ax.grid(axis='y',color='#eee',lw=.7,zorder=0)
+    ax.tick_params(axis='x',pad=10); ax.grid(False)
     ax.legend([Patch(fc=cc,ec='#555',lw=.9) for cc in COLORS],groups,title='Generated tools',
                  loc='upper right',frameon=False,fontsize=11,title_fontsize=12,
                  handlelength=1.2,labelspacing=.7,handletextpad=.5)
