@@ -34,5 +34,6 @@ Historical documents describe their own frozen revisions. They are not current d
 - [MATH v8 Round 2 MAS and frozen programs](experiments/math-v8-round2-mas.md)
 - [MATH v8 Round 2 ablations](experiments/math-v8-round2-ablations.md)
 - [BFCL Round 29 ablations](experiments/bfcl-round29-ablations-2026-10-11.md)
+- [Cross-benchmark search and mechanism audit](experiments/mechanism-audit-2026-10-12/FINDINGS.md), with [trees, curves, and execution tables](experiments/mechanism-audit-2026-10-12/README.md)
 
 Machine-readable artifacts beside these reports retain their original values and frozen program text. Documentation edits do not re-evaluate or relabel historical runs.
