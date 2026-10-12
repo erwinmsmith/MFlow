@@ -186,12 +186,19 @@ def member_plot(rows, overview, out):
     totals = {r['benchmark']:r['testTasks'] for r in overview}
     cmap = LinearSegmentedColormap.from_list('coverage', ['#edf3f2','#99c5bc','#286e67'])
     norm = Normalize(0,100)
-    roles=['reviewer','independent','checker','solver','calculator','normalizer','span_extractor','oracle_probe','turn_runner','verifier','<generated-profile>']
+    roles=['Single only','reviewer','independent','checker','solver','calculator','normalizer','span_extractor','oracle_probe','turn_runner','verifier','<generated-profile>']
     labels=[r['benchmark'] for r in overview]; ys=np.arange(len(labels))
     ax.set_ylim(len(labels)-.5,-1.1); ax.set_yticks(ys,labels,fontsize=11)
     ax.set_xlim(-.7,len(roles)-.3)
     ax.set_xticks(range(len(roles)),[x.replace('_',' ') if x!='<generated-profile>' else 'Custom profile*' for x in roles],rotation=55,ha='right',fontsize=11)
     ax.grid(color='#e9e9e9',ls=(0,(2,7)),lw=.7,zorder=0)
+    ax.axvline(.5,color='#ccc',lw=.7,zorder=1)
+    for y,r in enumerate(overview):
+        count = r['singleTasks']
+        value = 100*count/r['testTasks']
+        if count:
+            ax.scatter(0,y-.17,s=value/100*550,c=[cmap(norm(value))],edgecolors='#777',lw=.7,zorder=3)
+        ax.text(0,y+.33,str(count),ha='center',va='center',fontsize=11)
     for r in rows:
         x,y=roles.index(r['member']),labels.index(r['benchmark'])
         evidence = coverage[(r['benchmark'],r['member'])]
@@ -206,7 +213,7 @@ def member_plot(rows, overview, out):
     key = ax.inset_axes([.58,.88,.37,.028])
     c.fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),cax=key,orientation='horizontal',ticks=[0,50,100])
     key.set_xticklabels(['0%','50%','100%']); key.tick_params(labelsize=8,length=2,pad=1)
-    ax.text(.58,.925,'Test tasks with member',transform=ax.transAxes,fontsize=9,va='bottom')
+    ax.text(.58,.925,'Test-task coverage',transform=ax.transAxes,fontsize=9,va='bottom')
     c.save(out,'02-spawned-members')
 
 

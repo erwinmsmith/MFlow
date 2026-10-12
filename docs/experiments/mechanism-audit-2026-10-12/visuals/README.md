@@ -21,7 +21,9 @@ The compact figures omit figure-wide titles and place panel titles close to thei
 
 [SVG](02-spawned-members.svg) · [PDF](02-spawned-members.pdf) · [Spawn counts](members.csv) · [Task coverage](member-task-coverage.csv)
 
-The single matrix overlays three measures without adding panels or increasing the canvas:
+The leading **Single only** column counts test tasks with no SPAWN events: MATH 0/486, DROP 450/800, MBPP 13/341, BFCL 0/600, and AutomationBench 494/600. Its bubble area and color represent the fraction of all test tasks; the number is the task count. These counts include both correct and incorrect answers. The values come from [overview.csv](overview.csv).
+
+The remaining member columns overlay three measures without adding panels or increasing the canvas:
 
 - **Area:** the member category's fraction of all spawn events within that benchmark.
 - **Color:** the percentage of all test tasks in which that member category is spawned at least once. Repeated spawns within a task count once for this measure. Darker colors indicate broader task coverage.
