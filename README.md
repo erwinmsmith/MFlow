@@ -6,13 +6,9 @@ All executable agents use the registry-published **`@codesoul-co/ditto@0.1.2`** 
 
 ## Start here
 
-- [Documentation index](docs/README.md)
 - [Reproduce the exact benchmark splits](benchmark-splits/README.md)
-- [Shared datasets and supported benchmarks](docs/shared-benchmarks.md)
-- [Current dynamic MAS and tool design](docs/dynamic-tools-and-topologies.md)
-- [Native AFlow search control](docs/search-v4.md) and [Ditto graph/loop execution](docs/search-v6.md)
-- [Baseline setup](docs/baseline-rerun.md) and [BFCL comparison protocol](docs/bfcl-comparison.md)
-- [Ditto package boundary and requirements](docs/ditto-requirements.md)
+- [Shared dataset manager](benchmark-hub/README.md)
+- [Pinned baseline sources](baselines/sources.lock.json)
 
 ## Install
 
@@ -56,7 +52,7 @@ The default search imports the pinned official [AFlow controller](https://github
 - Tool execution protection remains enabled. Capabilities such as heterogeneous graphs, new subagents, and tool creation are available to search; their actual use must be established from the selected candidate and execution traces.
 - Standard evaluation resets task state. Only committed results from the same candidate and repetition are reused when resuming an interrupted run.
 
-Prepare the pinned upstream checkout and Python dependencies using [the baseline setup](docs/baseline-rerun.md). Python execution requires an available local sandbox image; mathematical grading requires `requirements-benchmarks.txt` in the selected `MFLOW_BENCH_PYTHON` environment. These commands invoke the configured model:
+Prepare the upstream checkout at the revision in [the source lock](baselines/sources.lock.json) and install [AFlow's Python dependencies](baselines/requirements-aflow.txt). Python execution requires an available local sandbox image; mathematical grading requires `requirements-benchmarks.txt` in the selected `MFLOW_BENCH_PYTHON` environment. These commands invoke the configured model:
 
 ```sh
 mkdir -p runs
@@ -96,7 +92,6 @@ The standard protocol does not carry new members or memory between test tasks. T
 | `data/*.lock.json` | Pinned upstream and converted dataset identities |
 | `scripts/` | Setup, experiment coordination, recovery, and status tools |
 | `test/` | Model-free contract and integration tests |
-| `docs/` | Current guides and explicitly dated historical records |
 | `runs/` | Ignored local results, frozen bundles, checkpoints, and usage |
 
 Typical search artifacts include `manifest.json`, `controller.json`, per-round strategy/experience files, repeated validation scores, per-task results and usage, optimizer proposals, and `best.json`. Report search cost separately from final test cost, including failed attempts and unknown calls. Historical per-round observation tests are additional experiments and must be disclosed separately.

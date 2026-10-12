@@ -18,7 +18,7 @@ Keep immutable inputs in `collections/`, prepared protocols in `views/`, environ
 
 ## Protocols and execution
 
-The [shared benchmark guide](../docs/shared-benchmarks.md) lists support and scoring details. The [public catalog](../benchmark-splits/catalog.json) fixes exact ordered membership and hashes for 11 prepared protocols:
+The [public catalog](../benchmark-splits/catalog.json) fixes exact ordered membership and hashes for 11 prepared protocols:
 
 - Five AFlow subsets preserve the pinned upstream validation/test split.
 - HumanEval+ inherits AFlow HumanEval membership with EvalPlus questions and tests.

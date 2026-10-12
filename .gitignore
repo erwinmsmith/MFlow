@@ -12,3 +12,6 @@ data/benchmarks
 .DS_Store
 __pycache__/
 AGENTS.md
+
+# Local working notes, experiment records, and generated figures.
+/docs/

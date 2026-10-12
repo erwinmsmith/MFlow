@@ -1,9 +1,0 @@
-[
-  {
-    "lineage": "deepseek_bfcl",
-    "round": 11,
-    "reason": "The turn_runner gate checks outer action-request names (bfcl_call/bfcl_respond) against the inner benchmark function schema, then sends a clarification instead of executing the wrapped call. All 1000 retained outcomes score zero. Tool observations contain 5040 successful bfcl_state calls and 4040 successful bfcl_respond calls, with no bfcl_call. No terminal row error or node failure is recorded, so this is a manually reviewed interface fault, not an inferred runtime exception.",
-    "artifact": "round-candidates/round-11.json: strategy.organization.agentTemplates[id=turn_runner].composition",
-    "observations": "round-11/pass-{0,1,2,3,4}: organization.toolUsage"
-  }
-]
