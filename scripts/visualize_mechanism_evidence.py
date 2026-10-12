@@ -180,7 +180,7 @@ def overview_plot(rows, out):
 def member_plot(rows, overview, out):
     # Reuse Figure 19's categorical bubble matrix and area encoding.
     # Auxiliary panels are removed; the matrix reclaims their horizontal space.
-    c = Canvas(1026,466); ax = c.ax([190,16,807,320]); clean(ax,True)
+    c = Canvas(1026,426); ax = c.ax([190,16,807,320]); clean(ax,True)
     coverage = {(r['benchmark'],r['member']):r for r in read(out/'member-task-coverage.csv')}
     assert set(coverage) == {(r['benchmark'],r['member']) for r in rows}
     totals = {r['benchmark']:r['testTasks'] for r in overview}
@@ -190,7 +190,7 @@ def member_plot(rows, overview, out):
     labels=[r['benchmark'] for r in overview]; ys=np.arange(len(labels))
     ax.set_ylim(len(labels)-.5,-1.1); ax.set_yticks(ys,labels,fontsize=11)
     ax.set_xlim(-.7,len(roles)-.3)
-    ax.set_xticks(range(len(roles)),[x.replace('_',' ') if x!='<generated-profile>' else 'Custom profile*' for x in roles],rotation=55,ha='right',fontsize=11)
+    ax.set_xticks(range(len(roles)),[x.replace('_',' ') if x!='<generated-profile>' else 'Custom profile*' for x in roles],rotation=35,ha='right',fontsize=11)
     ax.grid(color='#e9e9e9',ls=(0,(2,7)),lw=.7,zorder=0)
     ax.axvline(.5,color='#ccc',lw=.7,zorder=1)
     for y,r in enumerate(overview):
