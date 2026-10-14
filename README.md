@@ -1,6 +1,6 @@
 # MFlow
 
-MFlow searches for a reusable multi-agent organization program. Each candidate includes the MAS structure, dynamic spawning and routing rules, agent profiles, internal Ditto graphs/loops, templates, tools, and prompts. Inference executes the selected frozen program and starts each task with one root agent.
+MFlow searches for a reusable multi-agent organization program. Each candidate includes the MAS structure, dynamic spawning and routing rules, agent profiles, internal Ditto graphs/loops, templates, tools, and prompts. Inference executes the selected frozen program and starts each task with one root agent(s).
 
 All executable agents use the registry-published **`@codesoul-co/ditto@0.1.2`** through public exports. Ditto owns model, reasoning, and tool execution. MFlow owns datasets, organization policy, evaluation, and statistical search.
 
