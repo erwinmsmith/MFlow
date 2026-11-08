@@ -1,6 +1,6 @@
 # MFlow
 
-MFlow searches for a reusable multi-agent organization program or single agent system. Each candidate includes the MAS structure, dynamic spawning and routing rules, agent profiles, internal Ditto graphs/loops, templates, tools, and prompts. Inference executes the selected frozen program and starts each task with agents.
+MFlow searches for a reusable multi-agent organization program or just single agent system. Each candidate includes the MAS structure, dynamic spawning and routing rules, agent profiles, internal Ditto graphs/loops, templates, tools, and prompts. Inference executes the selected frozen program and starts each task with agents.
 
 ## Start here
 
